@@ -1,0 +1,238 @@
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Role {
+  id    String @id @default(uuid())
+  name  String @unique // 'OWNER' or 'MANAGER'
+  users User[]
+}
+
+model User {
+  id           String   @id @default(uuid())
+  username     String   @unique
+  passwordHash String
+  roleId       String
+  role         Role     @relation(fields: [roleId], references: [id])
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  dutySessions        DutySession[]
+  oilSales            OilSale[]
+  expenses            Expense[]
+  creditTransactions  CreditTransaction[]
+  auditLogs           AuditLog[]
+}
+
+model Staff {
+  id              String           @id @default(uuid())
+  name            String
+  active          Boolean          @default(true)
+  createdAt       DateTime         @default(now())
+  dutyAssignments DutyAssignment[]
+}
+
+model Pump {
+  id              String           @id @default(uuid())
+  name            String           @unique // Pump 1, Pump 2
+  active          Boolean          @default(true)
+  guns            Gun[]
+  dutyAssignments DutyAssignment[]
+}
+
+model Gun {
+  id              String         @id @default(uuid())
+  name            String         @unique // MS-1, HSD-1, etc.
+  pumpId          String
+  pump            Pump           @relation(fields: [pumpId], references: [id])
+  fuelType        String         // MS or HSD
+  active          Boolean        @default(true)
+  meterReadings   MeterReading[]
+}
+
+model DutySession {
+  id               String           @id @default(uuid())
+  dutyNumber       Int              @unique
+  startTime        DateTime
+  endTime          DateTime?
+  managerId        String
+  manager          User             @relation(fields: [managerId], references: [id])
+  status           String           @default("OPEN") // "OPEN", "CLOSED"
+  
+  // Cash reconciliation
+  expectedCash     Float            @default(0.0)
+  actualCash       Float            @default(0.0)
+  cashDifference   Float            @default(0.0)
+  
+  createdAt        DateTime         @default(now())
+
+  assignments       DutyAssignment[]
+  meterReadings     MeterReading[]
+  oilSales          OilSale[]
+  expenses          Expense[]
+  creditTransactions CreditTransaction[]
+  tankDips          TankDip[]
+}
+
+model DutyAssignment {
+  id            String      @id @default(uuid())
+  dutySessionId String
+  dutySession   DutySession @relation(fields: [dutySessionId], references: [id], onDelete: Cascade)
+  pumpId        String
+  pump          Pump        @relation(fields: [pumpId], references: [id])
+  fuelType      String      // MS or HSD
+  staffId       String
+  staff         Staff       @relation(fields: [staffId], references: [id])
+
+  @@unique([dutySessionId, pumpId, fuelType])
+}
+
+model MeterReading {
+  id            String      @id @default(uuid())
+  dutySessionId String
+  dutySession   DutySession @relation(fields: [dutySessionId], references: [id], onDelete: Cascade)
+  gunId         String
+  gun           Gun         @relation(fields: [gunId], references: [id])
+  previousReading Float
+  currentReading  Float
+  litresSold      Float
+  priceUsed       Float
+  salesAmount     Float
+
+  @@unique([dutySessionId, gunId])
+}
+
+model FuelPrice {
+  id            String   @id @default(uuid())
+  fuelType      String   // MS or HSD
+  price         Float
+  effectiveFrom DateTime @default(now())
+}
+
+model OilProduct {
+  id        String   @id @default(uuid())
+  name      String   @unique // 4T, 2T, etc.
+  price     Float
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+model OilPriceHistory {
+  id            String   @id @default(uuid())
+  productId     String
+  price         Float
+  effectiveFrom DateTime @default(now())
+}
+
+model OilSale {
+  id            String      @id @default(uuid())
+  dutySessionId String
+  dutySession   DutySession @relation(fields: [dutySessionId], references: [id], onDelete: Cascade)
+  productId     String
+  productName   String
+  quantity      Float
+  unitPrice     Float
+  totalAmount   Float
+  enteredById   String
+  enteredBy     User        @relation(fields: [enteredById], references: [id])
+  timestamp     DateTime    @default(now())
+}
+
+model ExpenseCategory {
+  id        String    @id @default(uuid())
+  name      String    @unique
+  expenses  Expense[]
+}
+
+model Expense {
+  id            String          @id @default(uuid())
+  dutySessionId String
+  dutySession   DutySession     @relation(fields: [dutySessionId], references: [id], onDelete: Cascade)
+  categoryId    String
+  category      ExpenseCategory @relation(fields: [categoryId], references: [id])
+  description   String
+  amount        Float
+  paymentMethod String          // Cash, GPay, PhonePe, Paytm, etc.
+  remarks       String?
+  enteredById   String
+  enteredBy     User            @relation(fields: [enteredById], references: [id])
+  timestamp     DateTime        @default(now())
+}
+
+model Customer {
+  id            String              @id @default(uuid())
+  name          String              @unique
+  contactDetails String?
+  address       String?
+  active        Boolean             @default(true)
+  balance       Float               @default(0.0) // running balance (positive = outstanding credit)
+  createdAt     DateTime            @default(now())
+  transactions  CreditTransaction[]
+}
+
+model CreditTransaction {
+  id              String      @id @default(uuid())
+  customerId      String
+  customer        Customer    @relation(fields: [customerId], references: [id])
+  dutySessionId   String
+  dutySession     DutySession @relation(fields: [dutySessionId], references: [id], onDelete: Cascade)
+  transactionType String      // CREDIT_SALE (increases balance), COLLECTION (decreases balance)
+  indentNumber    String?
+  productName     String?
+  quantity        Float?
+  unitPrice       Float?
+  amount          Float
+  description     String?
+  enteredById     String
+  enteredBy       User        @relation(fields: [enteredById], references: [id])
+  timestamp       DateTime    @default(now())
+}
+
+model TankStock {
+  id              String   @id @default(uuid())
+  fuelType        String   // MS or HSD
+  openingStock    Float
+  receipts        Float    @default(0.0)
+  sales           Float    @default(0.0)
+  expectedClosing Float
+  physicalDip     Float
+  variance        Float
+  timestamp       DateTime @default(now())
+}
+
+model TankReceipt {
+  id        String   @id @default(uuid())
+  fuelType  String   // MS or HSD
+  quantity  Float
+  date      DateTime @default(now())
+}
+
+model TankDip {
+  id            String      @id @default(uuid())
+  dutySessionId String
+  dutySession   DutySession @relation(fields: [dutySessionId], references: [id], onDelete: Cascade)
+  fuelType      String      // MS or HSD
+  physicalDip   Float
+  expectedClosing Float
+  variance      Float
+  timestamp     DateTime    @default(now())
+
+  @@unique([dutySessionId, fuelType])
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  action      String   // e.g. "UPDATE_EXPENSE", "CHANGE_PRICE"
+  timestamp   DateTime @default(now())
+  recordType  String   // e.g. "Expense", "FuelPrice"
+  recordId    String
+  oldValue    String?
+  newValue    String?
+}
