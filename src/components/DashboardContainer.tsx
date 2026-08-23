@@ -7,7 +7,7 @@ import {
   Activity, Users, ShieldAlert, LogOut, ArrowRight, UserCheck, CheckCircle2,
   AlertTriangle, Plus, Trash2, Calendar, FileText, ChevronRight, HelpCircle,
   Database, Info, TrendingUp, ArrowUpRight, ArrowDownRight, Wallet, HardDrive, BarChart3, CreditCard,
-  Edit, Eye, Layers, Building2, Check, ChevronDown, Filter, Lock, ShieldCheck
+  Edit, Eye, Layers, Building2, Check, ChevronDown, Filter, Lock, ShieldCheck, FlaskConical
 } from 'lucide-react';
 import {
   logoutAction, getActiveDutySession, startNewDutySession, saveMeterReadingsAction,
@@ -17,7 +17,7 @@ import {
   deleteStaffAction, addCustomerAction, toggleCustomerStatusAction, deleteCustomerAction,
   addOilProductAction, updateOilPriceAction, toggleOilProductStatusAction, deleteOilProductAction,
   getStaticData, getCreditLedgerReport, updateMeterReadingAction,
-  getHistoricalDuties, getExpenseReport, getOilSalesReport
+  getHistoricalDuties, getExpenseReport, getOilSalesReport, recordTankSampleAction
 } from '@/lib/actions';
 import * as XLSX from 'xlsx';
 
@@ -439,10 +439,22 @@ export default function DashboardContainer({
       setClosingReadings(readingsMap);
       setOngoingReadings(readingsMap);
       setOpeningReadings({});
+
+      if (activeDuty.tankSamples && activeDuty.tankSamples.length > 0) {
+        const msS = activeDuty.tankSamples.find((ts: any) => ts.fuelType === 'MS');
+        const hsdS = activeDuty.tankSamples.find((ts: any) => ts.fuelType === 'HSD');
+        setMsTestingLitres(msS ? msS.litres : 0);
+        setHsdTestingLitres(hsdS ? hsdS.litres : 0);
+      } else {
+        setMsTestingLitres(0);
+        setHsdTestingLitres(0);
+      }
     } else {
       setClosingReadings({});
       setOngoingReadings({});
       setOpeningReadings({});
+      setMsTestingLitres(0);
+      setHsdTestingLitres(0);
     }
   }, [activeDuty?.id]);
 
@@ -850,8 +862,8 @@ export default function DashboardContainer({
 
   // Expected Cash calculation based on accounting flow
   const digitalPaymentsSum = Object.values(digitalPayments).reduce((sum, val) => sum + Number(val), 0);
-  const grossRevenueInflow = grossFuelSalesTotal + oilSalesTotal + creditCollectionsCash;
-  const totalDeductions = creditSalesAmount + digitalPaymentsSum + expensesPaidInCash + totalTestingValue;
+  const grossRevenueInflow = dynamicFuelSalesTotal + oilSalesTotal + creditCollectionsCash;
+  const totalDeductions = creditSalesAmount + digitalPaymentsSum + expensesPaidInCash;
   const expectedCash = grossRevenueInflow - totalDeductions;
   const cashDiff = actualCash - expectedCash;
 
@@ -860,7 +872,7 @@ export default function DashboardContainer({
     setActionLoading(true);
     setErrorMessage(null);
     try {
-      // 1. First save the closing and opening meter readings entered in the form
+      // 1. Save meter readings entered in the form
       const readingsPayload = activeDuty.meterReadings.map((mr: any) => ({
         gunId: mr.gunId,
         currentReading: closingReadings[mr.gunId] !== undefined ? Number(closingReadings[mr.gunId]) : mr.currentReading,
@@ -869,7 +881,10 @@ export default function DashboardContainer({
 
       await saveMeterReadingsAction(activeDuty.id, readingsPayload);
 
-      // 2. Call the close action
+      // 2. Save Tank Sample Sale / Testing Litres
+      await recordTankSampleAction(activeDuty.id, msTestingLitres, hsdTestingLitres);
+
+      // 3. Call the close action
       const res = await closeDutySessionAction(
         activeDuty.id,
         Number(actualCash),
@@ -1559,13 +1574,9 @@ export default function DashboardContainer({
                 }
                 const digitalPaymentsSum = Object.values(digitalBreakdown).reduce((sum, val) => sum + val, 0);
 
-                // 7. TESTING DEDUCTIONS & FINAL CASH RECONCILIATION
-                const msTestingL = msTestingLitres || 0;
-                const hsdTestingL = hsdTestingLitres || 0;
-                const testingValue = (msTestingL * staticData.prices.MS) + (hsdTestingL * staticData.prices.HSD);
-
+                // 7. FINAL CASH RECONCILIATION
                 const grossRevenueInflow = totalFuelSales + totalOilSales + creditCollectionsCash;
-                const totalDeductions = creditSalesAmount + digitalPaymentsSum + cashExpenses + testingValue;
+                const totalDeductions = creditSalesAmount + digitalPaymentsSum + cashExpenses;
                 const expectedCash = Math.max(0, grossRevenueInflow - totalDeductions);
                 const actualCash = targetDuty.actualCash || expectedCash;
                 const cashDiff = targetDuty.status === 'OPEN' ? (actualCash - expectedCash) : (targetDuty.cashDifference || 0);
@@ -1816,30 +1827,70 @@ export default function DashboardContainer({
                         })}
                       </div>
 
-                      {/* Testing / Sample Quantity Deductions */}
-                      <div className="p-6 bg-slate-950 border-t border-slate-800 flex flex-wrap items-center justify-between gap-6">
-                        <div className="flex items-center gap-3">
-                          <div className="h-9 w-9 bg-amber-500/20 text-amber-400 rounded-xl border border-amber-500/30 flex items-center justify-center">
-                            <Info className="h-4 w-4" />
+                      {/* SECTION 3: TANK SAMPLE SALE / SAMPLE CONSUMPTION */}
+                      <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">
+                        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
+                          <div className="flex items-center gap-3">
+                            <div className="h-10 w-10 bg-amber-500/20 text-amber-400 rounded-xl border border-amber-500/30 flex items-center justify-center">
+                              <FlaskConical className="h-5 w-5" />
+                            </div>
+                            <div>
+                              <h4 className="font-extrabold text-white text-sm uppercase tracking-wider">Tank Sample Sale / Sample Consumption</h4>
+                              <p className="text-xs text-slate-400">Enter testing or sample litres used. Amounts calculate automatically using active fuel prices.</p>
+                            </div>
                           </div>
-                          <div>
-                            <h4 className="font-extrabold text-white text-sm">Testing / Sample Quantity Deductions</h4>
-                            <p className="text-xs text-slate-400">Fuel dispensed for density & quality calibration testing (deducted from expected cash).</p>
+
+                          <div className="bg-slate-950 px-4 py-2 rounded-xl border border-amber-500/30 text-right">
+                            <span className="text-[10px] text-amber-400 font-extrabold uppercase tracking-wider block">TOTAL TANK SAMPLE SALE</span>
+                            <span className="text-base font-black text-amber-300 font-mono">₹{totalTestingValue.toFixed(2)}</span>
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-6 text-xs font-mono">
-                          <div>
-                            <span className="text-slate-400 font-semibold block text-[10px]">MS Testing</span>
-                            <span className="font-bold text-indigo-400">{msTestingL} L</span>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-mono">
+                          {/* MS Sample Input */}
+                          <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
+                            <div className="flex justify-between items-center">
+                              <span className="font-sans font-bold text-indigo-400 uppercase">MS Sample (Litres)</span>
+                              <span className="text-slate-400 text-[11px]">Price: ₹{msPrice.toFixed(2)}/L</span>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                value={msTestingLitres || ''}
+                                onChange={(e) => setMsTestingLitres(Math.max(0, parseFloat(e.target.value) || 0))}
+                                placeholder="0.00"
+                                className="w-full bg-slate-900 border border-slate-750 rounded-lg px-3 py-2 text-white font-mono font-bold focus:border-amber-500 focus:outline-none"
+                              />
+                              <span className="text-slate-300 font-bold">L</span>
+                            </div>
+                            <p className="text-[11px] text-slate-400 font-sans">
+                              Calculation: <strong className="text-indigo-300 font-mono">{msTestingLitres} L × ₹{msPrice.toFixed(2)} = ₹{msTestingValue.toFixed(2)}</strong>
+                            </p>
                           </div>
-                          <div>
-                            <span className="text-slate-400 font-semibold block text-[10px]">HSD Testing</span>
-                            <span className="font-bold text-emerald-400">{hsdTestingL} L</span>
-                          </div>
-                          <div className="bg-slate-900 px-4 py-2 rounded-xl border border-slate-800">
-                            <span className="text-slate-400 font-semibold block text-[10px]">Testing Value</span>
-                            <span className="font-bold text-amber-400">₹{testingValue.toFixed(2)}</span>
+
+                          {/* HSD Sample Input */}
+                          <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
+                            <div className="flex justify-between items-center">
+                              <span className="font-sans font-bold text-emerald-400 uppercase">HSD Sample (Litres)</span>
+                              <span className="text-slate-400 text-[11px]">Price: ₹{hsdPrice.toFixed(2)}/L</span>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                value={hsdTestingLitres || ''}
+                                onChange={(e) => setHsdTestingLitres(Math.max(0, parseFloat(e.target.value) || 0))}
+                                placeholder="0.00"
+                                className="w-full bg-slate-900 border border-slate-750 rounded-lg px-3 py-2 text-white font-mono font-bold focus:border-amber-500 focus:outline-none"
+                              />
+                              <span className="text-slate-300 font-bold">L</span>
+                            </div>
+                            <p className="text-[11px] text-slate-400 font-sans">
+                              Calculation: <strong className="text-emerald-300 font-mono">{hsdTestingLitres} L × ₹{hsdPrice.toFixed(2)} = ₹{hsdTestingValue.toFixed(2)}</strong>
+                            </p>
                           </div>
                         </div>
                       </div>
@@ -2125,8 +2176,9 @@ export default function DashboardContainer({
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-xs font-mono">
                         <div className="bg-slate-950/80 p-4 rounded-xl border border-slate-800 space-y-2">
                           <h4 className="font-sans font-bold text-emerald-400 uppercase tracking-wider text-[11px]">Gross Revenue Inflows (+)</h4>
-                          <div className="flex justify-between text-slate-300"><span>Fuel Sales Amount:</span><span>₹{totalFuelSales.toFixed(2)}</span></div>
-                          <div className="flex justify-between text-slate-300"><span>Oil / Lubricant Sales:</span><span>₹{totalOilSales.toFixed(2)}</span></div>
+                          <div className="flex justify-between text-slate-300"><span>MS Fuel Sales:</span><span>₹{totalMsSalesAmount.toFixed(2)}</span></div>
+                          <div className="flex justify-between text-slate-300"><span>HSD Fuel Sales:</span><span>₹{totalHsdSalesAmount.toFixed(2)}</span></div>
+                          <div className="flex justify-between text-slate-300"><span>Oil / Lubricant Sales:</span><span>₹{oilSalesTotal.toFixed(2)}</span></div>
                           <div className="flex justify-between text-slate-300"><span>Credit Collections (Cash):</span><span>+₹{creditCollectionsCash.toFixed(2)}</span></div>
                           <div className="flex justify-between text-white font-bold border-t border-slate-800 pt-2 text-sm"><span>TOTAL GROSS INFLOW:</span><span>₹{grossRevenueInflow.toFixed(2)}</span></div>
                         </div>
@@ -2135,8 +2187,7 @@ export default function DashboardContainer({
                           <h4 className="font-sans font-bold text-amber-400 uppercase tracking-wider text-[11px]">Deductions & Non-Cash (-)</h4>
                           <div className="flex justify-between text-slate-300"><span>Credit Sales Given:</span><span>-₹{creditSalesAmount.toFixed(2)}</span></div>
                           <div className="flex justify-between text-slate-300"><span>Digital Payments (Non-Cash):</span><span>-₹{digitalPaymentsSum.toFixed(2)}</span></div>
-                          <div className="flex justify-between text-slate-300"><span>Testing / Sample Value:</span><span>-₹{testingValue.toFixed(2)}</span></div>
-                          <div className="flex justify-between text-slate-300"><span>Operating Expenses (Cash):</span><span>-₹{cashExpenses.toFixed(2)}</span></div>
+                          <div className="flex justify-between text-slate-300"><span>Operating Expenses (Cash):</span><span>-₹{expensesPaidInCash.toFixed(2)}</span></div>
                           <div className="flex justify-between text-white font-bold border-t border-slate-800 pt-2 text-sm"><span>TOTAL DEDUCTIONS:</span><span>₹{totalDeductions.toFixed(2)}</span></div>
                         </div>
                       </div>
@@ -5158,6 +5209,22 @@ export default function DashboardContainer({
                     </table>
                   </div>
 
+                  {/* Testing / Sample Deduction */}
+                  <div className="bg-slate-950 border border-slate-850 p-4 rounded-xl space-y-3">
+                    <span className="text-xs font-extrabold text-white uppercase tracking-wider block border-b border-slate-900 pb-2">TESTING / SAMPLE DEDUCTION</span>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase">MS Testing (Litres)</label>
+                        <input type="number" step="0.01" min="0" value={msTestingLitres || ''} onChange={(e) => setMsTestingLitres(Number(e.target.value))} className="block w-full rounded border border-slate-700 bg-slate-900 py-1.5 px-2.5 mt-1 text-xs text-white font-semibold font-mono focus:border-indigo-500 focus:outline-none" placeholder="0" />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase">HSD Testing (Litres)</label>
+                        <input type="number" step="0.01" min="0" value={hsdTestingLitres || ''} onChange={(e) => setHsdTestingLitres(Number(e.target.value))} className="block w-full rounded border border-slate-700 bg-slate-900 py-1.5 px-2.5 mt-1 text-xs text-white font-semibold font-mono focus:border-indigo-500 focus:outline-none" placeholder="0" />
+                      </div>
+                    </div>
+                    <div className="text-[10px] text-slate-500 font-mono">Testing Value: MS ₹{msTestingValue.toFixed(2)} + HSD ₹{hsdTestingValue.toFixed(2)} = ₹{totalTestingValue.toFixed(2)}</div>
+                  </div>
+
                   {/* Revenue Summary (ACC Book) */}
                   <div className="bg-slate-950 border border-slate-850 p-4 rounded-xl space-y-2 text-xs">
                     <span className="text-xs font-extrabold text-white uppercase tracking-wider block border-b border-slate-900 pb-2">DAILY FUEL & OIL SALES BREAKDOWN</span>
@@ -5204,79 +5271,6 @@ export default function DashboardContainer({
                         <input type="number" required min="1" value={oilQty || ''} onChange={(e) => setOilQty(Number(e.target.value))} className="block w-full rounded border border-slate-700 bg-slate-900 py-1.5 px-2 mt-1 text-xs text-white font-mono focus:border-indigo-500 focus:outline-none" placeholder="0" /></div>
                       <button type="submit" className="py-1.5 rounded bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[10px]"><Plus className="h-3 w-3 inline mr-1" />Add</button>
                     </form>
-                  </div>
-
-                  {/* Testing & Sample Sales Deduction (Beneath Oil Section) */}
-                  <div className="bg-slate-950 border border-slate-850 p-4 rounded-xl space-y-3">
-                    <div className="flex justify-between items-center border-b border-slate-900 pb-2">
-                      <span className="text-xs font-extrabold text-white uppercase tracking-wider block">TESTING & SAMPLE SALES DEDUCTION</span>
-                      <span className="text-[10px] font-mono text-amber-400 font-bold">Total Deduction: ₹{totalTestingValue.toFixed(2)}</span>
-                    </div>
-                    <p className="text-[11px] text-slate-400">Specify MS (Petrol) or HSD (Diesel) litres sold/dispensed for density & sample testing to deduct from gross revenue.</p>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
-                      {/* MS Testing Input */}
-                      <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-850 space-y-2">
-                        <div className="flex justify-between items-center text-xs font-bold text-indigo-400">
-                          <span>MS Petrol Testing / Sample</span>
-                          <span className="text-[10px] text-slate-400 font-mono">Rate: ₹{msPrice.toFixed(2)}/L</span>
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <label className="block text-[10px] font-bold text-slate-400 uppercase">Litres Sold / Tested</label>
-                            <input
-                              type="number"
-                              step="0.01"
-                              min="0"
-                              value={msTestingLitres || ''}
-                              onChange={(e) => setMsTestingLitres(Number(e.target.value))}
-                              className="block w-full rounded border border-slate-700 bg-slate-950 py-1.5 px-2.5 mt-1 text-xs text-white font-mono font-bold focus:border-indigo-500 focus:outline-none"
-                              placeholder="0.00 L"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-[10px] font-bold text-slate-400 uppercase">Amount (Deduction ₹)</label>
-                            <input
-                              type="text"
-                              readOnly
-                              value={`₹${msTestingValue.toFixed(2)}`}
-                              className="block w-full rounded border border-slate-800 bg-slate-900 py-1.5 px-2.5 mt-1 text-xs text-amber-400 font-mono font-bold select-none cursor-not-allowed"
-                            />
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* HSD Testing Input */}
-                      <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-850 space-y-2">
-                        <div className="flex justify-between items-center text-xs font-bold text-sky-400">
-                          <span>HSD Diesel Testing / Sample</span>
-                          <span className="text-[10px] text-slate-400 font-mono">Rate: ₹{hsdPrice.toFixed(2)}/L</span>
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <label className="block text-[10px] font-bold text-slate-400 uppercase">Litres Sold / Tested</label>
-                            <input
-                              type="number"
-                              step="0.01"
-                              min="0"
-                              value={hsdTestingLitres || ''}
-                              onChange={(e) => setHsdTestingLitres(Number(e.target.value))}
-                              className="block w-full rounded border border-slate-700 bg-slate-950 py-1.5 px-2.5 mt-1 text-xs text-white font-mono font-bold focus:border-indigo-500 focus:outline-none"
-                              placeholder="0.00 L"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-[10px] font-bold text-slate-400 uppercase">Amount (Deduction ₹)</label>
-                            <input
-                              type="text"
-                              readOnly
-                              value={`₹${hsdTestingValue.toFixed(2)}`}
-                              className="block w-full rounded border border-slate-800 bg-slate-900 py-1.5 px-2.5 mt-1 text-xs text-amber-400 font-mono font-bold select-none cursor-not-allowed"
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    </div>
                   </div>
 
                   {/* Bunk Expenses Input */}
@@ -5462,7 +5456,7 @@ export default function DashboardContainer({
                       <div className="space-y-1.5 bg-slate-900/60 p-3 rounded-lg border border-slate-850">
                         <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider block border-b border-slate-800 pb-1">CASH INFLOWS & REVENUE</span>
                         <div className="flex justify-between text-slate-300 font-sans">
-                          <span>Gross MS/HSD Meter Sales:</span>
+                          <span>Fuel Sales (Gross):</span>
                           <span className="font-mono font-bold text-white">₹{grossFuelSalesTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                         </div>
                         <div className="flex justify-between text-slate-300 font-sans">
@@ -5470,15 +5464,11 @@ export default function DashboardContainer({
                           <span className="font-mono font-bold text-white">₹{oilSalesTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                         </div>
                         <div className="flex justify-between text-slate-300 font-sans">
-                          <span>Testing & Sample Sales:</span>
-                          <span className="font-mono font-bold text-amber-400">₹{totalTestingValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                        </div>
-                        <div className="flex justify-between text-slate-300 font-sans">
                           <span>Credit Collections:</span>
                           <span className="font-mono font-bold text-emerald-400">+₹{creditCollectionsCash.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                         </div>
                         <div className="flex justify-between border-t border-slate-800 pt-1 text-xs font-bold text-emerald-300 font-sans">
-                          <span>GROSS REVENUE & INFLOWS:</span>
+                          <span>GROSS REVENUE:</span>
                           <span className="font-mono">₹{grossRevenueInflow.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                         </div>
                       </div>
@@ -5498,10 +5488,6 @@ export default function DashboardContainer({
                           <span>Cash Expenses:</span>
                           <span className="font-mono font-bold text-red-400">-₹{expensesPaidInCash.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                         </div>
-                        <div className="flex justify-between text-slate-300 font-sans">
-                          <span>Testing/Sample Value:</span>
-                          <span className="font-mono font-bold text-slate-400">-₹{totalTestingValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                        </div>
                         <div className="flex justify-between border-t border-slate-800 pt-1 text-xs font-bold text-red-300 font-sans">
                           <span>TOTAL DEBITS / DEDUCTIONS:</span>
                           <span className="font-mono">₹{totalDeductions.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
@@ -5513,7 +5499,7 @@ export default function DashboardContainer({
                     <div className="bg-indigo-950/40 border border-indigo-850 p-3 rounded-lg flex justify-between items-center text-xs">
                       <div>
                         <span className="font-extrabold text-indigo-200 block uppercase">NET EXPECTED CASH</span>
-                        <span className="text-[10px] text-slate-400 font-sans">Gross Revenue (including collections) - Deductions (Credit Sales, Digital, Expenses & Testing)</span>
+                        <span className="text-[10px] text-slate-400 font-sans">Gross Revenue (including collections) - Deductions (Credit Sales, Digital & Expenses)</span>
                       </div>
                       <span className="font-mono text-base font-extrabold text-indigo-300">
                         ₹{expectedCash.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}

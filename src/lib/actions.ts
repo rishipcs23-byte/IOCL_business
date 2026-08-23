@@ -244,6 +244,7 @@ export async function getActiveDutySession() {
       expenses: { include: { category: true, enteredBy: true } },
       creditTransactions: { include: { customer: true, enteredBy: true } },
       tankDips: true,
+      tankSamples: true,
       manager: true,
     },
   });
@@ -586,6 +587,101 @@ export async function recordTankDipAction(dutySessionId: string, fuelType: 'MS' 
   return { success: true };
 }
 
+export async function recordTankSampleAction(dutySessionId: string, msLitres: number, hsdLitres: number) {
+  const session = await requireAuth(['OWNER', 'MANAGER']);
+
+  const duty = await db.dutySession.findUnique({
+    where: { id: dutySessionId },
+    include: { meterReadings: true }
+  });
+
+  if (!duty || duty.status !== 'OPEN') {
+    throw new Error('Duty session is not open or valid.');
+  }
+
+  // Get active prices for MS and HSD
+  const msPriceRecord = await db.fuelPrice.findFirst({
+    where: { fuelType: 'MS' },
+    orderBy: { effectiveFrom: 'desc' },
+  });
+  const hsdPriceRecord = await db.fuelPrice.findFirst({
+    where: { fuelType: 'HSD' },
+    orderBy: { effectiveFrom: 'desc' },
+  });
+
+  const msPrice = msPriceRecord ? msPriceRecord.price : 112.15;
+  const hsdPrice = hsdPriceRecord ? hsdPriceRecord.price : 100.08;
+
+  const validMsLitres = Math.max(0, Number(msLitres) || 0);
+  const validHsdLitres = Math.max(0, Number(hsdLitres) || 0);
+
+  const msAmount = Number((validMsLitres * msPrice).toFixed(2));
+  const hsdAmount = Number((validHsdLitres * hsdPrice).toFixed(2));
+
+  await db.$transaction(async (tx) => {
+    // Upsert MS Sample
+    await tx.tankSample.upsert({
+      where: {
+        dutySessionId_fuelType: {
+          dutySessionId,
+          fuelType: 'MS',
+        },
+      },
+      update: {
+        litres: validMsLitres,
+        priceUsed: msPrice,
+        amount: msAmount,
+        createdBy: session.id,
+      },
+      create: {
+        dutySessionId,
+        fuelType: 'MS',
+        litres: validMsLitres,
+        priceUsed: msPrice,
+        amount: msAmount,
+        createdBy: session.id,
+      },
+    });
+
+    // Upsert HSD Sample
+    await tx.tankSample.upsert({
+      where: {
+        dutySessionId_fuelType: {
+          dutySessionId,
+          fuelType: 'HSD',
+        },
+      },
+      update: {
+        litres: validHsdLitres,
+        priceUsed: hsdPrice,
+        amount: hsdAmount,
+        createdBy: session.id,
+      },
+      create: {
+        dutySessionId,
+        fuelType: 'HSD',
+        litres: validHsdLitres,
+        priceUsed: hsdPrice,
+        amount: hsdAmount,
+        createdBy: session.id,
+      },
+    });
+  });
+
+  await logAudit(
+    session.id,
+    'RECORD_TANK_SAMPLE',
+    'TankSample',
+    dutySessionId,
+    undefined,
+    `MS Sample: ${validMsLitres} L (₹${msAmount}), HSD Sample: ${validHsdLitres} L (₹${hsdAmount})`
+  );
+
+  revalidatePath('/dashboard');
+  revalidatePath('/acc/current');
+  return { success: true };
+}
+
 // ----------------- DUTY CLOSING & RECONCILIATION -----------------
 
 export async function closeDutySessionAction(
@@ -681,6 +777,12 @@ export async function getHistoricalDuties() {
       meterReadings: {
         include: { gun: true },
       },
+      assignments: { include: { staff: true, pump: true } },
+      oilSales: { include: { enteredBy: true } },
+      expenses: { include: { category: true, enteredBy: true } },
+      creditTransactions: { include: { customer: true, enteredBy: true } },
+      tankDips: true,
+      tankSamples: true,
     },
   });
 }
@@ -695,6 +797,7 @@ export async function getDutyReport(dutySessionId: string) {
       expenses: { include: { category: true, enteredBy: true } },
       creditTransactions: { include: { customer: true, enteredBy: true } },
       tankDips: true,
+      tankSamples: true,
       manager: true,
     },
   });

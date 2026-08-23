@@ -77,6 +77,7 @@ model DutySession {
   expenses          Expense[]
   creditTransactions CreditTransaction[]
   tankDips          TankDip[]
+  tankSamples       TankSample[]
 }
 
 model DutyAssignment {
@@ -235,4 +236,18 @@ model AuditLog {
   recordId    String
   oldValue    String?
   newValue    String?
+}
+
+model TankSample {
+  id            String      @id @default(uuid())
+  dutySessionId String
+  dutySession   DutySession @relation(fields: [dutySessionId], references: [id], onDelete: Cascade)
+  fuelType      String      // MS or HSD
+  litres        Float       @default(0.0)
+  priceUsed     Float       @default(0.0)
+  amount        Float       @default(0.0)
+  createdAt     DateTime    @default(now())
+  createdBy     String?
+
+  @@unique([dutySessionId, fuelType])
 }
