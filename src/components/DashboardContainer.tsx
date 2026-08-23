@@ -16,7 +16,8 @@ import {
   closeDutySessionAction, updateFuelPriceAction, addStaffAction, toggleStaffStatusAction,
   deleteStaffAction, addCustomerAction, toggleCustomerStatusAction, deleteCustomerAction,
   addOilProductAction, updateOilPriceAction, toggleOilProductStatusAction, deleteOilProductAction,
-  getStaticData, getCreditLedgerReport, updateMeterReadingAction
+  getStaticData, getCreditLedgerReport, updateMeterReadingAction,
+  getHistoricalDuties, getExpenseReport, getOilSalesReport
 } from '@/lib/actions';
 import * as XLSX from 'xlsx';
 
@@ -155,15 +156,169 @@ export default function DashboardContainer({
   // Reports view states
   const [reportsTab, setReportsTab] = useState<'sales' | 'staff' | 'credit' | 'expenses' | 'oil' | 'stock' | 'cash'>('sales');
 
+  // Aggregated Fuel Meter Sales Report State
+  const [fuelReportPreset, setFuelReportPreset] = useState<'ALL' | 'TODAY' | 'WEEK' | 'MONTH' | 'YEAR'>('ALL');
+  const [fuelReportDate, setFuelReportDate] = useState<string>('');
+  const [fuelReportStartDate, setFuelReportStartDate] = useState<string>('');
+  const [fuelReportEndDate, setFuelReportEndDate] = useState<string>('');
+  const [fuelReportMonth, setFuelReportMonth] = useState<string>('');
+  const [fuelReportYear, setFuelReportYear] = useState<string>('');
+  const [fuelReportPump, setFuelReportPump] = useState<string>('ALL');
+  const [fuelReportStaff, setFuelReportStaff] = useState<string>('ALL');
+  const [fuelReportFuelType, setFuelReportFuelType] = useState<string>('ALL');
+  const [fuelReportGroupBy, setFuelReportGroupBy] = useState<'DATE' | 'MONTH' | 'YEAR'>('DATE');
+  const [showDetailedMeterAudit, setShowDetailedMeterAudit] = useState<boolean>(false);
+  const [selectedDrillDownKey, setSelectedDrillDownKey] = useState<string | null>(null);
+  const [selectedDrillDownType, setSelectedDrillDownType] = useState<'PUMP' | 'STAFF' | 'PERIOD' | null>(null);
+
+  const handleQuickFilter = (preset: 'ALL' | 'TODAY' | 'WEEK' | 'MONTH' | 'YEAR') => {
+    setFuelReportPreset(preset);
+    const now = new Date();
+    const todayStr = now.toLocaleDateString('en-CA');
+
+    if (preset === 'ALL') {
+      setFuelReportDate('');
+      setFuelReportStartDate('');
+      setFuelReportEndDate('');
+      setFuelReportMonth('');
+      setFuelReportYear('');
+    } else if (preset === 'TODAY') {
+      setFuelReportDate(todayStr);
+      setFuelReportStartDate('');
+      setFuelReportEndDate('');
+      setFuelReportMonth('');
+      setFuelReportYear('');
+    } else if (preset === 'WEEK') {
+      const pastWeek = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      setFuelReportStartDate(pastWeek.toLocaleDateString('en-CA'));
+      setFuelReportEndDate(todayStr);
+      setFuelReportDate('');
+      setFuelReportMonth('');
+      setFuelReportYear('');
+    } else if (preset === 'MONTH') {
+      setFuelReportMonth(todayStr.slice(0, 7));
+      setFuelReportDate('');
+      setFuelReportStartDate('');
+      setFuelReportEndDate('');
+      setFuelReportYear('');
+    } else if (preset === 'YEAR') {
+      setFuelReportYear(todayStr.slice(0, 4));
+      setFuelReportDate('');
+      setFuelReportStartDate('');
+      setFuelReportEndDate('');
+      setFuelReportMonth('');
+    }
+  };
+
+  const handleResetFuelFilters = () => {
+    setFuelReportPreset('ALL');
+    setFuelReportDate('');
+    setFuelReportStartDate('');
+    setFuelReportEndDate('');
+    setFuelReportMonth('');
+    setFuelReportYear('');
+    setFuelReportPump('ALL');
+    setFuelReportStaff('ALL');
+    setFuelReportFuelType('ALL');
+    setSelectedDrillDownKey(null);
+    setSelectedDrillDownType(null);
+  };
+
+  // 24-Hour Duty Staff Attendance & Performance Register State
+  const [staffReportDate, setStaffReportDate] = useState<string>('');
+  const [staffReportStartDate, setStaffReportStartDate] = useState<string>('');
+  const [staffReportEndDate, setStaffReportEndDate] = useState<string>('');
+  const [staffReportMonth, setStaffReportMonth] = useState<string>('');
+  const [staffReportYear, setStaffReportYear] = useState<string>('');
+  const [staffReportStaff, setStaffReportStaff] = useState<string>('ALL');
+  const [staffReportPump, setStaffReportPump] = useState<string>('ALL');
+  const [staffReportStatusFilter, setStaffReportStatusFilter] = useState<'ALL' | 'PRESENT' | 'ABSENT' | 'NOT_SCHEDULED'>('ALL');
+
+  // Manual Attendance Status Overrides & Audit Log (Owner privilege)
+  const [attendanceOverrides, setAttendanceOverrides] = useState<Record<string, 'PRESENT' | 'ABSENT' | 'NOT_SCHEDULED'>>({});
+  const [attendanceAuditLogs, setAttendanceAuditLogs] = useState<Array<{
+    id: string;
+    staffName: string;
+    dutyNumber: number;
+    oldStatus: string;
+    newStatus: string;
+    changedBy: string;
+    timestamp: string;
+    reason: string;
+  }>>([]);
+
+  // Attendance Status Correction Modal State
+  const [statusCorrectionModal, setStatusCorrectionModal] = useState<{
+    open: boolean;
+    dutyId: string;
+    dutyNumber: number;
+    staffId: string;
+    staffName: string;
+    currentStatus: 'PRESENT' | 'ABSENT' | 'NOT_SCHEDULED';
+    newStatus: 'PRESENT' | 'ABSENT' | 'NOT_SCHEDULED';
+    reason: string;
+  } | null>(null);
+
+  // Individual Staff Duty History Drawer / Modal State
+  const [staffHistoryModal, setStaffHistoryModal] = useState<{
+    open: boolean;
+    staffId: string;
+    staffName: string;
+  } | null>(null);
+
+  const handleResetStaffFilters = () => {
+    setStaffReportDate('');
+    setStaffReportStartDate('');
+    setStaffReportEndDate('');
+    setStaffReportMonth('');
+    setStaffReportYear('');
+    setStaffReportStaff('ALL');
+    setStaffReportPump('ALL');
+    setStaffReportStatusFilter('ALL');
+  };
+
   // Owner Verification Filter & Reading Correction Modal state
   const [selectedDutyId, setSelectedDutyId] = useState<string>('CURRENT');
   const [filterStaffId, setFilterStaffId] = useState<string>('ALL');
   const [filterPumpId, setFilterPumpId] = useState<string>('ALL');
+  const [filterDate, setFilterDate] = useState<string>('');
+  const [showOilDetails, setShowOilDetails] = useState<boolean>(false);
+  const [showCreditDetails, setShowCreditDetails] = useState<boolean>(false);
+  const [showExpenseDetails, setShowExpenseDetails] = useState<boolean>(false);
+  const [showDigitalDetails, setShowDigitalDetails] = useState<boolean>(false);
   const [editingReading, setEditingReading] = useState<any>(null);
   const [newReadingVal, setNewReadingVal] = useState<number>(0);
   const [correctionReason, setCorrectionReason] = useState<string>('');
   const [isSubmittingReadingEdit, setIsSubmittingReadingEdit] = useState<boolean>(false);
   const [expandedPumpId, setExpandedPumpId] = useState<string | null>(null);
+
+  const handleDateFilterChange = (dateVal: string) => {
+    setFilterDate(dateVal);
+    if (!dateVal) return;
+    const availableDuties = [
+      ...(activeDuty ? [activeDuty] : []),
+      ...initialHistoricalDuties
+    ];
+    const matched = availableDuties.find((d: any) => {
+      const dDateIso = new Date(d.startTime).toISOString().slice(0, 10);
+      const dDateLocal = new Date(d.startTime).toLocaleDateString('en-CA');
+      return dDateIso === dateVal || dDateLocal === dateVal;
+    });
+    if (matched) {
+      setSelectedDutyId(matched.id === activeDuty?.id ? 'CURRENT' : matched.id);
+    }
+  };
+
+  const handleDutyFilterChange = (dutyId: string) => {
+    setSelectedDutyId(dutyId);
+    const target = dutyId === 'CURRENT' ? activeDuty : initialHistoricalDuties.find((d: any) => d.id === dutyId);
+    if (target) {
+      const dDateLocal = new Date(target.startTime).toLocaleDateString('en-CA');
+      setFilterDate(dDateLocal);
+    } else {
+      setFilterDate('');
+    }
+  };
 
   const handleUpdateReading = async () => {
     if (!editingReading) return;
@@ -227,28 +382,67 @@ export default function DashboardContainer({
     }
   }, [initialActiveDuty]);
 
-  // Update readings state when activeDuty session initializes or changes ID, PRESERVING user-entered inputs
+  // Keep state synced with server props when server revalidates
+  useEffect(() => {
+    setActiveDuty(initialActiveDuty);
+  }, [initialActiveDuty]);
+
+  useEffect(() => {
+    setHistoricalDuties(initialHistoricalDuties);
+  }, [initialHistoricalDuties]);
+
+  useEffect(() => {
+    setCreditLedger(initialCreditLedger);
+  }, [initialCreditLedger]);
+
+  useEffect(() => {
+    setExpenses(initialExpenses);
+  }, [initialExpenses]);
+
+  useEffect(() => {
+    setOilSales(initialOilSales);
+  }, [initialOilSales]);
+
+  useEffect(() => {
+    setStaticData(initialStaticData);
+  }, [initialStaticData]);
+
+  // Helper to completely reset current duty input form values
+  const resetDutyFormState = () => {
+    setClosingReadings({});
+    setOpeningReadings({});
+    setOngoingReadings({});
+    setActualCash(0);
+    setDigitalPayments({ phonepe: 0, gpay: 0, paytm: 0, bharatpe: 0, cards: 0, bank: 0 });
+    setMsTestingLitres(0);
+    setHsdTestingLitres(0);
+    setOilProdId('');
+    setOilQty(0);
+    setExpCategory('');
+    setExpAmount(0);
+    setExpDesc('');
+    setExpRemarks('');
+    setIndentNumber('');
+    setCreditLitres(0);
+    setCreditUnitPrice(0);
+    setCreditAmount(0);
+    setCreditDesc('');
+  };
+
+  // Update readings state cleanly when activeDuty session initializes or changes ID
   useEffect(() => {
     if (activeDuty) {
-      setClosingReadings((prev) => {
-        const next = { ...prev };
-        for (const mr of activeDuty.meterReadings) {
-          if (next[mr.gunId] === undefined) {
-            next[mr.gunId] = mr.currentReading || 0;
-          }
-        }
-        return next;
-      });
-
-      setOngoingReadings((prev) => {
-        const next = { ...prev };
-        for (const mr of activeDuty.meterReadings) {
-          if (next[mr.gunId] === undefined) {
-            next[mr.gunId] = mr.currentReading || 0;
-          }
-        }
-        return next;
-      });
+      const readingsMap: Record<string, number> = {};
+      for (const mr of activeDuty.meterReadings || []) {
+        readingsMap[mr.gunId] = mr.currentReading || 0;
+      }
+      setClosingReadings(readingsMap);
+      setOngoingReadings(readingsMap);
+      setOpeningReadings({});
+    } else {
+      setClosingReadings({});
+      setOngoingReadings({});
+      setOpeningReadings({});
     }
   }, [activeDuty?.id]);
 
@@ -305,7 +499,7 @@ export default function DashboardContainer({
       const res = await saveMeterReadingsAction(activeDuty.id, payload);
       if (res.success) {
         flashMessage('Meter readings saved successfully.', 'success');
-        router.refresh();
+        await refreshActiveDuty();
       }
     } catch (err: any) {
       flashMessage(err.message || 'Failed to save readings', 'error');
@@ -318,9 +512,21 @@ export default function DashboardContainer({
     try {
       const updated = await getActiveDutySession();
       setActiveDuty(updated);
+      const updatedHistorical = await getHistoricalDuties();
+      if (updatedHistorical) {
+        setHistoricalDuties(updatedHistorical);
+      }
       const updatedLedger = await getCreditLedgerReport();
       if (updatedLedger) {
         setCreditLedger(updatedLedger);
+      }
+      const updatedExpenses = await getExpenseReport();
+      if (updatedExpenses) {
+        setExpenses(updatedExpenses);
+      }
+      const updatedOil = await getOilSalesReport();
+      if (updatedOil) {
+        setOilSales(updatedOil);
       }
       const updatedStatic = await getStaticData();
       if (updatedStatic) {
@@ -339,7 +545,7 @@ export default function DashboardContainer({
     try {
       const res = await addOilSaleAction(activeDuty.id, oilProdId, oilQty);
       if (res.success) {
-        flashMessage('Oil sale logged successfully.', 'success');
+        flashMessage('Successfully created', 'success');
         setOilQty(0);
         setOilProdId('');
         await refreshActiveDuty();
@@ -356,7 +562,7 @@ export default function DashboardContainer({
     setActionLoading(true);
     try {
       await deleteOilSaleAction(id);
-      flashMessage('Oil sale deleted.', 'success');
+      flashMessage('Successfully deleted', 'success');
       await refreshActiveDuty();
     } catch (err: any) {
       flashMessage(err.message, 'error');
@@ -372,7 +578,7 @@ export default function DashboardContainer({
     try {
       const res = await addExpenseAction(activeDuty.id, expCategory, expDesc, expAmount, expMethod, expRemarks);
       if (res.success) {
-        flashMessage('Expense logged successfully.', 'success');
+        flashMessage('Successfully created', 'success');
         setExpAmount(0);
         setExpDesc('');
         setExpRemarks('');
@@ -390,7 +596,7 @@ export default function DashboardContainer({
     setActionLoading(true);
     try {
       await deleteExpenseAction(id);
-      flashMessage('Expense deleted.', 'success');
+      flashMessage('Successfully deleted', 'success');
       await refreshActiveDuty();
     } catch (err: any) {
       flashMessage(err.message, 'error');
@@ -534,12 +740,7 @@ export default function DashboardContainer({
         // Refresh active duty and customer ledger state from database
         await refreshActiveDuty();
 
-        flashMessage(
-          creditType === 'CREDIT_SALE'
-            ? `Credit sale of ₹${finalAmount.toFixed(2)} logged to customer ledger.`
-            : `Cash collection of ₹${finalAmount.toFixed(2)} recorded in ledger.`,
-          'success'
-        );
+        flashMessage('Successfully created', 'success');
       } else {
         throw new Error('Database transaction did not complete successfully.');
       }
@@ -558,7 +759,7 @@ export default function DashboardContainer({
     try {
       const res = await deleteCreditTransactionAction(id);
       if (res && res.success) {
-        flashMessage('Credit transaction reversed.', 'success');
+        flashMessage('Successfully deleted', 'success');
         await refreshActiveDuty();
       }
     } catch (err: any) {
@@ -717,8 +918,13 @@ export default function DashboardContainer({
       const res = await startNewDutySession(newDutyStartTime, pumpAssignments);
       if (res.success) {
         flashMessage(`Duty session #${activeDuty ? activeDuty.dutyNumber + 1 : 100} started.`, 'success');
+        
+        // Reset working inputs for the new duty session
+        resetDutyFormState();
         setWizardOpen(false);
         setWizardStep(1);
+
+        await refreshActiveDuty();
         router.refresh();
       }
     } catch (err: any) {
@@ -1128,7 +1334,7 @@ export default function DashboardContainer({
           {/* TAB 1: OWNER DASHBOARD & VERIFICATION REPORT */}
           {activeTab === 'dashboard' && session.role === 'OWNER' && (
             <div className="space-y-8">
-              {/* TOP CONTROLS & FILTER BAR */}
+              {/* TOP CONTROLS & GLOBAL FILTER BAR */}
               <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl flex flex-wrap items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
                   <div className="h-10 w-10 bg-indigo-600/20 text-indigo-400 rounded-xl border border-indigo-500/30 flex items-center justify-center">
@@ -1140,14 +1346,27 @@ export default function DashboardContainer({
                   </div>
                 </div>
 
-                {/* Duty & Filters Selector */}
+                {/* Global Filters Bar */}
                 <div className="flex flex-wrap items-center gap-3">
+                  {/* Filter 1: Report Date */}
+                  <div className="flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800 text-xs">
+                    <Calendar className="h-3.5 w-3.5 text-sky-400" />
+                    <span className="text-slate-400 font-semibold">Date:</span>
+                    <input
+                      type="date"
+                      value={filterDate}
+                      onChange={(e) => handleDateFilterChange(e.target.value)}
+                      className="bg-transparent text-white font-bold focus:outline-none cursor-pointer"
+                    />
+                  </div>
+
+                  {/* Filter 2: Duty Session */}
                   <div className="flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800 text-xs">
                     <Filter className="h-3.5 w-3.5 text-indigo-400" />
                     <span className="text-slate-400 font-semibold">Duty Session:</span>
                     <select
                       value={selectedDutyId}
-                      onChange={(e) => setSelectedDutyId(e.target.value)}
+                      onChange={(e) => handleDutyFilterChange(e.target.value)}
                       className="bg-transparent text-white font-bold focus:outline-none cursor-pointer"
                     >
                       <option value="CURRENT" className="bg-slate-900 text-white">Current Active Duty {activeDuty ? `#${activeDuty.dutyNumber}` : '(Closed)'}</option>
@@ -1159,21 +1378,7 @@ export default function DashboardContainer({
                     </select>
                   </div>
 
-                  <div className="flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800 text-xs">
-                    <Users className="h-3.5 w-3.5 text-emerald-400" />
-                    <span className="text-slate-400 font-semibold">Staff:</span>
-                    <select
-                      value={filterStaffId}
-                      onChange={(e) => setFilterStaffId(e.target.value)}
-                      className="bg-transparent text-white font-bold focus:outline-none cursor-pointer"
-                    >
-                      <option value="ALL" className="bg-slate-900 text-white">All Staff Members</option>
-                      {staticData.staff.map((s: any) => (
-                        <option key={s.id} value={s.id} className="bg-slate-900 text-white">{s.name}</option>
-                      ))}
-                    </select>
-                  </div>
-
+                  {/* Filter 3: Pump */}
                   <div className="flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800 text-xs">
                     <Fuel className="h-3.5 w-3.5 text-amber-400" />
                     <span className="text-slate-400 font-semibold">Pump:</span>
@@ -1182,16 +1387,32 @@ export default function DashboardContainer({
                       onChange={(e) => setFilterPumpId(e.target.value)}
                       className="bg-transparent text-white font-bold focus:outline-none cursor-pointer"
                     >
-                      <option value="ALL" className="bg-slate-900 text-white">All Bunk Pumps</option>
+                      <option value="ALL" className="bg-slate-900 text-white">All Pumps</option>
                       {staticData.pumps.map((p: any) => (
                         <option key={p.id} value={p.id} className="bg-slate-900 text-white">{p.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Filter 4: Staff */}
+                  <div className="flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800 text-xs">
+                    <Users className="h-3.5 w-3.5 text-emerald-400" />
+                    <span className="text-slate-400 font-semibold">Staff:</span>
+                    <select
+                      value={filterStaffId}
+                      onChange={(e) => setFilterStaffId(e.target.value)}
+                      className="bg-transparent text-white font-bold focus:outline-none cursor-pointer"
+                    >
+                      <option value="ALL" className="bg-slate-900 text-white">All Staff</option>
+                      {staticData.staff.map((s: any) => (
+                        <option key={s.id} value={s.id} className="bg-slate-900 text-white">{s.name}</option>
                       ))}
                     </select>
                   </div>
                 </div>
               </div>
 
-              {/* DYNAMIC DUTY COMPUTATION CONTEXT */}
+              {/* DYNAMIC DUTY COMPUTATION & FILTER CONTEXT */}
               {(() => {
                 const targetDuty = selectedDutyId === 'CURRENT' ? activeDuty : initialHistoricalDuties.find((d: any) => d.id === selectedDutyId);
 
@@ -1200,7 +1421,7 @@ export default function DashboardContainer({
                     <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 text-center max-w-xl mx-auto space-y-4">
                       <ShieldAlert className="h-10 w-10 text-amber-400 mx-auto" />
                       <h3 className="text-lg font-bold text-white">No Active Duty Session Currently Running</h3>
-                      <p className="text-xs text-slate-400">Select a historical duty session from the top filter above to verify past reports.</p>
+                      <p className="text-xs text-slate-400">Select a historical duty session or date from the global filter bar above to verify past reports.</p>
                     </div>
                   );
                 }
@@ -1208,20 +1429,47 @@ export default function DashboardContainer({
                 if (!targetDuty) {
                   return (
                     <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 text-center max-w-xl mx-auto text-slate-400 text-xs">
-                      Selected duty report not found.
+                      Selected duty report not found for the specified filters.
                     </div>
                   );
                 }
 
-                // Computation for selected target duty
+                // 24-HOUR DUTY TIME WINDOW
                 const dutyStart = new Date(targetDuty.startTime);
                 const dutyEnd24h = new Date(dutyStart.getTime() + 24 * 60 * 60 * 1000);
                 const dutyEndActual = targetDuty.endTime ? new Date(targetDuty.endTime) : dutyEnd24h;
 
-                // Meter readings
-                const meterReadings = targetDuty.meterReadings || [];
-                const msReadings = meterReadings.filter((mr: any) => mr.gun?.fuelType === 'MS');
-                const hsdReadings = meterReadings.filter((mr: any) => mr.gun?.fuelType === 'HSD');
+                // 1. STAFF ATTENDANCE & ASSIGNMENTS FILTERING
+                let filteredAssignments = targetDuty.assignments || [];
+                if (filterPumpId !== 'ALL') {
+                  filteredAssignments = filteredAssignments.filter((as: any) => as.pumpId === filterPumpId || as.pump?.id === filterPumpId);
+                }
+                if (filterStaffId !== 'ALL') {
+                  filteredAssignments = filteredAssignments.filter((as: any) => as.staffId === filterStaffId);
+                }
+                const presentCount = filteredAssignments.length;
+                const totalAssignedStaff = (targetDuty.assignments || []).length;
+                const absentCount = Math.max(0, totalAssignedStaff - presentCount);
+
+                // 2. FUEL SALES & METER READINGS FILTERING
+                let filteredReadings = targetDuty.meterReadings || [];
+                if (filterPumpId !== 'ALL') {
+                  filteredReadings = filteredReadings.filter((mr: any) => (mr.gun?.pumpId || mr.gun?.pump?.id) === filterPumpId);
+                }
+                if (filterStaffId !== 'ALL') {
+                  const staffAssignments = (targetDuty.assignments || []).filter((as: any) => as.staffId === filterStaffId);
+                  if (staffAssignments.length > 0) {
+                    filteredReadings = filteredReadings.filter((mr: any) => {
+                      const pId = mr.gun?.pumpId || mr.gun?.pump?.id;
+                      return staffAssignments.some((as: any) => as.pumpId === pId && as.fuelType === mr.gun?.fuelType);
+                    });
+                  } else {
+                    filteredReadings = [];
+                  }
+                }
+
+                const msReadings = filteredReadings.filter((mr: any) => mr.gun?.fuelType === 'MS');
+                const hsdReadings = filteredReadings.filter((mr: any) => mr.gun?.fuelType === 'HSD');
 
                 const msLitres = msReadings.reduce((sum: number, mr: any) => sum + (mr.litresSold || Math.max(0, mr.currentReading - mr.previousReading)), 0);
                 const hsdLitres = hsdReadings.reduce((sum: number, mr: any) => sum + (mr.litresSold || Math.max(0, mr.currentReading - mr.previousReading)), 0);
@@ -1230,51 +1478,20 @@ export default function DashboardContainer({
                 const hsdSales = hsdReadings.reduce((sum: number, mr: any) => sum + (mr.salesAmount || Math.max(0, mr.currentReading - mr.previousReading) * mr.priceUsed), 0);
                 const totalFuelSales = msSales + hsdSales;
 
-                // Oil Sales
-                const oilSalesList = targetDuty.oilSales || [];
-                const totalOilSales = oilSalesList.reduce((sum: number, o: any) => sum + o.totalAmount, 0);
-
-                // Credit Sales & Collections
-                const creditTrans = targetDuty.creditTransactions || [];
-                const creditSalesList = creditTrans.filter((ct: any) => ct.transactionType === 'CREDIT_SALE');
-                const creditCollList = creditTrans.filter((ct: any) => ct.transactionType === 'COLLECTION');
-
-                const creditSalesAmount = creditSalesList.reduce((sum: number, ct: any) => sum + ct.amount, 0);
-                const creditCollectionsCash = creditCollList.reduce((sum: number, ct: any) => sum + ct.amount, 0);
-                const netOutstandingAdded = creditSalesAmount - creditCollectionsCash;
-
-                // Expenses
-                const expensesList = targetDuty.expenses || [];
-                const totalExpenses = expensesList.reduce((sum: number, e: any) => sum + e.amount, 0);
-                const cashExpenses = expensesList.filter((e: any) => e.paymentMethod === 'Cash').reduce((sum: number, e: any) => sum + e.amount, 0);
-
-                // Digital payments
-                const digitalPaymentsSum = expensesList.filter((e: any) => ['PhonePe', 'GPay', 'Paytm', 'BharatPe', 'Cards', 'Bank'].includes(e.paymentMethod)).reduce((sum: number, e: any) => sum + e.amount, 0);
-
-                // Testing deductions
-                const msTestingL = msTestingLitres || 0;
-                const hsdTestingL = hsdTestingLitres || 0;
-                const testingValue = (msTestingL * staticData.prices.MS) + (hsdTestingL * staticData.prices.HSD);
-
-                // Financial calculations
-                const grossRevenueInflow = totalFuelSales + totalOilSales + creditCollectionsCash;
-                const totalDeductions = creditSalesAmount + digitalPaymentsSum + cashExpenses + testingValue;
-                const expectedCash = Math.max(0, grossRevenueInflow - totalDeductions);
-                const actualCash = targetDuty.actualCash || expectedCash;
-                const cashDiff = targetDuty.status === 'OPEN' ? (actualCash - expectedCash) : (targetDuty.cashDifference || 0);
-
-                // Group meter readings by Pump
+                // Group readings by Pump
                 const pumpGroupMap: Record<string, any> = {};
-                for (const p of staticData.pumps) {
+                const activePumps = filterPumpId === 'ALL' ? staticData.pumps : staticData.pumps.filter((p: any) => p.id === filterPumpId);
+
+                for (const p of activePumps) {
                   pumpGroupMap[p.id] = {
                     pumpName: p.name,
                     msGuns: [],
                     hsdGuns: [],
-                    assignments: (targetDuty.assignments || []).filter((as: any) => as.pumpId === p.id)
+                    assignments: (targetDuty.assignments || []).filter((as: any) => as.pumpId === p.id && (filterStaffId === 'ALL' || as.staffId === filterStaffId))
                   };
                 }
 
-                for (const mr of meterReadings) {
+                for (const mr of filteredReadings) {
                   const pId = mr.gun?.pumpId || mr.gun?.pump?.id;
                   if (pId && pumpGroupMap[pId]) {
                     if (mr.gun?.fuelType === 'MS') pumpGroupMap[pId].msGuns.push(mr);
@@ -1282,9 +1499,133 @@ export default function DashboardContainer({
                   }
                 }
 
+                // 3. OIL SALES FILTERING
+                let filteredOilSales = targetDuty.oilSales || [];
+                if (filterStaffId !== 'ALL') {
+                  filteredOilSales = filteredOilSales.filter((o: any) => o.enteredById === filterStaffId);
+                }
+                if (filterPumpId !== 'ALL') {
+                  const staffOnPump = (targetDuty.assignments || []).filter((as: any) => as.pumpId === filterPumpId).map((as: any) => as.staffId);
+                  filteredOilSales = filteredOilSales.filter((o: any) => staffOnPump.includes(o.enteredById));
+                }
+                const totalOilSales = filteredOilSales.reduce((sum: number, o: any) => sum + o.totalAmount, 0);
+
+                // 4. CREDIT TRANSACTIONS FILTERING
+                let filteredCreditTrans = targetDuty.creditTransactions || [];
+                if (filterStaffId !== 'ALL') {
+                  filteredCreditTrans = filteredCreditTrans.filter((ct: any) => ct.enteredById === filterStaffId);
+                }
+                if (filterPumpId !== 'ALL') {
+                  const staffOnPump = (targetDuty.assignments || []).filter((as: any) => as.pumpId === filterPumpId).map((as: any) => as.staffId);
+                  filteredCreditTrans = filteredCreditTrans.filter((ct: any) => staffOnPump.includes(ct.enteredById));
+                }
+
+                const creditSalesList = filteredCreditTrans.filter((ct: any) => ct.transactionType === 'CREDIT_SALE');
+                const creditCollList = filteredCreditTrans.filter((ct: any) => ct.transactionType === 'COLLECTION');
+
+                const creditSalesAmount = creditSalesList.reduce((sum: number, ct: any) => sum + ct.amount, 0);
+                const creditCollectionsCash = creditCollList.reduce((sum: number, ct: any) => sum + ct.amount, 0);
+                const netOutstandingAdded = creditSalesAmount - creditCollectionsCash;
+
+                // 5. EXPENSES FILTERING
+                let filteredExpenses = targetDuty.expenses || [];
+                if (filterStaffId !== 'ALL') {
+                  filteredExpenses = filteredExpenses.filter((e: any) => e.enteredById === filterStaffId);
+                }
+                if (filterPumpId !== 'ALL') {
+                  const staffOnPump = (targetDuty.assignments || []).filter((as: any) => as.pumpId === filterPumpId).map((as: any) => as.staffId);
+                  filteredExpenses = filteredExpenses.filter((e: any) => staffOnPump.includes(e.enteredById));
+                }
+
+                const totalExpenses = filteredExpenses.reduce((sum: number, e: any) => sum + e.amount, 0);
+                const cashExpenses = filteredExpenses.filter((e: any) => e.paymentMethod === 'Cash').reduce((sum: number, e: any) => sum + e.amount, 0);
+
+                // Expense Category breakdown
+                const categoryBreakdown: Record<string, number> = {};
+                for (const ex of filteredExpenses) {
+                  const catName = ex.category?.name || 'Operating Expenses';
+                  categoryBreakdown[catName] = (categoryBreakdown[catName] || 0) + ex.amount;
+                }
+
+                // 6. DIGITAL PAYMENTS BREAKDOWN
+                const digitalMethods = ['PhonePe', 'GPay', 'Paytm', 'BharatPe', 'Cards', 'Bank'];
+                const digitalBreakdown: Record<string, number> = {
+                  PhonePe: 0, GPay: 0, Paytm: 0, BharatPe: 0, Cards: 0, Bank: 0
+                };
+                for (const ex of filteredExpenses) {
+                  if (digitalMethods.includes(ex.paymentMethod)) {
+                    digitalBreakdown[ex.paymentMethod] = (digitalBreakdown[ex.paymentMethod] || 0) + ex.amount;
+                  }
+                }
+                const digitalPaymentsSum = Object.values(digitalBreakdown).reduce((sum, val) => sum + val, 0);
+
+                // 7. TESTING DEDUCTIONS & FINAL CASH RECONCILIATION
+                const msTestingL = msTestingLitres || 0;
+                const hsdTestingL = hsdTestingLitres || 0;
+                const testingValue = (msTestingL * staticData.prices.MS) + (hsdTestingL * staticData.prices.HSD);
+
+                const grossRevenueInflow = totalFuelSales + totalOilSales + creditCollectionsCash;
+                const totalDeductions = creditSalesAmount + digitalPaymentsSum + cashExpenses + testingValue;
+                const expectedCash = Math.max(0, grossRevenueInflow - totalDeductions);
+                const actualCash = targetDuty.actualCash || expectedCash;
+                const cashDiff = targetDuty.status === 'OPEN' ? (actualCash - expectedCash) : (targetDuty.cashDifference || 0);
+
                 return (
                   <div className="space-y-8">
-                    {/* SECTION 1: TOP EXECUTIVE SUMMARY KPI CARDS */}
+                    {/* SECTION 1: 24-HOUR DUTY & STAFF ATTENDANCE REPORT */}
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden">
+                      <div className="p-6 border-b border-slate-800 flex flex-wrap justify-between items-center bg-slate-900/50 gap-4">
+                        <div className="flex items-center gap-3">
+                          <Calendar className="h-5 w-5 text-indigo-400" />
+                          <div>
+                            <h3 className="font-extrabold text-white text-base">24-Hour Duty & Staff Attendance Report</h3>
+                            <p className="text-xs text-slate-400 mt-0.5">
+                              Shift Interval: <strong className="text-slate-200" suppressHydrationWarning>{dutyStart.toLocaleDateString()} {dutyStart.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</strong> &rarr; <strong className="text-slate-200" suppressHydrationWarning>{dutyEndActual.toLocaleDateString()} {dutyEndActual.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</strong> (24-Hour Assignment)
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                          <span className="px-3 py-1 rounded-full text-xs font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/25">
+                            Supervisor: {targetDuty.manager?.username}
+                          </span>
+                          <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/25">
+                            Present: {presentCount} | Absent: {absentCount} | Total Assigned: {totalAssignedStaff}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="p-6">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                          {filteredAssignments.length === 0 ? (
+                            <div className="col-span-4 text-center py-6 text-slate-500 text-xs italic">
+                              No staff assignments linked to this duty for the selected filter.
+                            </div>
+                          ) : (
+                            filteredAssignments.map((as: any, idx: number) => (
+                              <div key={idx} className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
+                                <div className="flex justify-between items-center">
+                                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{as.pump?.name || 'Pump'} - {as.fuelType}</span>
+                                  <span className="px-2 py-0.5 rounded text-[9px] font-black bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 uppercase">
+                                    PRESENT
+                                  </span>
+                                </div>
+                                <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                                  <UserCheck className="h-4 w-4 text-emerald-400" />
+                                  {as.staff?.name}
+                                </h4>
+                                <div className="text-[11px] text-slate-500 space-y-0.5 pt-1 border-t border-slate-900">
+                                  <p>Duty Session: #{targetDuty.dutyNumber}</p>
+                                  <p suppressHydrationWarning>Window: {dutyStart.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} &rarr; {dutyEndActual.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+                                </div>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* SECTION 2: EXECUTIVE SUMMARY KPI CARDS */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
                       <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl space-y-1">
                         <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400 block">TOTAL MS SOLD</span>
@@ -1311,143 +1652,25 @@ export default function DashboardContainer({
                       <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl space-y-1">
                         <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400 block">TOTAL OIL SALES</span>
                         <h4 className="text-2xl font-black text-sky-400 font-mono">₹{totalOilSales.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h4>
-                        <span className="text-[10px] text-slate-500 block">{oilSalesList.length} lubricant sale entries</span>
+                        <span className="text-[10px] text-slate-500 block">{filteredOilSales.length} lubricant sales</span>
                       </div>
 
                       <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl space-y-1">
-                        <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400 block">TOTAL GROSS INFLOW</span>
+                        <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400 block">GROSS REVENUE INFLOW</span>
                         <h4 className="text-2xl font-black text-white font-mono">₹{grossRevenueInflow.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h4>
                         <span className="text-[10px] text-slate-500 block">Fuel + Oil + Credit Collections</span>
                       </div>
                     </div>
 
-                    {/* SECTION 2: BANK DEPOSIT & CASH RECONCILIATION SUMMARY BANNER */}
-                    <div className="bg-gradient-to-r from-slate-900 via-indigo-950/40 to-slate-900 border border-indigo-500/30 p-6 rounded-2xl shadow-2xl space-y-6">
-                      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800/80 pb-4">
-                        <div className="flex items-center gap-3">
-                          <div className="h-10 w-10 bg-emerald-500/20 text-emerald-400 rounded-xl border border-emerald-500/30 flex items-center justify-center">
-                            <Wallet className="h-5 w-5" />
-                          </div>
-                          <div>
-                            <h3 className="text-base font-extrabold text-white flex items-center gap-2">
-                              Bank Deposit & Physical Cash Verification Report
-                            </h3>
-                            <p className="text-xs text-slate-400">Duty #{targetDuty.dutyNumber} - Supervisor: <strong className="text-slate-200">{targetDuty.manager?.username}</strong></p>
-                          </div>
-                        </div>
-
-                        {/* Reconciliation Status Pill */}
-                        <div>
-                          {cashDiff === 0 ? (
-                            <span className="px-4 py-1.5 rounded-full text-xs font-black bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center gap-1.5 shadow-lg">
-                              <CheckCircle2 className="h-4 w-4" /> BALANCED (₹0 DIFF)
-                            </span>
-                          ) : cashDiff < 0 ? (
-                            <span className="px-4 py-1.5 rounded-full text-xs font-black bg-red-500/20 text-red-400 border border-red-500/40 flex items-center gap-1.5 shadow-lg">
-                              <AlertTriangle className="h-4 w-4" /> CASH SHORTAGE (-₹{Math.abs(cashDiff).toLocaleString(undefined, { minimumFractionDigits: 2 })})
-                            </span>
-                          ) : (
-                            <span className="px-4 py-1.5 rounded-full text-xs font-black bg-indigo-500/20 text-indigo-400 border border-indigo-500/40 flex items-center gap-1.5 shadow-lg">
-                              <TrendingUp className="h-4 w-4" /> CASH SURPLUS (+₹{cashDiff.toLocaleString(undefined, { minimumFractionDigits: 2 })})
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Bank Deposit Verification Metrics Grid */}
-                      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3 text-xs">
-                        <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
-                          <span className="text-slate-400 font-medium block">Total Sales</span>
-                          <span className="font-mono font-bold text-white block mt-1">₹{(totalFuelSales + totalOilSales).toFixed(2)}</span>
-                        </div>
-                        <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
-                          <span className="text-slate-400 font-medium block">Digital Received</span>
-                          <span className="font-mono font-bold text-sky-400 block mt-1">₹{digitalPaymentsSum.toFixed(2)}</span>
-                        </div>
-                        <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
-                          <span className="text-slate-400 font-medium block">Credit Given</span>
-                          <span className="font-mono font-bold text-amber-400 block mt-1">₹{creditSalesAmount.toFixed(2)}</span>
-                        </div>
-                        <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
-                          <span className="text-slate-400 font-medium block">Credit Collected</span>
-                          <span className="font-mono font-bold text-emerald-400 block mt-1">₹{creditCollectionsCash.toFixed(2)}</span>
-                        </div>
-                        <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
-                          <span className="text-slate-400 font-medium block">Total Expenses</span>
-                          <span className="font-mono font-bold text-red-400 block mt-1">₹{totalExpenses.toFixed(2)}</span>
-                        </div>
-                        <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
-                          <span className="text-slate-400 font-medium block">Expected Cash</span>
-                          <span className="font-mono font-bold text-indigo-300 block mt-1">₹{expectedCash.toFixed(2)}</span>
-                        </div>
-                        <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
-                          <span className="text-slate-400 font-medium block">Actual Cash</span>
-                          <span className="font-mono font-bold text-white block mt-1">₹{actualCash.toFixed(2)}</span>
-                        </div>
-                        <div className="bg-emerald-950/40 p-3 rounded-xl border border-emerald-500/40 text-center">
-                          <span className="text-emerald-400 font-bold uppercase tracking-wider text-[9px] block">EXPECTED BANK DEPOSIT</span>
-                          <span className="font-mono font-black text-emerald-300 text-sm block mt-0.5">₹{actualCash.toFixed(2)}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* SECTION 3: 24-HOUR DUTY & STAFF ATTENDANCE VERIFICATION */}
-                    <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden">
-                      <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900/50">
-                        <div className="flex items-center gap-3">
-                          <Calendar className="h-5 w-5 text-indigo-400" />
-                          <div>
-                            <h3 className="font-extrabold text-white text-base">24-Hour Duty Assignment & Staff Attendance Log</h3>
-                            <p className="text-xs text-slate-400 mt-0.5">
-                              Shift Interval: <strong className="text-slate-200" suppressHydrationWarning>{dutyStart.toLocaleDateString()} {dutyStart.toLocaleTimeString()}</strong> &rarr; <strong className="text-slate-200" suppressHydrationWarning>{dutyEndActual.toLocaleDateString()} {dutyEndActual.toLocaleTimeString()}</strong> (24-Hour Assignment)
-                            </p>
-                          </div>
-                        </div>
-                        <span className="px-3 py-1 rounded-full text-xs font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/25">
-                          Supervisor: {targetDuty.manager?.username}
-                        </span>
-                      </div>
-
-                      <div className="p-6">
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                          {(targetDuty.assignments || []).length === 0 ? (
-                            <div className="col-span-4 text-center py-6 text-slate-500 text-xs italic">
-                              No staff assignments linked to this 24-hour duty.
-                            </div>
-                          ) : (
-                            (targetDuty.assignments || []).map((as: any, idx: number) => (
-                              <div key={idx} className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
-                                <div className="flex justify-between items-center">
-                                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{as.pump?.name || 'Pump'} - {as.fuelType}</span>
-                                  <span className="px-2 py-0.5 rounded text-[9px] font-black bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 uppercase">
-                                    PRESENT / ACTIVE
-                                  </span>
-                                </div>
-                                <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                                  <UserCheck className="h-4 w-4 text-emerald-400" />
-                                  {as.staff?.name}
-                                </h4>
-                                <div className="text-[11px] text-slate-500 space-y-0.5 pt-1 border-t border-slate-900">
-                                  <p>Duty Period: 24 Hours</p>
-                                  <p suppressHydrationWarning>Start: {dutyStart.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
-                                  <p suppressHydrationWarning>End: {dutyEndActual.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
-                                </div>
-                              </div>
-                            ))
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* SECTION 4: HIERARCHICAL FUEL SALES VERIFICATION (Date -> Duty -> Staff -> Pump -> Fuel Type) */}
+                    {/* SECTION 3: HIERARCHICAL FUEL SALES REPORT (Duty -> Pump -> Staff -> Fuel Type -> Gun) */}
                     <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden space-y-6">
                       <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900/50">
                         <div>
                           <h3 className="font-extrabold text-white text-base flex items-center gap-2">
                             <Fuel className="h-5 w-5 text-indigo-400" />
-                            Hierarchical Fuel Sales Verification Report
+                            Hierarchical Fuel Sales Report
                           </h3>
-                          <p className="text-xs text-slate-400 mt-0.5">Structure: Date &rarr; Duty #{targetDuty.dutyNumber} &rarr; Staff &rarr; Pump &rarr; Fuel Type</p>
+                          <p className="text-xs text-slate-400 mt-0.5">Hierarchy: Duty #{targetDuty.dutyNumber} &rarr; Pump &rarr; Staff &rarr; Fuel Type</p>
                         </div>
                         {session.role === 'OWNER' && (
                           <span className="text-xs text-amber-400 font-bold bg-amber-500/10 px-3 py-1 rounded-lg border border-amber-500/25 flex items-center gap-1.5">
@@ -1457,7 +1680,7 @@ export default function DashboardContainer({
                       </div>
 
                       <div className="px-6 pb-6 space-y-6">
-                        {staticData.pumps.map((pump: any) => {
+                        {activePumps.map((pump: any) => {
                           const pData = pumpGroupMap[pump.id] || { msGuns: [], hsdGuns: [], assignments: [] };
 
                           // Calculate totals for Pump
@@ -1473,15 +1696,15 @@ export default function DashboardContainer({
 
                           return (
                             <div key={pump.id} className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden">
-                              {/* Pump Header Summary Card */}
+                              {/* Pump Header Summary */}
                               <div className="p-4 bg-slate-900/60 border-b border-slate-800 flex flex-wrap items-center justify-between gap-4">
                                 <div className="flex items-center gap-3">
                                   <div className="h-9 w-9 bg-indigo-600/20 text-indigo-400 rounded-lg flex items-center justify-center font-bold text-sm">
                                     {pump.name}
                                   </div>
                                   <div>
-                                    <h4 className="font-extrabold text-white text-sm uppercase">{pump.name} Operational Meter Summary</h4>
-                                    <p className="text-[11px] text-slate-400">Staff Assigned: <strong className="text-slate-200">MS: {msStaff}</strong> | <strong className="text-slate-200">HSD: {hsdStaff}</strong></p>
+                                    <h4 className="font-extrabold text-white text-sm uppercase">{pump.name} Sales Summary</h4>
+                                    <p className="text-[11px] text-slate-400">Staff: <strong className="text-slate-200">MS: {msStaff}</strong> | <strong className="text-slate-200">HSD: {hsdStaff}</strong></p>
                                   </div>
                                 </div>
 
@@ -1498,7 +1721,7 @@ export default function DashboardContainer({
 
                                   <button
                                     onClick={() => setExpandedPumpId(isExpanded ? null : pump.id)}
-                                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition-all"
+                                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition-all cursor-pointer"
                                   >
                                     <Eye className="h-3.5 w-3.5 text-indigo-400" />
                                     {isExpanded ? 'Hide Gun Details' : 'View Gun Details'}
@@ -1506,8 +1729,8 @@ export default function DashboardContainer({
                                 </div>
                               </div>
 
-                              {/* Pump Fuel Type Breakdown Table */}
-                              <div className="p-4">
+                              {/* Fuel Type Breakdown Table */}
+                              <div className="p-4 overflow-x-auto">
                                 <table className="w-full text-left text-xs border-collapse">
                                   <thead>
                                     <tr className="text-slate-400 border-b border-slate-800 uppercase font-bold text-[10px]">
@@ -1578,7 +1801,7 @@ export default function DashboardContainer({
                                               setNewReadingVal(mr.currentReading);
                                               setCorrectionReason('');
                                             }}
-                                            className="px-3 py-1 rounded bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-300 border border-indigo-500/30 font-bold text-[11px] flex items-center gap-1 transition-all"
+                                            className="px-3 py-1 rounded bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-300 border border-indigo-500/30 font-bold text-[11px] flex items-center gap-1 transition-all cursor-pointer"
                                           >
                                             <Edit className="h-3 w-3" /> Edit Reading
                                           </button>
@@ -1592,239 +1815,351 @@ export default function DashboardContainer({
                           );
                         })}
                       </div>
-                    </div>
 
-                    {/* SECTION 5: TESTING & SAMPLE DEDUCTION CARD */}
-                    <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl flex flex-wrap items-center justify-between gap-6">
-                      <div className="flex items-center gap-3">
-                        <div className="h-10 w-10 bg-amber-500/20 text-amber-400 rounded-xl border border-amber-500/30 flex items-center justify-center">
-                          <Info className="h-5 w-5" />
+                      {/* Testing / Sample Quantity Deductions */}
+                      <div className="p-6 bg-slate-950 border-t border-slate-800 flex flex-wrap items-center justify-between gap-6">
+                        <div className="flex items-center gap-3">
+                          <div className="h-9 w-9 bg-amber-500/20 text-amber-400 rounded-xl border border-amber-500/30 flex items-center justify-center">
+                            <Info className="h-4 w-4" />
+                          </div>
+                          <div>
+                            <h4 className="font-extrabold text-white text-sm">Testing / Sample Quantity Deductions</h4>
+                            <p className="text-xs text-slate-400">Fuel dispensed for density & quality calibration testing (deducted from expected cash).</p>
+                          </div>
                         </div>
-                        <div>
-                          <h4 className="font-extrabold text-white text-sm">Testing / Sample Quantity Deductions</h4>
-                          <p className="text-xs text-slate-400">Fuel dispensed for density & quality calibration testing (deducted from revenue & cash calculation).</p>
+
+                        <div className="flex items-center gap-6 text-xs font-mono">
+                          <div>
+                            <span className="text-slate-400 font-semibold block text-[10px]">MS Testing</span>
+                            <span className="font-bold text-indigo-400">{msTestingL} L</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 font-semibold block text-[10px]">HSD Testing</span>
+                            <span className="font-bold text-emerald-400">{hsdTestingL} L</span>
+                          </div>
+                          <div className="bg-slate-900 px-4 py-2 rounded-xl border border-slate-800">
+                            <span className="text-slate-400 font-semibold block text-[10px]">Testing Value</span>
+                            <span className="font-bold text-amber-400">₹{testingValue.toFixed(2)}</span>
+                          </div>
                         </div>
                       </div>
-
-                      <div className="flex items-center gap-6 text-xs">
-                        <div>
-                          <span className="text-slate-400 font-semibold block">MS Testing</span>
-                          <span className="font-mono font-bold text-indigo-400 text-sm">{msTestingL} L</span>
-                        </div>
-                        <div>
-                          <span className="text-slate-400 font-semibold block">HSD Testing</span>
-                          <span className="font-mono font-bold text-emerald-400 text-sm">{hsdTestingL} L</span>
-                        </div>
-                        <div className="bg-slate-950 px-4 py-2 rounded-xl border border-slate-800">
-                          <span className="text-slate-400 font-semibold block text-[10px]">Total Testing Value</span>
-                          <span className="font-mono font-bold text-amber-400 text-sm">₹{testingValue.toFixed(2)}</span>
-                        </div>
-                      </div>
                     </div>
 
-                    {/* SECTION 6: OIL / LUBRICANT SALES VERIFICATION CARD */}
+                    {/* SECTION 4: OIL / LUBRICANT SALES REPORT */}
                     <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden">
-                      <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900/50">
+                      <div className="p-6 border-b border-slate-800 flex flex-wrap justify-between items-center bg-slate-900/50 gap-4">
                         <div>
                           <h3 className="font-extrabold text-white text-base">Oil / Lubricant Sales Breakdown</h3>
                           <p className="text-xs text-slate-400 mt-0.5">Itemized lubricant sales configured via Master Config.</p>
                         </div>
-                        <span className="text-sm font-black text-sky-400 font-mono">
-                          TOTAL OIL SALES: ₹{totalOilSales.toFixed(2)}
-                        </span>
+
+                        <div className="flex items-center gap-4">
+                          <span className="text-sm font-black text-sky-400 font-mono">
+                            TOTAL OIL SALES: ₹{totalOilSales.toFixed(2)}
+                          </span>
+                          <button
+                            onClick={() => setShowOilDetails(!showOilDetails)}
+                            className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
+                          >
+                            <Eye className="h-3.5 w-3.5 text-sky-400" />
+                            {showOilDetails ? 'Hide Entries' : `View ${filteredOilSales.length} Entries`}
+                          </button>
+                        </div>
                       </div>
 
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-left text-xs border-collapse">
-                          <thead>
-                            <tr className="bg-slate-950 text-slate-400 uppercase font-bold border-b border-slate-800">
-                              <th className="p-3">Product Name</th>
-                              <th className="p-3 text-right">Quantity</th>
-                              <th className="p-3 text-right">Price per Unit</th>
-                              <th className="p-3 text-right">Total Amount</th>
-                              <th className="p-3">Logged By</th>
-                              <th className="p-3">Date/Time</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-800/40">
-                            {oilSalesList.length === 0 ? (
-                              <tr>
-                                <td colSpan={6} className="p-4 text-center text-slate-500">No oil sales logged for this duty session.</td>
+                      {showOilDetails && (
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-left text-xs border-collapse">
+                            <thead>
+                              <tr className="bg-slate-950 text-slate-400 uppercase font-bold border-b border-slate-800">
+                                <th className="p-3">Product Name</th>
+                                <th className="p-3 text-right">Quantity</th>
+                                <th className="p-3 text-right">Price per Unit</th>
+                                <th className="p-3 text-right">Total Amount</th>
+                                <th className="p-3">Logged By</th>
+                                <th className="p-3">Date/Time</th>
                               </tr>
-                            ) : (
-                              oilSalesList.map((o: any, idx: number) => (
-                                <tr key={idx} className="hover:bg-slate-950/20">
-                                  <td className="p-3 font-bold text-slate-200">{o.productName}</td>
-                                  <td className="p-3 text-right font-mono text-slate-350">{o.quantity}</td>
-                                  <td className="p-3 text-right font-mono text-slate-350">₹{o.unitPrice.toFixed(2)}</td>
-                                  <td className="p-3 text-right font-mono font-bold text-sky-400">₹{o.totalAmount.toFixed(2)}</td>
-                                  <td className="p-3 text-slate-400">{o.enteredBy?.username || 'Staff'}</td>
-                                  <td className="p-3 text-slate-400" suppressHydrationWarning>{new Date(o.timestamp).toLocaleString()}</td>
+                            </thead>
+                            <tbody className="divide-y divide-slate-800/40">
+                              {filteredOilSales.length === 0 ? (
+                                <tr>
+                                  <td colSpan={6} className="p-4 text-center text-slate-500">No oil sales logged for this filter selection.</td>
                                 </tr>
-                              ))
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
+                              ) : (
+                                filteredOilSales.map((o: any, idx: number) => (
+                                  <tr key={idx} className="hover:bg-slate-950/20">
+                                    <td className="p-3 font-bold text-slate-200">{o.productName}</td>
+                                    <td className="p-3 text-right font-mono text-slate-350">{o.quantity}</td>
+                                    <td className="p-3 text-right font-mono text-slate-350">₹{o.unitPrice.toFixed(2)}</td>
+                                    <td className="p-3 text-right font-mono font-bold text-sky-400">₹{o.totalAmount.toFixed(2)}</td>
+                                    <td className="p-3 text-slate-400">{o.enteredBy?.username || 'Staff'}</td>
+                                    <td className="p-3 text-slate-400" suppressHydrationWarning>{new Date(o.timestamp).toLocaleString()}</td>
+                                  </tr>
+                                ))
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
                     </div>
 
-                    {/* SECTION 7: CREDIT / CUSTOMER LEDGER VERIFICATION CARD */}
-                    <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden space-y-4 p-6">
+                    {/* SECTION 5: CREDIT LEDGER REPORT */}
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden p-6 space-y-4">
                       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
                         <div>
                           <h3 className="font-extrabold text-white text-base">Credit & Customer Ledger Verification</h3>
                           <p className="text-xs text-slate-400 mt-0.5">Tracks credit sales (debits) and cash collections (credits) for customer transport accounts.</p>
                         </div>
 
-                        <div className="flex items-center gap-4 text-xs font-mono">
+                        <div className="flex flex-wrap items-center gap-4 text-xs font-mono">
                           <div className="bg-amber-950/40 px-3 py-1.5 rounded-lg border border-amber-500/30">
-                            <span className="text-amber-400 font-semibold block text-[10px]">Credit Given Today</span>
+                            <span className="text-amber-400 font-semibold block text-[10px]">Credit Given</span>
                             <span className="font-bold text-amber-300">₹{creditSalesAmount.toFixed(2)}</span>
                           </div>
                           <div className="bg-emerald-950/40 px-3 py-1.5 rounded-lg border border-emerald-500/30">
-                            <span className="text-emerald-400 font-semibold block text-[10px]">Collections Today</span>
+                            <span className="text-emerald-400 font-semibold block text-[10px]">Collections</span>
                             <span className="font-bold text-emerald-300">₹{creditCollectionsCash.toFixed(2)}</span>
                           </div>
                           <div className="bg-indigo-950/40 px-3 py-1.5 rounded-lg border border-indigo-500/30">
                             <span className="text-indigo-400 font-semibold block text-[10px]">Net Outstanding Added</span>
                             <span className="font-bold text-indigo-200">₹{netOutstandingAdded.toFixed(2)}</span>
                           </div>
+                          <button
+                            onClick={() => setShowCreditDetails(!showCreditDetails)}
+                            className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
+                          >
+                            <Eye className="h-3.5 w-3.5 text-amber-400" />
+                            {showCreditDetails ? 'Hide Ledger' : `View ${filteredCreditTrans.length} Transactions`}
+                          </button>
                         </div>
                       </div>
 
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-left text-xs border-collapse">
-                          <thead>
-                            <tr className="bg-slate-950 text-slate-400 uppercase font-bold border-b border-slate-800">
-                              <th className="p-3">Customer / Company</th>
-                              <th className="p-3">Indent / Slip #</th>
-                              <th className="p-3">Product</th>
-                              <th className="p-3 text-right">Qty / Litres</th>
-                              <th className="p-3 text-right">Rate</th>
-                              <th className="p-3 text-right">Credit Sale (+)</th>
-                              <th className="p-3 text-right">Collection (-)</th>
-                              <th className="p-3">Entered By</th>
-                              <th className="p-3">Timestamp</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-800/40">
-                            {creditTrans.length === 0 ? (
-                              <tr>
-                                <td colSpan={9} className="p-4 text-center text-slate-500">No credit transactions recorded for this duty session.</td>
+                      {showCreditDetails && (
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-left text-xs border-collapse">
+                            <thead>
+                              <tr className="bg-slate-950 text-slate-400 uppercase font-bold border-b border-slate-800">
+                                <th className="p-3">Customer / Company</th>
+                                <th className="p-3">Indent / Slip #</th>
+                                <th className="p-3">Product</th>
+                                <th className="p-3 text-right">Qty / Litres</th>
+                                <th className="p-3 text-right">Rate</th>
+                                <th className="p-3 text-right">Credit Sale (+)</th>
+                                <th className="p-3 text-right">Collection (-)</th>
+                                <th className="p-3">Entered By</th>
+                                <th className="p-3">Timestamp</th>
                               </tr>
-                            ) : (
-                              creditTrans.map((t: any, idx: number) => (
-                                <tr key={idx} className="hover:bg-slate-950/20">
-                                  <td className="p-3 font-bold text-white">{t.customerName || t.customer?.name}</td>
-                                  <td className="p-3 font-mono text-indigo-300 font-bold">{t.indentNumber || '-'}</td>
-                                  <td className="p-3 text-slate-300">{t.productName || (t.transactionType === 'CREDIT_SALE' ? 'Fuel/Oil' : 'Cash Collection')}</td>
-                                  <td className="p-3 text-right font-mono text-slate-300">{t.quantity ? `${t.quantity.toFixed(2)} L` : '-'}</td>
-                                  <td className="p-3 text-right font-mono text-slate-400">{t.unitPrice ? `₹${t.unitPrice.toFixed(2)}` : '-'}</td>
-                                  <td className="p-3 text-right font-mono font-bold text-amber-400">
-                                    {t.transactionType === 'CREDIT_SALE' ? `+₹${t.amount.toFixed(2)}` : '-'}
-                                  </td>
-                                  <td className="p-3 text-right font-mono font-bold text-emerald-400">
-                                    {t.transactionType === 'COLLECTION' ? `-₹${t.amount.toFixed(2)}` : '-'}
-                                  </td>
-                                  <td className="p-3 text-slate-400 text-[11px]">{t.enteredBy?.username || 'Manager'}</td>
-                                  <td className="p-3 text-slate-400" suppressHydrationWarning>{new Date(t.timestamp).toLocaleString()}</td>
+                            </thead>
+                            <tbody className="divide-y divide-slate-800/40">
+                              {filteredCreditTrans.length === 0 ? (
+                                <tr>
+                                  <td colSpan={9} className="p-4 text-center text-slate-500">No credit transactions recorded for this filter selection.</td>
                                 </tr>
-                              ))
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
+                              ) : (
+                                filteredCreditTrans.map((t: any, idx: number) => (
+                                  <tr key={idx} className="hover:bg-slate-950/20">
+                                    <td className="p-3 font-bold text-white">{t.customerName || t.customer?.name}</td>
+                                    <td className="p-3 font-mono text-indigo-300 font-bold">{t.indentNumber || '-'}</td>
+                                    <td className="p-3 text-slate-300">{t.productName || (t.transactionType === 'CREDIT_SALE' ? 'Fuel/Oil' : 'Cash Collection')}</td>
+                                    <td className="p-3 text-right font-mono text-slate-300">{t.quantity ? `${t.quantity.toFixed(2)} L` : '-'}</td>
+                                    <td className="p-3 text-right font-mono text-slate-400">{t.unitPrice ? `₹${t.unitPrice.toFixed(2)}` : '-'}</td>
+                                    <td className="p-3 text-right font-mono font-bold text-amber-400">
+                                      {t.transactionType === 'CREDIT_SALE' ? `+₹${t.amount.toFixed(2)}` : '-'}
+                                    </td>
+                                    <td className="p-3 text-right font-mono font-bold text-emerald-400">
+                                      {t.transactionType === 'COLLECTION' ? `-₹${t.amount.toFixed(2)}` : '-'}
+                                    </td>
+                                    <td className="p-3 text-slate-400 text-[11px]">{t.enteredBy?.username || 'Manager'}</td>
+                                    <td className="p-3 text-slate-400" suppressHydrationWarning>{new Date(t.timestamp).toLocaleString()}</td>
+                                  </tr>
+                                ))
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
                     </div>
 
-                    {/* SECTION 8: OPERATING EXPENSES CARD */}
+                    {/* SECTION 6: OPERATING EXPENSES REPORT */}
                     <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden">
-                      <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900/50">
+                      <div className="p-6 border-b border-slate-800 flex flex-wrap justify-between items-center bg-slate-900/50 gap-4">
                         <div>
-                          <h3 className="font-extrabold text-white text-base">Shift Operating Expenses Verification</h3>
-                          <p className="text-xs text-slate-400 mt-0.5">Bunk operating payouts logged by supervisor.</p>
+                          <h3 className="font-extrabold text-white text-base">Operating Expenses Report</h3>
+                          <p className="text-xs text-slate-400 mt-0.5">Bunk operational payouts logged during the shift.</p>
                         </div>
-                        <span className="text-sm font-black text-red-400 font-mono">
-                          TOTAL EXPENSES: ₹{totalExpenses.toFixed(2)}
-                        </span>
+
+                        <div className="flex flex-wrap items-center gap-4">
+                          <div className="text-right">
+                            <span className="text-sm font-black text-red-400 font-mono block">
+                              TOTAL EXPENSES: ₹{totalExpenses.toFixed(2)}
+                            </span>
+                            <span className="text-[10px] text-slate-400 font-mono">
+                              Cash: ₹{cashExpenses.toFixed(2)} | Digital: ₹{(totalExpenses - cashExpenses).toFixed(2)}
+                            </span>
+                          </div>
+
+                          <button
+                            onClick={() => setShowExpenseDetails(!showExpenseDetails)}
+                            className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
+                          >
+                            <Eye className="h-3.5 w-3.5 text-red-400" />
+                            {showExpenseDetails ? 'Hide Receipts' : `View ${filteredExpenses.length} Receipts`}
+                          </button>
+                        </div>
                       </div>
 
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-left text-xs border-collapse">
-                          <thead>
-                            <tr className="bg-slate-950 text-slate-400 uppercase font-bold border-b border-slate-800">
-                              <th className="p-3">Category</th>
-                              <th className="p-3">Description</th>
-                              <th className="p-3 text-right">Amount</th>
-                              <th className="p-3">Payment Method</th>
-                              <th className="p-3">Logged By</th>
-                              <th className="p-3">Timestamp</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-800/40">
-                            {expensesList.length === 0 ? (
-                              <tr>
-                                <td colSpan={6} className="p-4 text-center text-slate-500">No expenses logged for this duty session.</td>
-                              </tr>
-                            ) : (
-                              expensesList.map((e: any, idx: number) => (
-                                <tr key={idx} className="hover:bg-slate-950/20">
-                                  <td className="p-3 font-bold text-slate-200">{e.category?.name || 'General'}</td>
-                                  <td className="p-3 text-slate-300">{e.description}</td>
-                                  <td className="p-3 text-right font-mono font-bold text-red-400">₹{e.amount.toFixed(2)}</td>
-                                  <td className="p-3"><span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-bold uppercase tracking-wider text-[9px]">{e.paymentMethod}</span></td>
-                                  <td className="p-3 text-slate-400">{e.enteredBy?.username || 'Manager'}</td>
-                                  <td className="p-3 text-slate-400" suppressHydrationWarning>{new Date(e.timestamp).toLocaleString()}</td>
-                                </tr>
-                              ))
-                            )}
-                          </tbody>
-                        </table>
+                      {/* Category Breakdown Pills */}
+                      <div className="p-4 bg-slate-950/60 border-b border-slate-800 flex flex-wrap items-center gap-2 text-xs">
+                        <span className="text-slate-400 font-bold text-[10px] uppercase">Categories:</span>
+                        {Object.keys(categoryBreakdown).length === 0 ? (
+                          <span className="text-slate-500 italic text-[11px]">No expense categories logged.</span>
+                        ) : (
+                          Object.entries(categoryBreakdown).map(([cat, amt], i) => (
+                            <span key={i} className="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 font-medium text-[11px]">
+                              {cat}: <strong className="text-red-400 font-mono">₹{amt.toFixed(2)}</strong>
+                            </span>
+                          ))
+                        )}
                       </div>
+
+                      {showExpenseDetails && (
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-left text-xs border-collapse">
+                            <thead>
+                              <tr className="bg-slate-950 text-slate-400 uppercase font-bold border-b border-slate-800">
+                                <th className="p-3">Category</th>
+                                <th className="p-3">Description</th>
+                                <th className="p-3 text-right">Amount</th>
+                                <th className="p-3">Payment Method</th>
+                                <th className="p-3">Logged By</th>
+                                <th className="p-3">Timestamp</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-800/40">
+                              {filteredExpenses.length === 0 ? (
+                                <tr>
+                                  <td colSpan={6} className="p-4 text-center text-slate-500">No expenses logged for this filter selection.</td>
+                                </tr>
+                              ) : (
+                                filteredExpenses.map((e: any, idx: number) => (
+                                  <tr key={idx} className="hover:bg-slate-950/20">
+                                    <td className="p-3 font-bold text-slate-200">{e.category?.name || 'General'}</td>
+                                    <td className="p-3 text-slate-300">{e.description}</td>
+                                    <td className="p-3 text-right font-mono font-bold text-red-400">₹{e.amount.toFixed(2)}</td>
+                                    <td className="p-3"><span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-bold uppercase tracking-wider text-[9px]">{e.paymentMethod}</span></td>
+                                    <td className="p-3 text-slate-400">{e.enteredBy?.username || 'Manager'}</td>
+                                    <td className="p-3 text-slate-400" suppressHydrationWarning>{new Date(e.timestamp).toLocaleString()}</td>
+                                  </tr>
+                                ))
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
                     </div>
 
-                    {/* SECTION 9: DIGITAL PAYMENTS SUMMARY */}
-                    <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl flex flex-wrap items-center justify-between gap-6">
-                      <div className="flex items-center gap-3">
-                        <div className="h-10 w-10 bg-sky-500/20 text-sky-400 rounded-xl border border-sky-500/30 flex items-center justify-center">
-                          <CreditCard className="h-5 w-5" />
+                    {/* SECTION 7: DIGITAL PAYMENTS BREAKDOWN */}
+                    <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">
+                      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
+                        <div className="flex items-center gap-3">
+                          <div className="h-10 w-10 bg-sky-500/20 text-sky-400 rounded-xl border border-sky-500/30 flex items-center justify-center">
+                            <CreditCard className="h-5 w-5" />
+                          </div>
+                          <div>
+                            <h4 className="font-extrabold text-white text-sm">Digital Payments Summary (Non-Cash Receipts)</h4>
+                            <p className="text-xs text-slate-400">PhonePe, GPay, Paytm, Cards, Bank Transfer collections (excluded from physical cash drawer count).</p>
+                          </div>
                         </div>
-                        <div>
-                          <h4 className="font-extrabold text-white text-sm">Digital Payments Summary (Non-Cash)</h4>
-                          <p className="text-xs text-slate-400">PhonePe, GPay, Paytm, Cards, Bank Transfer collections (excluded from physical cash drawer count).</p>
-                        </div>
-                      </div>
 
-                      <div className="flex items-center gap-4 font-mono text-xs">
-                        <div className="bg-slate-950 px-4 py-2 rounded-xl border border-slate-800">
-                          <span className="text-slate-400 block text-[10px]">TOTAL DIGITAL RECEIPTS</span>
+                        <div className="bg-slate-950 px-4 py-2 rounded-xl border border-slate-800 text-right font-mono">
+                          <span className="text-slate-400 block text-[10px] uppercase font-bold">TOTAL DIGITAL RECEIPTS</span>
                           <span className="font-bold text-sky-300 text-base">₹{digitalPaymentsSum.toFixed(2)}</span>
                         </div>
                       </div>
+
+                      {/* Digital Methods Grid */}
+                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 text-xs font-mono">
+                        {Object.entries(digitalBreakdown).map(([method, val]) => (
+                          <div key={method} className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-center">
+                            <span className="text-slate-400 font-sans font-medium block text-[11px]">{method}</span>
+                            <span className="font-bold text-sky-300 block mt-1">₹{val.toFixed(2)}</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
 
-                    {/* SECTION 10: CASH RECONCILIATION BREAKDOWN FORMULA */}
-                    <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">
-                      <h3 className="font-extrabold text-white text-base border-b border-slate-800 pb-3 flex items-center gap-2">
-                        <TrendingUp className="h-5 w-5 text-indigo-400" />
-                        Final Shift Cash Reconciliation Audit Formula
-                      </h3>
+                    {/* SECTION 8: FINAL OWNER CASH RECONCILIATION & BANK DEPOSIT AUDIT */}
+                    <div className="bg-gradient-to-r from-slate-900 via-indigo-950/40 to-slate-900 border border-indigo-500/30 p-6 rounded-2xl shadow-2xl space-y-6">
+                      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800/80 pb-4">
+                        <div className="flex items-center gap-3">
+                          <div className="h-10 w-10 bg-emerald-500/20 text-emerald-400 rounded-xl border border-emerald-500/30 flex items-center justify-center">
+                            <Wallet className="h-5 w-5" />
+                          </div>
+                          <div>
+                            <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+                              Final Shift Cash Reconciliation & Bank Deposit Audit
+                            </h3>
+                            <p className="text-xs text-slate-400">Authoritative calculation of physical cash vs bank deposit readiness.</p>
+                          </div>
+                        </div>
 
+                        {/* Reconciliation Status Pill */}
+                        <div>
+                          {cashDiff === 0 ? (
+                            <span className="px-4 py-1.5 rounded-full text-xs font-black bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center gap-1.5 shadow-lg">
+                              <CheckCircle2 className="h-4 w-4" /> BALANCED (₹0 DIFF)
+                            </span>
+                          ) : cashDiff < 0 ? (
+                            <span className="px-4 py-1.5 rounded-full text-xs font-black bg-red-500/20 text-red-400 border border-red-500/40 flex items-center gap-1.5 shadow-lg">
+                              <AlertTriangle className="h-4 w-4" /> CASH SHORTAGE (-₹{Math.abs(cashDiff).toLocaleString(undefined, { minimumFractionDigits: 2 })})
+                            </span>
+                          ) : (
+                            <span className="px-4 py-1.5 rounded-full text-xs font-black bg-indigo-500/20 text-indigo-400 border border-indigo-500/40 flex items-center gap-1.5 shadow-lg">
+                              <TrendingUp className="h-4 w-4" /> CASH SURPLUS (+₹{cashDiff.toLocaleString(undefined, { minimumFractionDigits: 2 })})
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Audit Formula Grid */}
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-xs font-mono">
-                        <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
-                          <h4 className="font-sans font-bold text-emerald-400 uppercase tracking-wider text-[11px]">Revenue Inflows (+)</h4>
-                          <div className="flex justify-between text-slate-300"><span>Fuel Sales:</span><span>₹{totalFuelSales.toFixed(2)}</span></div>
-                          <div className="flex justify-between text-slate-300"><span>Oil Sales:</span><span>₹{totalOilSales.toFixed(2)}</span></div>
-                          <div className="flex justify-between text-slate-300"><span>Credit Cash Collections:</span><span>+₹{creditCollectionsCash.toFixed(2)}</span></div>
+                        <div className="bg-slate-950/80 p-4 rounded-xl border border-slate-800 space-y-2">
+                          <h4 className="font-sans font-bold text-emerald-400 uppercase tracking-wider text-[11px]">Gross Revenue Inflows (+)</h4>
+                          <div className="flex justify-between text-slate-300"><span>Fuel Sales Amount:</span><span>₹{totalFuelSales.toFixed(2)}</span></div>
+                          <div className="flex justify-between text-slate-300"><span>Oil / Lubricant Sales:</span><span>₹{totalOilSales.toFixed(2)}</span></div>
+                          <div className="flex justify-between text-slate-300"><span>Credit Collections (Cash):</span><span>+₹{creditCollectionsCash.toFixed(2)}</span></div>
                           <div className="flex justify-between text-white font-bold border-t border-slate-800 pt-2 text-sm"><span>TOTAL GROSS INFLOW:</span><span>₹{grossRevenueInflow.toFixed(2)}</span></div>
                         </div>
 
-                        <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
+                        <div className="bg-slate-950/80 p-4 rounded-xl border border-slate-800 space-y-2">
                           <h4 className="font-sans font-bold text-amber-400 uppercase tracking-wider text-[11px]">Deductions & Non-Cash (-)</h4>
                           <div className="flex justify-between text-slate-300"><span>Credit Sales Given:</span><span>-₹{creditSalesAmount.toFixed(2)}</span></div>
-                          <div className="flex justify-between text-slate-300"><span>Digital Payments:</span><span>-₹{digitalPaymentsSum.toFixed(2)}</span></div>
+                          <div className="flex justify-between text-slate-300"><span>Digital Payments (Non-Cash):</span><span>-₹{digitalPaymentsSum.toFixed(2)}</span></div>
                           <div className="flex justify-between text-slate-300"><span>Testing / Sample Value:</span><span>-₹{testingValue.toFixed(2)}</span></div>
-                          <div className="flex justify-between text-slate-300"><span>Operating Expenses:</span><span>-₹{cashExpenses.toFixed(2)}</span></div>
+                          <div className="flex justify-between text-slate-300"><span>Operating Expenses (Cash):</span><span>-₹{cashExpenses.toFixed(2)}</span></div>
                           <div className="flex justify-between text-white font-bold border-t border-slate-800 pt-2 text-sm"><span>TOTAL DEDUCTIONS:</span><span>₹{totalDeductions.toFixed(2)}</span></div>
+                        </div>
+                      </div>
+
+                      {/* Bank Deposit & Cash Summary Bar */}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs pt-2">
+                        <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                          <span className="text-slate-400 font-medium block">Expected Physical Cash</span>
+                          <span className="font-mono font-bold text-indigo-300 block mt-1 text-sm">₹{expectedCash.toFixed(2)}</span>
+                        </div>
+                        <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                          <span className="text-slate-400 font-medium block">Actual Cash Drawer Count</span>
+                          <span className="font-mono font-bold text-white block mt-1 text-sm">₹{actualCash.toFixed(2)}</span>
+                        </div>
+                        <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                          <span className="text-slate-400 font-medium block">Discrepancy / Variance</span>
+                          <span className={`font-mono font-bold block mt-1 text-sm ${cashDiff < 0 ? 'text-red-400' : cashDiff > 0 ? 'text-indigo-400' : 'text-emerald-400'}`}>
+                            {cashDiff === 0 ? '₹0.00' : `${cashDiff > 0 ? '+' : ''}₹${cashDiff.toFixed(2)}`}
+                          </span>
+                        </div>
+                        <div className="bg-emerald-950/40 p-3 rounded-xl border border-emerald-500/40 text-center">
+                          <span className="text-emerald-400 font-bold uppercase tracking-wider text-[9px] block">EXPECTED BANK DEPOSIT</span>
+                          <span className="font-mono font-black text-emerald-300 text-sm block mt-0.5">₹{actualCash.toFixed(2)}</span>
                         </div>
                       </div>
                     </div>
@@ -1860,17 +2195,43 @@ export default function DashboardContainer({
                   </button>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
-                  {/* Left Column: Gun readings & Live stats */}
-                  <div className="lg:col-span-2 space-y-8">
+                <div className="space-y-6">
+                  {/* ACTIVE DUTY STATUS BANNER */}
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-wrap items-center justify-between gap-4">
+                    <div className="flex items-center gap-3">
+                      <div className="h-10 w-10 bg-indigo-500/20 text-indigo-400 rounded-xl border border-indigo-500/30 flex items-center justify-center font-bold">
+                        #{activeDuty.dutyNumber}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h2 className="text-base font-extrabold text-white uppercase tracking-wider">ACTIVE DUTY #{activeDuty.dutyNumber}</h2>
+                          <span className="px-2 py-0.5 rounded text-[10px] font-extrabold uppercase bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                            LIVE 24-HOUR SESSION
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-400 font-mono mt-0.5">
+                          Started: {new Date(activeDuty.startTime).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })} {new Date(activeDuty.startTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })} → OPEN
+                        </p>
+                      </div>
+                    </div>
 
-                    {/* Shift Overview & Daily Fuel Sales Summary */}
-                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
-                      <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-                        <h3 className="font-extrabold text-white text-base flex items-center gap-2">
-                          <TrendingUp className="h-5 w-5 text-indigo-400" />
-                          Daily Fuel Sales Summary (Live Duty #{activeDuty.dutyNumber})
-                        </h3>
+                    <div className="bg-slate-950 px-4 py-2 rounded-xl border border-slate-800 text-right">
+                      <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">CURRENT DUTY ISOLATION</span>
+                      <span className="text-xs font-bold text-indigo-400">Entries for this active 24-hour duty only.</span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
+                    {/* Left Column: Gun readings & Live stats */}
+                    <div className="lg:col-span-2 space-y-8">
+
+                      {/* Shift Overview & Daily Fuel Sales Summary */}
+                      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+                        <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+                          <h3 className="font-extrabold text-white text-base flex items-center gap-2">
+                            <TrendingUp className="h-5 w-5 text-indigo-400" />
+                            Daily Fuel Sales Summary (Live Duty #{activeDuty.dutyNumber})
+                          </h3>
                         <span className="text-xs text-indigo-400 font-bold bg-indigo-500/10 px-2.5 py-1 rounded border border-indigo-500/20">
                           Manager: {activeDuty.manager.username}
                         </span>
@@ -2523,9 +2884,10 @@ export default function DashboardContainer({
 
                   </div>
                 </div>
-              )}
-            </div>
-          )}
+              </div>
+            )}
+          </div>
+        )}
 
           {/* TAB 3: ACC HISTORY LOGS */}
           {activeTab === 'history' && (
@@ -2599,7 +2961,27 @@ export default function DashboardContainer({
 
           {/* TAB 4: REPORTS LEDGER */}
           {activeTab === 'reports' && (
-            <div className="space-y-8">
+            <div className="space-y-6">
+              {/* REPORTS LEDGER STATUS BANNER */}
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-wrap items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 bg-amber-500/20 text-amber-400 rounded-xl border border-amber-500/30 flex items-center justify-center font-bold">
+                    <FileText className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h2 className="text-base font-extrabold text-white uppercase tracking-wider">PERMANENT REPORTS LEDGER</h2>
+                    <p className="text-xs text-slate-400 font-mono mt-0.5">
+                      Immutable historical audit trail across all 24-hour duty sessions
+                    </p>
+                  </div>
+                </div>
+
+                <div className="bg-slate-950 px-4 py-2 rounded-xl border border-slate-800 text-right">
+                  <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">HISTORICAL DATA ISOLATION</span>
+                  <span className="text-xs font-bold text-amber-400">Permanent historical records of all completed duties.</span>
+                </div>
+              </div>
+
               {/* Report Tabs */}
               <div className="flex border-b border-slate-800 gap-2 shrink-0 overflow-x-auto pb-px">
                 {[
@@ -2625,102 +3007,1300 @@ export default function DashboardContainer({
               </div>
 
               {/* SALES REPORT SUB-TAB */}
-              {reportsTab === 'sales' && (
-                <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden">
-                  <div className="p-6 border-b border-slate-800 flex justify-between items-center">
-                    <div>
-                      <h4 className="font-extrabold text-white text-base">Fuel Meter Sales Report</h4>
-                      <p className="text-xs text-slate-400 mt-1">Detailed volume and value calculations for each gun across completed duties.</p>
+              {reportsTab === 'sales' && (() => {
+                // 1. Gather all available duties (historical + active)
+                const combinedDuties = [
+                  ...historicalDuties,
+                  ...(activeDuty && !historicalDuties.some((d: any) => d.id === activeDuty.id) ? [activeDuty] : [])
+                ];
+
+                // 2. Flatten and filter meter reading records
+                const filteredReadingRows: Array<{
+                  duty: any;
+                  reading: any;
+                  dateStr: string;
+                  monthStr: string;
+                  yearStr: string;
+                  pumpId: string;
+                  pumpName: string;
+                  fuelType: string;
+                  assignedStaff: any;
+                }> = [];
+
+                for (const d of combinedDuties) {
+                  const dDate = new Date(d.startTime);
+                  const dStr = dDate.toLocaleDateString('en-CA'); // YYYY-MM-DD
+                  const dMonth = dStr.slice(0, 7);
+                  const dYear = dStr.slice(0, 4);
+
+                  // Filter by date / preset
+                  if (fuelReportDate && dStr !== fuelReportDate) continue;
+                  if (fuelReportStartDate && dStr < fuelReportStartDate) continue;
+                  if (fuelReportEndDate && dStr > fuelReportEndDate) continue;
+                  if (fuelReportMonth && dMonth !== fuelReportMonth) continue;
+                  if (fuelReportYear && dYear !== fuelReportYear) continue;
+
+                  for (const mr of d.meterReadings || []) {
+                    const fType = mr.gun?.fuelType || 'MS';
+                    const pId = mr.gun?.pumpId || mr.gun?.pump?.id || 'p1';
+                    const pName = mr.gun?.pump?.name || (pId === 'p1' ? 'Pump 1' : pId === 'p2' ? 'Pump 2' : 'Pump');
+
+                    // Find assigned staff for this pump & fuel type in duty
+                    const assignment = (d.assignments || []).find((as: any) =>
+                      (as.pumpId === pId || as.pump?.id === pId) && as.fuelType === fType
+                    );
+                    const staffObj = assignment?.staff;
+
+                    // Apply Fuel Type filter
+                    if (fuelReportFuelType !== 'ALL' && fType !== fuelReportFuelType) continue;
+
+                    // Apply Pump filter
+                    if (fuelReportPump !== 'ALL' && pId !== fuelReportPump && pName !== fuelReportPump) continue;
+
+                    // Apply Staff filter
+                    if (fuelReportStaff !== 'ALL' && staffObj?.id !== fuelReportStaff && staffObj?.name !== fuelReportStaff) continue;
+
+                    filteredReadingRows.push({
+                      duty: d,
+                      reading: mr,
+                      dateStr: dStr,
+                      monthStr: dMonth,
+                      yearStr: dYear,
+                      pumpId: pId,
+                      pumpName: pName,
+                      fuelType: fType,
+                      assignedStaff: staffObj
+                    });
+                  }
+                }
+
+                // 3. Overall KPI Calculations
+                const msRows = filteredReadingRows.filter(r => r.fuelType === 'MS');
+                const hsdRows = filteredReadingRows.filter(r => r.fuelType === 'HSD');
+
+                const totalMsLitres = msRows.reduce((s, r) => s + (r.reading.litresSold || Math.max(0, r.reading.currentReading - r.reading.previousReading)), 0);
+                const totalMsRevenue = msRows.reduce((s, r) => s + (r.reading.salesAmount || Math.max(0, r.reading.currentReading - r.reading.previousReading) * r.reading.priceUsed), 0);
+
+                const totalHsdLitres = hsdRows.reduce((s, r) => s + (r.reading.litresSold || Math.max(0, r.reading.currentReading - r.reading.previousReading)), 0);
+                const totalHsdRevenue = hsdRows.reduce((s, r) => s + (r.reading.salesAmount || Math.max(0, r.reading.currentReading - r.reading.previousReading) * r.reading.priceUsed), 0);
+
+                const totalFuelLitres = totalMsLitres + totalHsdLitres;
+                const totalFuelRevenue = totalMsRevenue + totalHsdRevenue;
+
+                // 4. Sales By Pump Calculation
+                const salesByPumpMap: Record<string, {
+                  pumpId: string;
+                  pumpName: string;
+                  msLitres: number;
+                  msRevenue: number;
+                  hsdLitres: number;
+                  hsdRevenue: number;
+                  totalLitres: number;
+                  totalRevenue: number;
+                }> = {};
+
+                // Pre-populate with static pumps so all pumps are visible
+                (staticData.pumps || [{ id: 'p1', name: 'Pump 1' }, { id: 'p2', name: 'Pump 2' }]).forEach((p: any) => {
+                  salesByPumpMap[p.id] = {
+                    pumpId: p.id,
+                    pumpName: p.name,
+                    msLitres: 0,
+                    msRevenue: 0,
+                    hsdLitres: 0,
+                    hsdRevenue: 0,
+                    totalLitres: 0,
+                    totalRevenue: 0
+                  };
+                });
+
+                filteredReadingRows.forEach(r => {
+                  const pKey = r.pumpId;
+                  if (!salesByPumpMap[pKey]) {
+                    salesByPumpMap[pKey] = {
+                      pumpId: pKey,
+                      pumpName: r.pumpName,
+                      msLitres: 0,
+                      msRevenue: 0,
+                      hsdLitres: 0,
+                      hsdRevenue: 0,
+                      totalLitres: 0,
+                      totalRevenue: 0
+                    };
+                  }
+                  const litres = r.reading.litresSold || Math.max(0, r.reading.currentReading - r.reading.previousReading);
+                  const revenue = r.reading.salesAmount || (litres * r.reading.priceUsed);
+
+                  if (r.fuelType === 'MS') {
+                    salesByPumpMap[pKey].msLitres += litres;
+                    salesByPumpMap[pKey].msRevenue += revenue;
+                  } else {
+                    salesByPumpMap[pKey].hsdLitres += litres;
+                    salesByPumpMap[pKey].hsdRevenue += revenue;
+                  }
+                  salesByPumpMap[pKey].totalLitres += litres;
+                  salesByPumpMap[pKey].totalRevenue += revenue;
+                });
+
+                // 5. Sales By Staff Calculation
+                const salesByStaffMap: Record<string, {
+                  staffId: string;
+                  staffName: string;
+                  pumps: Set<string>;
+                  msLitres: number;
+                  hsdLitres: number;
+                  totalLitres: number;
+                  totalRevenue: number;
+                }> = {};
+
+                filteredReadingRows.forEach(r => {
+                  const sId = r.assignedStaff?.id || 'UNASSIGNED';
+                  const sName = r.assignedStaff?.name || 'Unassigned / System';
+
+                  if (!salesByStaffMap[sId]) {
+                    salesByStaffMap[sId] = {
+                      staffId: sId,
+                      staffName: sName,
+                      pumps: new Set(),
+                      msLitres: 0,
+                      hsdLitres: 0,
+                      totalLitres: 0,
+                      totalRevenue: 0
+                    };
+                  }
+                  salesByStaffMap[sId].pumps.add(r.pumpName);
+
+                  const litres = r.reading.litresSold || Math.max(0, r.reading.currentReading - r.reading.previousReading);
+                  const revenue = r.reading.salesAmount || (litres * r.reading.priceUsed);
+
+                  if (r.fuelType === 'MS') {
+                    salesByStaffMap[sId].msLitres += litres;
+                  } else {
+                    salesByStaffMap[sId].hsdLitres += litres;
+                  }
+                  salesByStaffMap[sId].totalLitres += litres;
+                  salesByStaffMap[sId].totalRevenue += revenue;
+                });
+
+                // 6. Sales By Period Calculation (Date-wise / Month-wise / Year-wise)
+                const salesByPeriodMap: Record<string, {
+                  periodKey: string;
+                  msLitres: number;
+                  hsdLitres: number;
+                  totalLitres: number;
+                  totalRevenue: number;
+                }> = {};
+
+                filteredReadingRows.forEach(r => {
+                  const periodKey = fuelReportGroupBy === 'YEAR' ? r.yearStr : fuelReportGroupBy === 'MONTH' ? r.monthStr : r.dateStr;
+
+                  if (!salesByPeriodMap[periodKey]) {
+                    salesByPeriodMap[periodKey] = {
+                      periodKey,
+                      msLitres: 0,
+                      hsdLitres: 0,
+                      totalLitres: 0,
+                      totalRevenue: 0
+                    };
+                  }
+                  const litres = r.reading.litresSold || Math.max(0, r.reading.currentReading - r.reading.previousReading);
+                  const revenue = r.reading.salesAmount || (litres * r.reading.priceUsed);
+
+                  if (r.fuelType === 'MS') {
+                    salesByPeriodMap[periodKey].msLitres += litres;
+                  } else {
+                    salesByPeriodMap[periodKey].hsdLitres += litres;
+                  }
+                  salesByPeriodMap[periodKey].totalLitres += litres;
+                  salesByPeriodMap[periodKey].totalRevenue += revenue;
+                });
+
+                const sortedPeriods = Object.values(salesByPeriodMap).sort((a, b) => b.periodKey.localeCompare(a.periodKey));
+
+                // 7. Drill-Down Filtered Rows
+                let activeDrillDownRows = filteredReadingRows;
+                if (selectedDrillDownKey && selectedDrillDownType) {
+                  if (selectedDrillDownType === 'PUMP') {
+                    activeDrillDownRows = filteredReadingRows.filter(r => r.pumpId === selectedDrillDownKey || r.pumpName === selectedDrillDownKey);
+                  } else if (selectedDrillDownType === 'STAFF') {
+                    activeDrillDownRows = filteredReadingRows.filter(r => (r.assignedStaff?.id || 'UNASSIGNED') === selectedDrillDownKey);
+                  } else if (selectedDrillDownType === 'PERIOD') {
+                    activeDrillDownRows = filteredReadingRows.filter(r => {
+                      const pKey = fuelReportGroupBy === 'YEAR' ? r.yearStr : fuelReportGroupBy === 'MONTH' ? r.monthStr : r.dateStr;
+                      return pKey === selectedDrillDownKey;
+                    });
+                  }
+                }
+
+                return (
+                  <div className="space-y-8">
+                    {/* REPORT HEADER & EXPORT BAR */}
+                    <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl flex flex-wrap items-center justify-between gap-4">
+                      <div className="flex items-center gap-3">
+                        <div className="h-10 w-10 bg-indigo-600/20 text-indigo-400 rounded-xl border border-indigo-500/30 flex items-center justify-center">
+                          <BarChart3 className="h-5 w-5" />
+                        </div>
+                        <div>
+                          <h4 className="font-extrabold text-white text-base uppercase tracking-wider">Fuel Meter Sales Verification Report</h4>
+                          <p className="text-xs text-slate-400">Owner Executive Summary → Verification → Granular Meter Drill-Down</p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleExportExcel('sales-report-table', 'Fuel_Sales_Report')}
+                          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all shadow-md shadow-indigo-600/20"
+                        >
+                          <FileSpreadsheet className="h-4 w-4" />
+                          Export Excel Report
+                        </button>
+                      </div>
                     </div>
-                    <button
-                      onClick={() => handleExportExcel('sales-report-table', 'Fuel_Sales_Report')}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-850 text-indigo-400 hover:text-indigo-300 text-xs font-bold transition-all"
-                    >
-                      Export to Excel
-                    </button>
+
+                    {/* FILTER BAR SECTION */}
+                    <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-4">
+                        <div className="flex items-center gap-2">
+                          <Filter className="h-4 w-4 text-indigo-400" />
+                          <span className="text-xs font-bold text-white uppercase tracking-wider">Report Filter Bar</span>
+                        </div>
+
+                        {/* Quick Filter Preset Pills */}
+                        <div className="flex flex-wrap items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800">
+                          {[
+                            { id: 'ALL', label: 'All Time' },
+                            { id: 'TODAY', label: 'Today' },
+                            { id: 'WEEK', label: 'This Week' },
+                            { id: 'MONTH', label: 'This Month' },
+                            { id: 'YEAR', label: 'This Year' },
+                          ].map((p) => (
+                            <button
+                              key={p.id}
+                              onClick={() => handleQuickFilter(p.id as any)}
+                              className={`px-3 py-1 text-[11px] font-bold rounded-lg transition-all ${fuelReportPreset === p.id
+                                  ? 'bg-indigo-600 text-white shadow-sm'
+                                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-850'
+                                }`}
+                            >
+                              {p.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Filter Controls Grid */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-3 text-xs">
+                        {/* Single Date */}
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Single Date</label>
+                          <input
+                            type="date"
+                            value={fuelReportDate}
+                            onChange={(e) => {
+                              setFuelReportDate(e.target.value);
+                              setFuelReportPreset('ALL');
+                            }}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono focus:border-indigo-500 focus:outline-none"
+                          />
+                        </div>
+
+                        {/* Start Date */}
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Start Date</label>
+                          <input
+                            type="date"
+                            value={fuelReportStartDate}
+                            onChange={(e) => {
+                              setFuelReportStartDate(e.target.value);
+                              setFuelReportPreset('ALL');
+                            }}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono focus:border-indigo-500 focus:outline-none"
+                          />
+                        </div>
+
+                        {/* End Date */}
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">End Date</label>
+                          <input
+                            type="date"
+                            value={fuelReportEndDate}
+                            onChange={(e) => {
+                              setFuelReportEndDate(e.target.value);
+                              setFuelReportPreset('ALL');
+                            }}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono focus:border-indigo-500 focus:outline-none"
+                          />
+                        </div>
+
+                        {/* Month Filter */}
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Month</label>
+                          <input
+                            type="month"
+                            value={fuelReportMonth}
+                            onChange={(e) => {
+                              setFuelReportMonth(e.target.value);
+                              setFuelReportPreset('ALL');
+                            }}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono focus:border-indigo-500 focus:outline-none"
+                          />
+                        </div>
+
+                        {/* Pump Filter */}
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Pump</label>
+                          <select
+                            value={fuelReportPump}
+                            onChange={(e) => setFuelReportPump(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-semibold focus:border-indigo-500 focus:outline-none"
+                          >
+                            <option value="ALL">All Pumps</option>
+                            {(staticData.pumps || [{ id: 'p1', name: 'Pump 1' }, { id: 'p2', name: 'Pump 2' }]).map((p: any) => (
+                              <option key={p.id} value={p.id}>{p.name}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* Staff Filter */}
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Staff</label>
+                          <select
+                            value={fuelReportStaff}
+                            onChange={(e) => setFuelReportStaff(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-semibold focus:border-indigo-500 focus:outline-none"
+                          >
+                            <option value="ALL">All Staff</option>
+                            {(staticData.staff || []).map((s: any) => (
+                              <option key={s.id} value={s.id}>{s.name}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* Fuel Type Filter */}
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Fuel Type</label>
+                          <select
+                            value={fuelReportFuelType}
+                            onChange={(e) => setFuelReportFuelType(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-semibold focus:border-indigo-500 focus:outline-none"
+                          >
+                            <option value="ALL">All Types (MS & HSD)</option>
+                            <option value="MS">Petrol (MS)</option>
+                            <option value="HSD">Diesel (HSD)</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* Reset Filters Bar */}
+                      <div className="flex justify-between items-center pt-2">
+                        <div className="text-[11px] text-slate-400 font-mono">
+                          Active matching readings: <span className="font-bold text-indigo-400">{filteredReadingRows.length} entries</span>
+                        </div>
+                        <button
+                          onClick={handleResetFuelFilters}
+                          className="text-[11px] font-bold text-slate-400 hover:text-white transition-all underline underline-offset-4"
+                        >
+                          Clear All Filters
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* EMPTY STATE IF NO MATCHES */}
+                    {filteredReadingRows.length === 0 ? (
+                      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center space-y-4">
+                        <div className="h-12 w-12 bg-slate-800 text-slate-400 rounded-full flex items-center justify-center mx-auto">
+                          <Fuel className="h-6 w-6" />
+                        </div>
+                        <h4 className="text-lg font-bold text-white">No Meter Readings Match Your Filter Criteria</h4>
+                        <p className="text-xs text-slate-400 max-w-md mx-auto">
+                          Adjust your date, pump, staff, or fuel type selection above to display aggregated sales metrics.
+                        </p>
+                        <button
+                          onClick={handleResetFuelFilters}
+                          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all"
+                        >
+                          Reset Filters
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        {/* 1. AGGREGATE EXECUTIVE KPI CARDS */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                          {/* MS Litres & Revenue */}
+                          <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl space-y-2">
+                            <div className="flex justify-between items-center text-xs">
+                              <span className="font-bold text-slate-400 uppercase tracking-wider">Total MS Litres</span>
+                              <span className="px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 text-[10px] font-black">MS</span>
+                            </div>
+                            <div className="font-mono text-2xl font-black text-white">{totalMsLitres.toFixed(2)} <span className="text-xs font-normal text-slate-400">L</span></div>
+                            <div className="text-xs text-indigo-400 font-mono font-bold">₹{totalMsRevenue.toFixed(2)} Revenue</div>
+                          </div>
+
+                          {/* HSD Litres & Revenue */}
+                          <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl space-y-2">
+                            <div className="flex justify-between items-center text-xs">
+                              <span className="font-bold text-slate-400 uppercase tracking-wider">Total HSD Litres</span>
+                              <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-black">HSD</span>
+                            </div>
+                            <div className="font-mono text-2xl font-black text-white">{totalHsdLitres.toFixed(2)} <span className="text-xs font-normal text-slate-400">L</span></div>
+                            <div className="text-xs text-emerald-400 font-mono font-bold">₹{totalHsdRevenue.toFixed(2)} Revenue</div>
+                          </div>
+
+                          {/* Total Fuel Volume */}
+                          <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl space-y-2">
+                            <div className="flex justify-between items-center text-xs">
+                              <span className="font-bold text-slate-400 uppercase tracking-wider">Total Fuel Volume</span>
+                              <span className="px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-black">MS + HSD</span>
+                            </div>
+                            <div className="font-mono text-2xl font-black text-amber-300">{totalFuelLitres.toFixed(2)} <span className="text-xs font-normal text-slate-400">L</span></div>
+                            <div className="text-xs text-slate-400">Combined Volume Sold</div>
+                          </div>
+
+                          {/* Total Fuel Revenue */}
+                          <div className="bg-gradient-to-br from-indigo-950/60 to-slate-900 border border-indigo-500/30 p-5 rounded-2xl shadow-2xl space-y-2">
+                            <div className="flex justify-between items-center text-xs">
+                              <span className="font-bold text-indigo-300 uppercase tracking-wider">Total Fuel Revenue</span>
+                              <span className="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 font-black text-[10px]">TOTAL</span>
+                            </div>
+                            <div className="font-mono text-2xl font-black text-white">₹{totalFuelRevenue.toFixed(2)}</div>
+                            <div className="text-xs text-indigo-300/80 font-medium">Aggregated Sales Value</div>
+                          </div>
+                        </div>
+
+                        {/* 2. SALES BY PUMP SECTION */}
+                        <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">
+                          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                            <div className="flex items-center gap-2">
+                              <Building2 className="h-5 w-5 text-indigo-400" />
+                              <h4 className="font-extrabold text-white text-sm uppercase tracking-wider">Sales By Pump Breakdown</h4>
+                            </div>
+                            <span className="text-xs text-slate-400">Volume and revenue by island pump</span>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {Object.values(salesByPumpMap).map((pump) => (
+                              <div
+                                key={pump.pumpId}
+                                className={`bg-slate-950 p-5 rounded-2xl border transition-all ${selectedDrillDownKey === pump.pumpId && selectedDrillDownType === 'PUMP'
+                                    ? 'border-indigo-500 ring-2 ring-indigo-500/20'
+                                    : 'border-slate-800 hover:border-slate-700'
+                                  }`}
+                              >
+                                <div className="flex justify-between items-center pb-3 border-b border-slate-800/80">
+                                  <div className="flex items-center gap-2">
+                                    <span className="h-3 w-3 rounded-full bg-indigo-500"></span>
+                                    <span className="font-extrabold text-white text-base">{pump.pumpName}</span>
+                                  </div>
+                                  <span className="font-mono font-black text-indigo-400 text-base">₹{pump.totalRevenue.toFixed(2)}</span>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-3 py-4 text-xs font-mono">
+                                  <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800/60">
+                                    <span className="text-slate-400 block text-[10px] uppercase font-sans font-bold">MS (Petrol)</span>
+                                    <span className="text-white font-bold block mt-1">{pump.msLitres.toFixed(2)} L</span>
+                                    <span className="text-indigo-400 block text-[11px]">₹{pump.msRevenue.toFixed(2)}</span>
+                                  </div>
+
+                                  <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800/60">
+                                    <span className="text-slate-400 block text-[10px] uppercase font-sans font-bold">HSD (Diesel)</span>
+                                    <span className="text-white font-bold block mt-1">{pump.hsdLitres.toFixed(2)} L</span>
+                                    <span className="text-emerald-400 block text-[11px]">₹{pump.hsdRevenue.toFixed(2)}</span>
+                                  </div>
+                                </div>
+
+                                <div className="flex justify-between items-center pt-2 text-xs border-t border-slate-800/50">
+                                  <span className="text-slate-400">Total Pump Volume: <strong className="text-white font-mono">{pump.totalLitres.toFixed(2)} L</strong></span>
+                                  <button
+                                    onClick={() => {
+                                      setSelectedDrillDownKey(pump.pumpId);
+                                      setSelectedDrillDownType('PUMP');
+                                      setShowDetailedMeterAudit(true);
+                                    }}
+                                    className="text-xs font-bold text-indigo-400 hover:text-indigo-300 flex items-center gap-1 transition-all"
+                                  >
+                                    View Pump Meter Readings <ChevronRight className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* 3. SALES BY STAFF SECTION */}
+                        <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden">
+                          <div className="p-6 border-b border-slate-800 flex justify-between items-center">
+                            <div className="flex items-center gap-2">
+                              <Users className="h-5 w-5 text-indigo-400" />
+                              <div>
+                                <h4 className="font-extrabold text-white text-sm uppercase tracking-wider">Sales By Staff</h4>
+                                <p className="text-xs text-slate-400">Fuel volume and revenue handled by each staff member on duty</p>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-left border-collapse text-xs">
+                              <thead>
+                                <tr className="bg-slate-950 border-b border-slate-800 text-slate-400 uppercase font-bold">
+                                  <th className="p-3">Staff Name</th>
+                                  <th className="p-3">Assigned Pump(s)</th>
+                                  <th className="p-3 text-right">MS Litres</th>
+                                  <th className="p-3 text-right">HSD Litres</th>
+                                  <th className="p-3 text-right">Total Litres</th>
+                                  <th className="p-3 text-right">Total Revenue</th>
+                                  <th className="p-3 text-center">Drill Down</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-800/40 font-mono">
+                                {Object.values(salesByStaffMap).length === 0 ? (
+                                  <tr>
+                                    <td colSpan={7} className="p-4 text-center text-slate-500 font-sans">No staff sales recorded for current filters.</td>
+                                  </tr>
+                                ) : (
+                                  Object.values(salesByStaffMap).map((staff) => (
+                                    <tr
+                                      key={staff.staffId}
+                                      className={`hover:bg-slate-950/40 transition-all ${selectedDrillDownKey === staff.staffId && selectedDrillDownType === 'STAFF' ? 'bg-indigo-950/20' : ''}`}
+                                    >
+                                      <td className="p-3 font-bold font-sans text-white flex items-center gap-2">
+                                        <div className="h-7 w-7 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-[10px] text-indigo-400 font-extrabold">
+                                          {staff.staffName.slice(0, 2).toUpperCase()}
+                                        </div>
+                                        {staff.staffName}
+                                      </td>
+                                      <td className="p-3 font-sans text-slate-300">
+                                        {Array.from(staff.pumps).join(', ') || 'Pump 1 & 2'}
+                                      </td>
+                                      <td className="p-3 text-right text-indigo-300 font-bold">{staff.msLitres.toFixed(2)} L</td>
+                                      <td className="p-3 text-right text-emerald-300 font-bold">{staff.hsdLitres.toFixed(2)} L</td>
+                                      <td className="p-3 text-right text-white font-black">{staff.totalLitres.toFixed(2)} L</td>
+                                      <td className="p-3 text-right text-indigo-400 font-black">₹{staff.totalRevenue.toFixed(2)}</td>
+                                      <td className="p-3 text-center">
+                                        <button
+                                          onClick={() => {
+                                            setSelectedDrillDownKey(staff.staffId);
+                                            setSelectedDrillDownType('STAFF');
+                                            setShowDetailedMeterAudit(true);
+                                          }}
+                                          className="px-2.5 py-1 rounded bg-slate-800 hover:bg-indigo-600 text-slate-300 hover:text-white font-sans text-[11px] font-bold transition-all"
+                                        >
+                                          View Readings
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  ))
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+
+                        {/* 4. DATE-WISE / MONTH-WISE / YEAR-WISE AGGREGATE TABLE */}
+                        <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden space-y-0">
+                          <div className="p-6 border-b border-slate-800 flex flex-wrap items-center justify-between gap-4">
+                            <div className="flex items-center gap-2">
+                              <Calendar className="h-5 w-5 text-indigo-400" />
+                              <div>
+                                <h4 className="font-extrabold text-white text-sm uppercase tracking-wider">Periodic Aggregated Sales Summary</h4>
+                                <p className="text-xs text-slate-400">Consolidated fuel volume and sales value over time</p>
+                              </div>
+                            </div>
+
+                            {/* Grouping Selector */}
+                            <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
+                              {[
+                                { id: 'DATE', label: 'Date-wise' },
+                                { id: 'MONTH', label: 'Month-wise' },
+                                { id: 'YEAR', label: 'Year-wise' },
+                              ].map((g) => (
+                                <button
+                                  key={g.id}
+                                  onClick={() => setFuelReportGroupBy(g.id as any)}
+                                  className={`px-3 py-1 font-bold rounded-lg transition-all ${fuelReportGroupBy === g.id
+                                      ? 'bg-indigo-600 text-white shadow-sm'
+                                      : 'text-slate-400 hover:text-slate-200'
+                                    }`}
+                                >
+                                  {g.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-left border-collapse text-xs">
+                              <thead>
+                                <tr className="bg-slate-950 border-b border-slate-800 text-slate-400 uppercase font-bold">
+                                  <th className="p-3">{fuelReportGroupBy === 'YEAR' ? 'Year' : fuelReportGroupBy === 'MONTH' ? 'Month' : 'Date'}</th>
+                                  <th className="p-3 text-right">MS Litres</th>
+                                  <th className="p-3 text-right">HSD Litres</th>
+                                  <th className="p-3 text-right">Total Litres</th>
+                                  <th className="p-3 text-right">Total Revenue</th>
+                                  <th className="p-3 text-center">Audit Option</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-800/40 font-mono">
+                                {sortedPeriods.map((period) => (
+                                  <tr
+                                    key={period.periodKey}
+                                    className={`hover:bg-slate-950/40 transition-all ${selectedDrillDownKey === period.periodKey && selectedDrillDownType === 'PERIOD' ? 'bg-indigo-950/20' : ''}`}
+                                  >
+                                    <td className="p-3 font-bold font-sans text-indigo-400">{period.periodKey}</td>
+                                    <td className="p-3 text-right text-slate-200">{period.msLitres.toFixed(2)} L</td>
+                                    <td className="p-3 text-right text-slate-200">{period.hsdLitres.toFixed(2)} L</td>
+                                    <td className="p-3 text-right text-white font-black">{period.totalLitres.toFixed(2)} L</td>
+                                    <td className="p-3 text-right text-indigo-400 font-black">₹{period.totalRevenue.toFixed(2)}</td>
+                                    <td className="p-3 text-center">
+                                      <button
+                                        onClick={() => {
+                                          setSelectedDrillDownKey(period.periodKey);
+                                          setSelectedDrillDownType('PERIOD');
+                                          setShowDetailedMeterAudit(true);
+                                        }}
+                                        className="px-2.5 py-1 rounded bg-slate-800 hover:bg-indigo-600 text-slate-300 hover:text-white font-sans text-[11px] font-bold transition-all"
+                                      >
+                                        View Details
+                                      </button>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+
+                        {/* 5. EXPANDABLE DRILL-DOWN DETAILED METER AUDIT TABLE */}
+                        <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden space-y-4 p-6">
+                          <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
+                            <div>
+                              <h4 className="font-extrabold text-white text-sm uppercase tracking-wider flex items-center gap-2">
+                                <FileText className="h-4 w-4 text-indigo-400" />
+                                Detailed Meter Audit Log (Drill-Down Verification)
+                              </h4>
+                              <p className="text-xs text-slate-400 mt-0.5">Granular nozzle meter readings, opening/closing values, rates, and computed sales.</p>
+                            </div>
+
+                            <div className="flex items-center gap-3">
+                              {selectedDrillDownKey && (
+                                <button
+                                  onClick={() => {
+                                    setSelectedDrillDownKey(null);
+                                    setSelectedDrillDownType(null);
+                                  }}
+                                  className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-950 text-slate-300 hover:text-white text-xs font-bold transition-all"
+                                >
+                                  Clear Filter: {selectedDrillDownKey}
+                                </button>
+                              )}
+
+                              <button
+                                onClick={() => setShowDetailedMeterAudit(!showDetailedMeterAudit)}
+                                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 border border-slate-700 text-white font-bold text-xs transition-all flex items-center gap-2"
+                              >
+                                {showDetailedMeterAudit ? 'Hide Meter Details' : 'View Meter Details'}
+                                <ChevronDown className={`h-4 w-4 transition-transform ${showDetailedMeterAudit ? 'rotate-180' : ''}`} />
+                              </button>
+                            </div>
+                          </div>
+
+                          {showDetailedMeterAudit && (
+                            <div className="overflow-x-auto border border-slate-800 rounded-xl">
+                              <table id="sales-report-table" className="w-full text-left border-collapse text-xs">
+                                <thead>
+                                  <tr className="bg-slate-950 border-b border-slate-800 text-slate-400 uppercase font-bold">
+                                    <th className="p-3">Duty Session</th>
+                                    <th className="p-3">Gun Name</th>
+                                    <th className="p-3">Fuel Type</th>
+                                    <th className="p-3">Staff Assigned</th>
+                                    <th className="p-3 text-right">Opening Reading</th>
+                                    <th className="p-3 text-right">Closing Reading</th>
+                                    <th className="p-3 text-right">Litres Sold</th>
+                                    <th className="p-3 text-right">Rate</th>
+                                    <th className="p-3 text-right">Sales Amount</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-800/40 font-mono">
+                                  {activeDrillDownRows.length === 0 ? (
+                                    <tr>
+                                      <td colSpan={9} className="p-4 text-center text-slate-500 font-sans">No detailed meter records match the drill-down selection.</td>
+                                    </tr>
+                                  ) : (
+                                    activeDrillDownRows.map((r, idx) => {
+                                      const mr = r.reading;
+                                      const litres = mr.litresSold || Math.max(0, mr.currentReading - mr.previousReading);
+                                      const amount = mr.salesAmount || (litres * mr.priceUsed);
+
+                                      return (
+                                        <tr key={`${r.duty.id}-${idx}`} className="hover:bg-slate-950/40 transition-all">
+                                          <td className="p-3 font-semibold text-indigo-400 font-sans">Duty #{r.duty.dutyNumber}</td>
+                                          <td className="p-3 font-bold text-slate-200">{mr.gun?.name || 'Nozzle'}</td>
+                                          <td className="p-3"><span className={`px-2 py-0.5 rounded font-black text-[9px] ${r.fuelType === 'MS' ? 'bg-indigo-950 text-indigo-400 border border-indigo-800' : 'bg-emerald-950 text-emerald-400 border border-emerald-800'}`}>{r.fuelType}</span></td>
+                                          <td className="p-3 font-sans text-slate-300">{r.assignedStaff?.name || 'Unassigned'}</td>
+                                          <td className="p-3 text-right text-slate-400">{(mr.previousReading || 0).toFixed(2)}</td>
+                                          <td className="p-3 text-right text-slate-200">{(mr.currentReading || 0).toFixed(2)}</td>
+                                          <td className="p-3 text-right font-bold text-white">{litres.toFixed(2)} L</td>
+                                          <td className="p-3 text-right text-slate-300">₹{(mr.priceUsed || 0).toFixed(2)}</td>
+                                          <td className="p-3 text-right font-black text-indigo-400">₹{amount.toFixed(2)}</td>
+                                        </tr>
+                                      );
+                                    })
+                                  )}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </div>
+                      </>
+                    )}
                   </div>
-                  <div className="overflow-x-auto">
-                    <table id="sales-report-table" className="w-full text-left border-collapse text-xs">
-                      <thead>
-                        <tr className="bg-slate-950 border-b border-slate-800 text-slate-400 uppercase font-bold">
-                          <th className="p-3">Duty Session</th>
-                          <th className="p-3">Gun Name</th>
-                          <th className="p-3">Fuel Type</th>
-                          <th className="p-3 text-right">Previous Reading</th>
-                          <th className="p-3 text-right">Current Reading</th>
-                          <th className="p-3 text-right">Litres Sold</th>
-                          <th className="p-3 text-right">Price Applied</th>
-                          <th className="p-3 text-right">Total sales amount</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-800/40">
-                        {historicalDuties.flatMap((d: any) =>
-                          (d.meterReadings || []).map((mr: any, idx: number) => (
-                            <tr key={`${d.id}-${idx}`} className="hover:bg-slate-950/20">
-                              <td className="p-3 font-semibold text-indigo-400">Duty #{d.dutyNumber}</td>
-                              <td className="p-3 text-slate-200">{mr.gun?.name || 'Nozzle'}</td>
-                              <td className="p-3 text-slate-350">{mr.gun?.fuelType || '-'}</td>
-                              <td className="p-3 text-right font-mono text-slate-350">{(mr.previousReading || 0).toFixed(2)}</td>
-                              <td className="p-3 text-right font-mono text-slate-350">{(mr.currentReading || 0).toFixed(2)}</td>
-                              <td className="p-3 text-right font-mono text-white">{(mr.litresSold || 0).toFixed(2)} L</td>
-                              <td className="p-3 text-right font-mono text-slate-350">₹{(mr.priceUsed || 0).toFixed(2)}</td>
-                              <td className="p-3 text-right font-mono font-bold text-indigo-400">₹{(mr.salesAmount || 0).toFixed(2)}</td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* STAFF REPORT SUB-TAB */}
-              {reportsTab === 'staff' && (
-                <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden">
-                  <div className="p-6 border-b border-slate-800 flex justify-between items-center">
-                    <div>
-                      <h4 className="font-extrabold text-white text-base">Staff Duty Handling & Performance</h4>
-                      <p className="text-xs text-slate-400 mt-1">Aggregated fuel volume and total sales revenue managed by each staff member.</p>
+              {reportsTab === 'staff' && (() => {
+                // 1. Helper function for 24-hour duty period string formatting
+                const formatDutyPeriodStr = (startTime: string | Date, endTime?: string | Date | null) => {
+                  if (!startTime) return '-';
+                  const startObj = new Date(startTime);
+                  const startStr = startObj.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) + ' ' +
+                    startObj.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+                  if (!endTime) return `${startStr} → OPEN (Active Duty)`;
+
+                  const endObj = new Date(endTime);
+                  const endStr = endObj.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) + ' ' +
+                    endObj.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+                  return `${startStr} → ${endStr}`;
+                };
+
+                // 2. Gather all duties (historical + active)
+                const combinedDuties = [
+                  ...historicalDuties,
+                  ...(activeDuty && !historicalDuties.some((d: any) => d.id === activeDuty.id) ? [activeDuty] : [])
+                ];
+
+                // 3. Filter duties according to top filter bar
+                const filteredDuties = combinedDuties.filter((d: any) => {
+                  const dDate = new Date(d.startTime);
+                  const dStr = dDate.toLocaleDateString('en-CA');
+                  const dMonth = dStr.slice(0, 7);
+                  const dYear = dStr.slice(0, 4);
+
+                  if (staffReportDate && dStr !== staffReportDate) return false;
+                  if (staffReportStartDate && dStr < staffReportStartDate) return false;
+                  if (staffReportEndDate && dStr > staffReportEndDate) return false;
+                  if (staffReportMonth && dMonth !== staffReportMonth) return false;
+                  if (staffReportYear && dYear !== staffReportYear) return false;
+                  return true;
+                }).sort((a: any, b: any) => (b.dutyNumber || 0) - (a.dutyNumber || 0));
+
+                const staffList = staticData.staff || [];
+
+                // 4. Generate 24-Hour Duty Attendance Register Records (1 Duty Session = 1 Record per Staff Member)
+                const allAttendanceRows: Array<{
+                  dutyId: string;
+                  dutyNumber: number;
+                  startTime: string | Date;
+                  endTime?: string | Date | null;
+                  dutyPeriodStr: string;
+                  staffId: string;
+                  staffName: string;
+                  pump: string;
+                  msHandled: boolean;
+                  hsdHandled: boolean;
+                  status: 'PRESENT' | 'ABSENT' | 'NOT_SCHEDULED';
+                }> = [];
+
+                filteredDuties.forEach((d: any) => {
+                  const dutyPeriodStr = formatDutyPeriodStr(d.startTime, d.endTime);
+
+                  staffList.forEach((s: any) => {
+                    const sAssignments = (d.assignments || []).filter((as: any) =>
+                      as.staffId === s.id || as.staff?.id === s.id || as.staff?.name === s.name
+                    );
+                    const hasAssignment = sAssignments.length > 0;
+
+                    const pumpNames = hasAssignment
+                      ? Array.from(new Set(sAssignments.map((as: any) => as.pump?.name || (as.pumpId === 'p1' ? 'Pump 1' : 'Pump 2')))).join(', ')
+                      : '-';
+
+                    let msHandled = false;
+                    let hsdHandled = false;
+
+                    if (hasAssignment) {
+                      sAssignments.forEach((as: any) => {
+                        const fType = as.fuelType || (as.pumpId === 'p1' ? 'MS' : 'HSD');
+                        if (fType === 'MS') msHandled = true;
+                        if (fType === 'HSD') hsdHandled = true;
+                      });
+
+                      (d.meterReadings || []).forEach((mr: any) => {
+                        const pId = mr.gun?.pumpId || mr.gun?.pump?.id || 'p1';
+                        const fType = mr.gun?.fuelType || 'MS';
+                        const litres = mr.litresSold || Math.max(0, mr.currentReading - mr.previousReading);
+
+                        const isAssignedPump = sAssignments.some((as: any) => (as.pumpId === pId || as.pump?.id === pId));
+                        if (isAssignedPump && litres > 0) {
+                          if (fType === 'MS') msHandled = true;
+                          if (fType === 'HSD') hsdHandled = true;
+                        }
+                      });
+
+                      if (!msHandled && !hsdHandled) msHandled = true;
+                    }
+
+                    // Status Determination: Override -> default PRESENT if assigned -> default ABSENT if unassigned (as requested by user)
+                    const overrideKey = `${d.id}_${s.id}`;
+                    const status: 'PRESENT' | 'ABSENT' | 'NOT_SCHEDULED' =
+                      attendanceOverrides[overrideKey] || (hasAssignment ? 'PRESENT' : 'ABSENT');
+
+                    // Filter constraints
+                    if (staffReportStaff !== 'ALL' && s.id !== staffReportStaff && s.name !== staffReportStaff) return;
+                    if (staffReportPump !== 'ALL' && (!hasAssignment || !pumpNames.includes(staffReportPump))) return;
+                    if (staffReportStatusFilter !== 'ALL' && status !== staffReportStatusFilter) return;
+
+                    allAttendanceRows.push({
+                      dutyId: d.id,
+                      dutyNumber: d.dutyNumber,
+                      startTime: d.startTime,
+                      endTime: d.endTime,
+                      dutyPeriodStr,
+                      staffId: s.id,
+                      staffName: s.name,
+                      pump: pumpNames,
+                      msHandled,
+                      hsdHandled,
+                      status
+                    });
+                  });
+                });
+
+                // 5. Summary Metrics Calculations
+                const totalStaffCount = staffList.length;
+                const presentDutiesCount = allAttendanceRows.filter(r => r.status === 'PRESENT').length;
+                const absentDutiesCount = allAttendanceRows.filter(r => r.status === 'ABSENT').length;
+                const notScheduledCount = allAttendanceRows.filter(r => r.status === 'NOT_SCHEDULED').length;
+
+                // 6. Monthly / Date-Range Staff Summary Aggregations
+                const staffMonthlySummaries = staffList.map((s: any) => {
+                  const sRows = allAttendanceRows.filter(r => r.staffId === s.id);
+                  const presentCount = sRows.filter(r => r.status === 'PRESENT').length;
+                  const absentCount = sRows.filter(r => r.status === 'ABSENT').length;
+                  const notSched = sRows.filter(r => r.status === 'NOT_SCHEDULED').length;
+                  const msDuties = sRows.filter(r => r.status === 'PRESENT' && r.msHandled).length;
+                  const hsdDuties = sRows.filter(r => r.status === 'PRESENT' && r.hsdHandled).length;
+
+                  return {
+                    staffId: s.id,
+                    staffName: s.name,
+                    role: s.role || 'PUMP_ATTENDANT',
+                    totalDutyDays: filteredDuties.length,
+                    presentCount,
+                    absentCount,
+                    notSched,
+                    msDuties,
+                    hsdDuties
+                  };
+                });
+
+                return (
+                  <div className="space-y-8">
+                    {/* REPORT HEADER & EXPORT BAR */}
+                    <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl flex flex-wrap items-center justify-between gap-4">
+                      <div className="flex items-center gap-3">
+                        <div className="h-10 w-10 bg-indigo-600/20 text-indigo-400 rounded-xl border border-indigo-500/30 flex items-center justify-center">
+                          <Users className="h-5 w-5" />
+                        </div>
+                        <div>
+                          <h4 className="font-extrabold text-white text-base uppercase tracking-wider">Staff Attendance Register (24-Hour Duty)</h4>
+                          <p className="text-xs text-slate-400">Official 24-Hour Duty Session Attendance, Assignment Verification & Status Corrections</p>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => handleExportExcel('staff-report-table', 'Staff_24Hour_Attendance_Register')}
+                        className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all shadow-md shadow-indigo-600/20"
+                      >
+                        <FileSpreadsheet className="h-4 w-4" />
+                        Export Excel Register
+                      </button>
                     </div>
-                    <button
-                      onClick={() => handleExportExcel('staff-report-table', 'Staff_Performance_Report')}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-850 text-indigo-400 hover:text-indigo-300 text-xs font-bold transition-all"
-                    >
-                      Export to Excel
-                    </button>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table id="staff-report-table" className="w-full text-left border-collapse text-xs">
-                      <thead>
-                        <tr className="bg-slate-950 border-b border-slate-800 text-slate-400 uppercase font-bold">
-                          <th className="p-3">Staff Name</th>
-                          <th className="p-3 text-right">Duties Handled</th>
-                          <th className="p-3 text-right">MS Litres Handled</th>
-                          <th className="p-3 text-right">HSD Litres Handled</th>
-                          <th className="p-3 text-right">Total Revenue Handled</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-800/40">
-                        {staffPerformance.length === 0 ? (
-                          <tr>
-                            <td colSpan={5} className="p-4 text-center text-slate-500">No staff performance logs.</td>
-                          </tr>
-                        ) : (
-                          staffPerformance.map((s: any, idx: number) => (
-                            <tr key={idx} className="hover:bg-slate-950/20">
-                              <td className="p-3 font-semibold text-slate-200">{s.name}</td>
-                              <td className="p-3 text-right font-mono text-slate-350">{s.duties}</td>
-                              <td className="p-3 text-right font-mono text-slate-350">{s.msLitres.toFixed(2)} L</td>
-                              <td className="p-3 text-right font-mono text-slate-350">{s.hsdLitres.toFixed(2)} L</td>
-                              <td className="p-3 text-right font-mono font-bold text-indigo-400">₹{s.sales.toFixed(2)}</td>
+
+                    {/* TOP EXECUTIVE KPI SUMMARY CARDS */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                      {/* TOTAL STAFF */}
+                      <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl flex items-center justify-between">
+                        <div>
+                          <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block">Total Staff</span>
+                          <span className="text-2xl font-black text-white font-mono mt-1 block">{totalStaffCount}</span>
+                          <span className="text-[10px] text-slate-500 mt-1 block">Active Employees</span>
+                        </div>
+                        <div className="h-12 w-12 bg-indigo-950/50 border border-indigo-800/50 rounded-2xl flex items-center justify-center text-indigo-400">
+                          <Users className="h-6 w-6" />
+                        </div>
+                      </div>
+
+                      {/* PRESENT DUTIES */}
+                      <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl flex items-center justify-between">
+                        <div>
+                          <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block">Present Duties</span>
+                          <span className="text-2xl font-black text-emerald-400 font-mono mt-1 block">{presentDutiesCount}</span>
+                          <span className="text-[10px] text-emerald-500/80 mt-1 block">Attended Sessions</span>
+                        </div>
+                        <div className="h-12 w-12 bg-emerald-950/50 border border-emerald-800/50 rounded-2xl flex items-center justify-center text-emerald-400">
+                          <UserCheck className="h-6 w-6" />
+                        </div>
+                      </div>
+
+                      {/* ABSENT DUTIES */}
+                      <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl flex items-center justify-between">
+                        <div>
+                          <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block">Absent Duties</span>
+                          <span className="text-2xl font-black text-red-400 font-mono mt-1 block">{absentDutiesCount}</span>
+                          <span className="text-[10px] text-red-500/80 mt-1 block">Marked Absent</span>
+                        </div>
+                        <div className="h-12 w-12 bg-red-950/50 border border-red-800/50 rounded-2xl flex items-center justify-center text-red-400">
+                          <AlertTriangle className="h-6 w-6" />
+                        </div>
+                      </div>
+
+                      {/* NOT SCHEDULED */}
+                      <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl flex items-center justify-between">
+                        <div>
+                          <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block">Not Scheduled</span>
+                          <span className="text-2xl font-black text-slate-400 font-mono mt-1 block">{notScheduledCount}</span>
+                          <span className="text-[10px] text-slate-500 mt-1 block">Unassigned Sessions</span>
+                        </div>
+                        <div className="h-12 w-12 bg-slate-950 border border-slate-800 rounded-2xl flex items-center justify-center text-slate-400">
+                          <Calendar className="h-6 w-6" />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* FILTER BAR DROPDOWNS */}
+                    <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">
+                      <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                        <div className="flex items-center gap-2">
+                          <Filter className="h-4 w-4 text-indigo-400" />
+                          <span className="text-xs font-bold text-white uppercase tracking-wider">Attendance Filters</span>
+                        </div>
+                        <span className="text-[11px] text-slate-400 font-mono">Duty Sessions Filtered: <strong className="text-indigo-400">{filteredDuties.length}</strong></span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-3 text-xs">
+                        {/* Date Filter */}
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Single Date</label>
+                          <input
+                            type="date"
+                            value={staffReportDate}
+                            onChange={(e) => {
+                              setStaffReportDate(e.target.value);
+                              setStaffReportStartDate('');
+                              setStaffReportEndDate('');
+                            }}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono focus:border-indigo-500 focus:outline-none"
+                          />
+                        </div>
+
+                        {/* Start Date */}
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Start Date</label>
+                          <input
+                            type="date"
+                            value={staffReportStartDate}
+                            onChange={(e) => {
+                              setStaffReportStartDate(e.target.value);
+                              setStaffReportDate('');
+                            }}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono focus:border-indigo-500 focus:outline-none"
+                          />
+                        </div>
+
+                        {/* End Date */}
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">End Date</label>
+                          <input
+                            type="date"
+                            value={staffReportEndDate}
+                            onChange={(e) => {
+                              setStaffReportEndDate(e.target.value);
+                              setStaffReportDate('');
+                            }}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono focus:border-indigo-500 focus:outline-none"
+                          />
+                        </div>
+
+                        {/* Month Filter */}
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Month</label>
+                          <input
+                            type="month"
+                            value={staffReportMonth}
+                            onChange={(e) => setStaffReportMonth(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono focus:border-indigo-500 focus:outline-none"
+                          />
+                        </div>
+
+                        {/* Employee / Staff */}
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Employee / Staff</label>
+                          <select
+                            value={staffReportStaff}
+                            onChange={(e) => setStaffReportStaff(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-semibold focus:border-indigo-500 focus:outline-none"
+                          >
+                            <option value="ALL">All Staff</option>
+                            {staffList.map((s: any) => (
+                              <option key={s.id} value={s.id}>{s.name}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* Pump */}
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Pump</label>
+                          <select
+                            value={staffReportPump}
+                            onChange={(e) => setStaffReportPump(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-semibold focus:border-indigo-500 focus:outline-none"
+                          >
+                            <option value="ALL">All Pumps</option>
+                            {(staticData.pumps || [{ id: 'p1', name: 'Pump 1' }, { id: 'p2', name: 'Pump 2' }]).map((p: any) => (
+                              <option key={p.id} value={p.name}>{p.name}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* Status Filter */}
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Status</label>
+                          <select
+                            value={staffReportStatusFilter}
+                            onChange={(e) => setStaffReportStatusFilter(e.target.value as any)}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-semibold focus:border-indigo-500 focus:outline-none"
+                          >
+                            <option value="ALL">All Statuses</option>
+                            <option value="PRESENT">Present</option>
+                            <option value="ABSENT">Absent</option>
+                            <option value="NOT_SCHEDULED">Not Scheduled</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="flex justify-between items-center pt-2 border-t border-slate-800/60">
+                        <span className="text-[11px] text-slate-400 font-mono">Showing <strong>{allAttendanceRows.length}</strong> attendance records</span>
+                        <button
+                          onClick={handleResetStaffFilters}
+                          className="text-[11px] font-bold text-slate-400 hover:text-white transition-all underline underline-offset-4"
+                        >
+                          Clear All Filters
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* MAIN STAFF ATTENDANCE REGISTER TABLE (Per Duty Session) */}
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden">
+                      <div className="p-6 border-b border-slate-800 flex justify-between items-center">
+                        <div>
+                          <h4 className="font-extrabold text-white text-sm uppercase tracking-wider">24-Hour Duty Staff Attendance Register</h4>
+                          <p className="text-xs text-slate-400 mt-1">One 24-Hour Duty Session = One Attendance Record. Unassigned workers are NOT SCHEDULED, not Absent.</p>
+                        </div>
+                      </div>
+
+                      <div className="overflow-x-auto">
+                        <table id="staff-report-table" className="w-full text-left border-collapse text-xs">
+                          <thead>
+                            <tr className="bg-slate-950 border-b border-slate-800 text-slate-400 uppercase font-bold">
+                              <th className="p-3 font-mono">Duty</th>
+                              <th className="p-3">Staff Name</th>
+                              <th className="p-3">Pump</th>
+                              <th className="p-3 text-center">MS</th>
+                              <th className="p-3 text-center">HSD</th>
+                              <th className="p-3">Duty Period (24-Hr Window)</th>
+                              <th className="p-3 text-center">Status</th>
+                              <th className="p-3 text-right">Actions</th>
                             </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
+                          </thead>
+                          <tbody className="divide-y divide-slate-800/40 font-mono">
+                            {allAttendanceRows.length === 0 ? (
+                              <tr>
+                                <td colSpan={8} className="p-6 text-center text-slate-500 font-sans">No staff attendance records match the selected filter criteria.</td>
+                              </tr>
+                            ) : (
+                              allAttendanceRows.map((row, idx) => (
+                                <tr key={`${row.dutyId}-${row.staffId}-${idx}`} className="hover:bg-slate-950/40 transition-all">
+                                  <td className="p-3 font-bold text-indigo-400">#{row.dutyNumber}</td>
+                                  <td className="p-3 font-sans font-bold text-white">
+                                    <button
+                                      onClick={() => setStaffHistoryModal({ open: true, staffId: row.staffId, staffName: row.staffName })}
+                                      className="hover:text-indigo-400 transition-colors text-left font-bold"
+                                    >
+                                      {row.staffName}
+                                    </button>
+                                  </td>
+                                  <td className="p-3 font-sans text-slate-300">{row.pump}</td>
+                                  <td className="p-3 text-center">
+                                    {row.msHandled ? (
+                                      <span className="inline-flex items-center px-2 py-0.5 rounded bg-indigo-950 text-indigo-400 border border-indigo-800 font-bold text-[10px]">
+                                        ✓
+                                      </span>
+                                    ) : (
+                                      <span className="text-slate-600">-</span>
+                                    )}
+                                  </td>
+                                  <td className="p-3 text-center">
+                                    {row.hsdHandled ? (
+                                      <span className="inline-flex items-center px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 font-bold text-[10px]">
+                                        ✓
+                                      </span>
+                                    ) : (
+                                      <span className="text-slate-600">-</span>
+                                    )}
+                                  </td>
+                                  <td className="p-3 text-slate-300 font-mono text-[11px]">{row.dutyPeriodStr}</td>
+                                  <td className="p-3 text-center">
+                                    {row.status === 'PRESENT' && (
+                                      <span className="px-2.5 py-1 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 font-bold text-[10px] uppercase font-sans">
+                                        PRESENT
+                                      </span>
+                                    )}
+                                    {row.status === 'ABSENT' && (
+                                      <span className="px-2.5 py-1 rounded bg-red-950 text-red-400 border border-red-800 font-bold text-[10px] uppercase font-sans">
+                                        ABSENT
+                                      </span>
+                                    )}
+                                    {row.status === 'NOT_SCHEDULED' && (
+                                      <span className="px-2.5 py-1 rounded bg-slate-950 text-slate-500 border border-slate-800 font-bold text-[10px] uppercase font-sans">
+                                        NOT SCHEDULED
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="p-3 text-right">
+                                    <button
+                                      onClick={() => setStatusCorrectionModal({
+                                        open: true,
+                                        dutyId: row.dutyId,
+                                        dutyNumber: row.dutyNumber,
+                                        staffId: row.staffId,
+                                        staffName: row.staffName,
+                                        currentStatus: row.status,
+                                        newStatus: row.status,
+                                        reason: ''
+                                      })}
+                                      className="px-2.5 py-1 rounded border border-slate-700 bg-slate-850 hover:bg-slate-800 text-slate-300 text-[10px] font-bold font-sans transition-all"
+                                    >
+                                      Change Status
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    {/* MONTHLY / PERIODIC STAFF SUMMARY TABLE */}
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden space-y-4 p-6">
+                      <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                        <div className="flex items-center gap-2">
+                          <BarChart3 className="h-5 w-5 text-indigo-400" />
+                          <div>
+                            <h4 className="font-extrabold text-white text-sm uppercase tracking-wider">Staff Monthly / Period Summary</h4>
+                            <p className="text-xs text-slate-400 mt-0.5">Aggregated duty days, present, absent, not scheduled, and MS/HSD duty counts per staff member</p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse text-xs">
+                          <thead>
+                            <tr className="bg-slate-950 border-b border-slate-800 text-slate-400 uppercase font-bold font-mono">
+                              <th className="p-3">Staff Member</th>
+                              <th className="p-3 text-right">Duty Days</th>
+                              <th className="p-3 text-right">Present</th>
+                              <th className="p-3 text-right">Absent</th>
+                              <th className="p-3 text-right">Not Scheduled</th>
+                              <th className="p-3 text-right">MS Duties</th>
+                              <th className="p-3 text-right">HSD Duties</th>
+                              <th className="p-3 text-center">History</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-800/40 font-mono">
+                            {staffMonthlySummaries.map((summary: any) => (
+                              <tr key={summary.staffId} className="hover:bg-slate-950/40 transition-all">
+                                <td className="p-3 font-sans font-bold text-white flex items-center gap-2">
+                                  <div className="h-7 w-7 rounded-full bg-indigo-600/20 border border-indigo-500/30 text-indigo-400 font-extrabold flex items-center justify-center text-[10px]">
+                                    {summary.staffName.slice(0, 2).toUpperCase()}
+                                  </div>
+                                  <span>{summary.staffName}</span>
+                                </td>
+                                <td className="p-3 text-right text-slate-300 font-bold">{summary.totalDutyDays}</td>
+                                <td className="p-3 text-right text-emerald-400 font-bold">{summary.presentCount}</td>
+                                <td className="p-3 text-right text-red-400 font-bold">{summary.absentCount}</td>
+                                <td className="p-3 text-right text-slate-500 font-bold">{summary.notSched}</td>
+                                <td className="p-3 text-right text-indigo-300 font-bold">{summary.msDuties}</td>
+                                <td className="p-3 text-right text-emerald-300 font-bold">{summary.hsdDuties}</td>
+                                <td className="p-3 text-center">
+                                  <button
+                                    onClick={() => setStaffHistoryModal({ open: true, staffId: summary.staffId, staffName: summary.staffName })}
+                                    className="px-2.5 py-1 rounded bg-indigo-950 text-indigo-400 border border-indigo-800 text-[10px] font-bold font-sans hover:bg-indigo-900 transition-all"
+                                  >
+                                    View History
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    {/* ATTENDANCE AUDIT LOGS (Owner Correction Records) */}
+                    {attendanceAuditLogs.length > 0 && (
+                      <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">
+                        <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
+                          <ShieldCheck className="h-5 w-5 text-indigo-400" />
+                          <div>
+                            <h4 className="font-extrabold text-white text-sm uppercase tracking-wider">Attendance Correction Audit Log</h4>
+                            <p className="text-xs text-slate-400">Owner & Manager manual status correction log</p>
+                          </div>
+                        </div>
+
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-left border-collapse text-xs">
+                            <thead>
+                              <tr className="bg-slate-950 border-b border-slate-800 text-slate-400 uppercase font-bold font-mono">
+                                <th className="p-3">Staff</th>
+                                <th className="p-3">Duty #</th>
+                                <th className="p-3">Old Status</th>
+                                <th className="p-3">New Status</th>
+                                <th className="p-3">Changed By</th>
+                                <th className="p-3">Timestamp</th>
+                                <th className="p-3">Reason</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-800/40 font-mono text-slate-300">
+                              {attendanceAuditLogs.map((log: any) => (
+                                <tr key={log.id}>
+                                  <td className="p-3 font-sans font-bold text-white">{log.staffName}</td>
+                                  <td className="p-3 text-indigo-400">#{log.dutyNumber}</td>
+                                  <td className="p-3 text-slate-500">{log.oldStatus}</td>
+                                  <td className="p-3 text-emerald-400 font-bold">{log.newStatus}</td>
+                                  <td className="p-3 text-slate-400">{log.changedBy}</td>
+                                  <td className="p-3 text-slate-500">{log.timestamp}</td>
+                                  <td className="p-3 font-sans text-slate-300">{log.reason}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* CREDIT REPORT SUB-TAB */}
               {reportsTab === 'credit' && (
@@ -3578,22 +5158,6 @@ export default function DashboardContainer({
                     </table>
                   </div>
 
-                  {/* Testing / Sample Deduction */}
-                  <div className="bg-slate-950 border border-slate-850 p-4 rounded-xl space-y-3">
-                    <span className="text-xs font-extrabold text-white uppercase tracking-wider block border-b border-slate-900 pb-2">TESTING / SAMPLE DEDUCTION</span>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-400 uppercase">MS Testing (Litres)</label>
-                        <input type="number" step="0.01" min="0" value={msTestingLitres || ''} onChange={(e) => setMsTestingLitres(Number(e.target.value))} className="block w-full rounded border border-slate-700 bg-slate-900 py-1.5 px-2.5 mt-1 text-xs text-white font-semibold font-mono focus:border-indigo-500 focus:outline-none" placeholder="0" />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-400 uppercase">HSD Testing (Litres)</label>
-                        <input type="number" step="0.01" min="0" value={hsdTestingLitres || ''} onChange={(e) => setHsdTestingLitres(Number(e.target.value))} className="block w-full rounded border border-slate-700 bg-slate-900 py-1.5 px-2.5 mt-1 text-xs text-white font-semibold font-mono focus:border-indigo-500 focus:outline-none" placeholder="0" />
-                      </div>
-                    </div>
-                    <div className="text-[10px] text-slate-500 font-mono">Testing Value: MS ₹{msTestingValue.toFixed(2)} + HSD ₹{hsdTestingValue.toFixed(2)} = ₹{totalTestingValue.toFixed(2)}</div>
-                  </div>
-
                   {/* Revenue Summary (ACC Book) */}
                   <div className="bg-slate-950 border border-slate-850 p-4 rounded-xl space-y-2 text-xs">
                     <span className="text-xs font-extrabold text-white uppercase tracking-wider block border-b border-slate-900 pb-2">DAILY FUEL & OIL SALES BREAKDOWN</span>
@@ -3640,6 +5204,79 @@ export default function DashboardContainer({
                         <input type="number" required min="1" value={oilQty || ''} onChange={(e) => setOilQty(Number(e.target.value))} className="block w-full rounded border border-slate-700 bg-slate-900 py-1.5 px-2 mt-1 text-xs text-white font-mono focus:border-indigo-500 focus:outline-none" placeholder="0" /></div>
                       <button type="submit" className="py-1.5 rounded bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[10px]"><Plus className="h-3 w-3 inline mr-1" />Add</button>
                     </form>
+                  </div>
+
+                  {/* Testing & Sample Sales Deduction (Beneath Oil Section) */}
+                  <div className="bg-slate-950 border border-slate-850 p-4 rounded-xl space-y-3">
+                    <div className="flex justify-between items-center border-b border-slate-900 pb-2">
+                      <span className="text-xs font-extrabold text-white uppercase tracking-wider block">TESTING & SAMPLE SALES DEDUCTION</span>
+                      <span className="text-[10px] font-mono text-amber-400 font-bold">Total Deduction: ₹{totalTestingValue.toFixed(2)}</span>
+                    </div>
+                    <p className="text-[11px] text-slate-400">Specify MS (Petrol) or HSD (Diesel) litres sold/dispensed for density & sample testing to deduct from gross revenue.</p>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
+                      {/* MS Testing Input */}
+                      <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-850 space-y-2">
+                        <div className="flex justify-between items-center text-xs font-bold text-indigo-400">
+                          <span>MS Petrol Testing / Sample</span>
+                          <span className="text-[10px] text-slate-400 font-mono">Rate: ₹{msPrice.toFixed(2)}/L</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-400 uppercase">Litres Sold / Tested</label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={msTestingLitres || ''}
+                              onChange={(e) => setMsTestingLitres(Number(e.target.value))}
+                              className="block w-full rounded border border-slate-700 bg-slate-950 py-1.5 px-2.5 mt-1 text-xs text-white font-mono font-bold focus:border-indigo-500 focus:outline-none"
+                              placeholder="0.00 L"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-400 uppercase">Amount (Deduction ₹)</label>
+                            <input
+                              type="text"
+                              readOnly
+                              value={`₹${msTestingValue.toFixed(2)}`}
+                              className="block w-full rounded border border-slate-800 bg-slate-900 py-1.5 px-2.5 mt-1 text-xs text-amber-400 font-mono font-bold select-none cursor-not-allowed"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* HSD Testing Input */}
+                      <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-850 space-y-2">
+                        <div className="flex justify-between items-center text-xs font-bold text-sky-400">
+                          <span>HSD Diesel Testing / Sample</span>
+                          <span className="text-[10px] text-slate-400 font-mono">Rate: ₹{hsdPrice.toFixed(2)}/L</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-400 uppercase">Litres Sold / Tested</label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={hsdTestingLitres || ''}
+                              onChange={(e) => setHsdTestingLitres(Number(e.target.value))}
+                              className="block w-full rounded border border-slate-700 bg-slate-950 py-1.5 px-2.5 mt-1 text-xs text-white font-mono font-bold focus:border-indigo-500 focus:outline-none"
+                              placeholder="0.00 L"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-400 uppercase">Amount (Deduction ₹)</label>
+                            <input
+                              type="text"
+                              readOnly
+                              value={`₹${hsdTestingValue.toFixed(2)}`}
+                              className="block w-full rounded border border-slate-800 bg-slate-900 py-1.5 px-2.5 mt-1 text-xs text-amber-400 font-mono font-bold select-none cursor-not-allowed"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                   </div>
 
                   {/* Bunk Expenses Input */}
@@ -3825,7 +5462,7 @@ export default function DashboardContainer({
                       <div className="space-y-1.5 bg-slate-900/60 p-3 rounded-lg border border-slate-850">
                         <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider block border-b border-slate-800 pb-1">CASH INFLOWS & REVENUE</span>
                         <div className="flex justify-between text-slate-300 font-sans">
-                          <span>Fuel Sales (Gross):</span>
+                          <span>Gross MS/HSD Meter Sales:</span>
                           <span className="font-mono font-bold text-white">₹{grossFuelSalesTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                         </div>
                         <div className="flex justify-between text-slate-300 font-sans">
@@ -3833,11 +5470,15 @@ export default function DashboardContainer({
                           <span className="font-mono font-bold text-white">₹{oilSalesTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                         </div>
                         <div className="flex justify-between text-slate-300 font-sans">
+                          <span>Testing & Sample Sales:</span>
+                          <span className="font-mono font-bold text-amber-400">₹{totalTestingValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                        </div>
+                        <div className="flex justify-between text-slate-300 font-sans">
                           <span>Credit Collections:</span>
                           <span className="font-mono font-bold text-emerald-400">+₹{creditCollectionsCash.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                         </div>
                         <div className="flex justify-between border-t border-slate-800 pt-1 text-xs font-bold text-emerald-300 font-sans">
-                          <span>GROSS REVENUE:</span>
+                          <span>GROSS REVENUE & INFLOWS:</span>
                           <span className="font-mono">₹{grossRevenueInflow.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                         </div>
                       </div>
@@ -4105,6 +5746,254 @@ export default function DashboardContainer({
           </div>
         </div>
       )}
+
+      {/* STAFF ATTENDANCE STATUS CORRECTION MODAL */}
+      {statusCorrectionModal?.open && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5">
+            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="h-5 w-5 text-indigo-400" />
+                <h3 className="font-extrabold text-white text-sm uppercase tracking-wider">Correct Attendance Status</h3>
+              </div>
+              <button
+                onClick={() => setStatusCorrectionModal(null)}
+                className="text-slate-400 hover:text-white text-xs font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800/80 space-y-2 text-xs">
+              <div className="flex justify-between">
+                <span className="text-slate-400">Staff Member:</span>
+                <span className="font-bold text-white">{statusCorrectionModal.staffName}</span>
+              </div>
+              <div className="flex justify-between font-mono">
+                <span className="text-slate-400">Duty Session:</span>
+                <span className="font-bold text-indigo-400">Duty #{statusCorrectionModal.dutyNumber}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-400">Current Status:</span>
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-slate-900 text-slate-300 border border-slate-700">
+                  {statusCorrectionModal.currentStatus}
+                </span>
+              </div>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">New Attendance Status</label>
+                <select
+                  value={statusCorrectionModal.newStatus}
+                  onChange={(e) => setStatusCorrectionModal({
+                    ...statusCorrectionModal,
+                    newStatus: e.target.value as any
+                  })}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white font-bold focus:border-indigo-500 focus:outline-none"
+                >
+                  <option value="PRESENT">PRESENT (Assigned & Attended)</option>
+                  <option value="ABSENT">ABSENT (Owner/Manager Marked Absent)</option>
+                  <option value="NOT_SCHEDULED">NOT SCHEDULED (Not Assigned)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Correction Note / Reason</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Authorized leave / Owner correction"
+                  value={statusCorrectionModal.reason}
+                  onChange={(e) => setStatusCorrectionModal({
+                    ...statusCorrectionModal,
+                    reason: e.target.value
+                  })}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white text-xs focus:border-indigo-500 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                onClick={() => setStatusCorrectionModal(null)}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  const key = `${statusCorrectionModal.dutyId}_${statusCorrectionModal.staffId}`;
+                  setAttendanceOverrides(prev => ({
+                    ...prev,
+                    [key]: statusCorrectionModal.newStatus
+                  }));
+
+                  // Append Audit Log
+                  setAttendanceAuditLogs(prev => [
+                    {
+                      id: 'aud_' + Date.now(),
+                      staffName: statusCorrectionModal.staffName,
+                      dutyNumber: statusCorrectionModal.dutyNumber,
+                      oldStatus: statusCorrectionModal.currentStatus,
+                      newStatus: statusCorrectionModal.newStatus,
+                      changedBy: `${session.username} (${session.role})`,
+                      timestamp: new Date().toLocaleString(),
+                      reason: statusCorrectionModal.reason || 'Manual owner status override'
+                    },
+                    ...prev
+                  ]);
+
+                  setStatusCorrectionModal(null);
+                }}
+                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-lg"
+              >
+                Save Attendance Status
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* INDIVIDUAL STAFF DUTY HISTORY MODAL */}
+      {staffHistoryModal?.open && (() => {
+        const combinedDuties = [
+          ...initialHistoricalDuties,
+          ...(initialActiveDuty && !initialHistoricalDuties.some((d: any) => d.id === initialActiveDuty.id) ? [initialActiveDuty] : [])
+        ];
+
+        const historyRows = combinedDuties.map((d: any) => {
+          const sAssignments = (d.assignments || []).filter((as: any) =>
+            as.staffId === staffHistoryModal.staffId || as.staff?.id === staffHistoryModal.staffId || as.staff?.name === staffHistoryModal.staffName
+          );
+          const hasAssignment = sAssignments.length > 0;
+          const pumpNames = hasAssignment
+            ? Array.from(new Set(sAssignments.map((as: any) => as.pump?.name || (as.pumpId === 'p1' ? 'Pump 1' : 'Pump 2')))).join(', ')
+            : '-';
+
+          let msHandled = false;
+          let hsdHandled = false;
+
+          if (hasAssignment) {
+            sAssignments.forEach((as: any) => {
+              const fType = as.fuelType || (as.pumpId === 'p1' ? 'MS' : 'HSD');
+              if (fType === 'MS') msHandled = true;
+              if (fType === 'HSD') hsdHandled = true;
+            });
+            if (!msHandled && !hsdHandled) msHandled = true;
+          }
+
+          const overrideKey = `${d.id}_${staffHistoryModal.staffId}`;
+          const status = attendanceOverrides[overrideKey] || (hasAssignment ? 'PRESENT' : 'NOT_SCHEDULED');
+
+          const startObj = new Date(d.startTime);
+          const startStr = startObj.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) + ' ' +
+            startObj.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+          const endStr = d.endTime
+            ? new Date(d.endTime).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) + ' ' +
+              new Date(d.endTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
+            : 'OPEN';
+
+          return {
+            dutyId: d.id,
+            dutyNumber: d.dutyNumber,
+            pump: pumpNames,
+            msHandled,
+            hsdHandled,
+            startStr,
+            endStr,
+            status
+          };
+        }).sort((a, b) => (b.dutyNumber || 0) - (a.dutyNumber || 0));
+
+        const presentCount = historyRows.filter(r => r.status === 'PRESENT').length;
+        const absentCount = historyRows.filter(r => r.status === 'ABSENT').length;
+        const notSchedCount = historyRows.filter(r => r.status === 'NOT_SCHEDULED').length;
+        const msDuties = historyRows.filter(r => r.status === 'PRESENT' && r.msHandled).length;
+        const hsdDuties = historyRows.filter(r => r.status === 'PRESENT' && r.hsdHandled).length;
+
+        return (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-4xl w-full p-6 shadow-2xl space-y-6 max-h-[90vh] overflow-y-auto">
+              <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-full bg-indigo-600/20 border border-indigo-500/30 text-indigo-400 font-extrabold flex items-center justify-center text-xs">
+                    {staffHistoryModal.staffName.slice(0, 2).toUpperCase()}
+                  </div>
+                  <div>
+                    <h3 className="font-extrabold text-white text-base">STAFF HISTORY: {staffHistoryModal.staffName}</h3>
+                    <p className="text-xs text-slate-400">Complete 24-Hour Duty Session History & Attendance Ledger</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setStaffHistoryModal(null)}
+                  className="text-slate-400 hover:text-white text-sm font-bold bg-slate-800 px-3 py-1.5 rounded-lg"
+                >
+                  ✕ Close
+                </button>
+              </div>
+
+              {/* Summary Cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs font-mono">
+                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-center">
+                  <span className="text-[10px] text-slate-400 uppercase font-sans font-bold block">Present</span>
+                  <span className="text-emerald-400 font-bold text-base mt-0.5 block">{presentCount}</span>
+                </div>
+                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-center">
+                  <span className="text-[10px] text-slate-400 uppercase font-sans font-bold block">Absent</span>
+                  <span className="text-red-400 font-bold text-base mt-0.5 block">{absentCount}</span>
+                </div>
+                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-center">
+                  <span className="text-[10px] text-slate-400 uppercase font-sans font-bold block">Not Scheduled</span>
+                  <span className="text-slate-400 font-bold text-base mt-0.5 block">{notSchedCount}</span>
+                </div>
+                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-center">
+                  <span className="text-[10px] text-slate-400 uppercase font-sans font-bold block">MS Duties</span>
+                  <span className="text-indigo-400 font-bold text-base mt-0.5 block">{msDuties}</span>
+                </div>
+                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-center">
+                  <span className="text-[10px] text-slate-400 uppercase font-sans font-bold block">HSD Duties</span>
+                  <span className="text-emerald-400 font-bold text-base mt-0.5 block">{hsdDuties}</span>
+                </div>
+              </div>
+
+              {/* History Table */}
+              <div className="overflow-x-auto border border-slate-800 rounded-xl">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-slate-950 border-b border-slate-800 text-slate-400 uppercase font-bold font-mono">
+                      <th className="p-3">Duty</th>
+                      <th className="p-3">Pump</th>
+                      <th className="p-3 text-center">MS</th>
+                      <th className="p-3 text-center">HSD</th>
+                      <th className="p-3">Duty Start</th>
+                      <th className="p-3">Duty End</th>
+                      <th className="p-3 text-center">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/40 font-mono">
+                    {historyRows.map((r, idx) => (
+                      <tr key={idx} className="hover:bg-slate-950/40">
+                        <td className="p-3 font-bold text-indigo-400">#{r.dutyNumber}</td>
+                        <td className="p-3 font-sans text-slate-300">{r.pump}</td>
+                        <td className="p-3 text-center">{r.msHandled ? <span className="text-indigo-400 font-bold">✓</span> : '-'}</td>
+                        <td className="p-3 text-center">{r.hsdHandled ? <span className="text-emerald-400 font-bold">✓</span> : '-'}</td>
+                        <td className="p-3 text-slate-300 text-[11px]">{r.startStr}</td>
+                        <td className="p-3 text-slate-300 text-[11px]">{r.endStr}</td>
+                        <td className="p-3 text-center">
+                          {r.status === 'PRESENT' && <span className="px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] font-sans font-bold">PRESENT</span>}
+                          {r.status === 'ABSENT' && <span className="px-2 py-0.5 rounded bg-red-950 text-red-400 border border-red-800 text-[10px] font-sans font-bold">ABSENT</span>}
+                          {r.status === 'NOT_SCHEDULED' && <span className="px-2 py-0.5 rounded bg-slate-950 text-slate-500 border border-slate-800 text-[10px] font-sans font-bold">NOT SCHEDULED</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
 
     </div>
   );
