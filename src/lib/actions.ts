@@ -525,7 +525,7 @@ export async function addCreditTransactionAction(
   await logAudit(session.id, 'ADD_CREDIT_TRANSACTION', 'CreditTransaction', trans.id, undefined, `${transactionType}: ${trans.customer.name} - ${productName || ''} (${quantity || 0} L @ ₹${unitPrice || 0}) = ₹${numAmount}`);
   revalidatePath('/dashboard');
   revalidatePath('/acc/current');
-  return { success: true, transaction: trans };
+  return { success: true, transactionId: trans.id };
 }
 
 export async function deleteCreditTransactionAction(id: string) {

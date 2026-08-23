@@ -157,6 +157,8 @@ export default function DashboardContainer({
 
   // Owner Verification Filter & Reading Correction Modal state
   const [selectedDutyId, setSelectedDutyId] = useState<string>('CURRENT');
+  const [filterStaffId, setFilterStaffId] = useState<string>('ALL');
+  const [filterPumpId, setFilterPumpId] = useState<string>('ALL');
   const [editingReading, setEditingReading] = useState<any>(null);
   const [newReadingVal, setNewReadingVal] = useState<number>(0);
   const [correctionReason, setCorrectionReason] = useState<string>('');
@@ -185,8 +187,10 @@ export default function DashboardContainer({
   };
 
   const [currentClock, setCurrentClock] = useState<string>('');
+  const [isMounted, setIsMounted] = useState<boolean>(false);
 
   useEffect(() => {
+    setIsMounted(true);
     setCurrentClock(new Date().toLocaleString());
     const timer = setInterval(() => {
       setCurrentClock(new Date().toLocaleString());
@@ -519,7 +523,7 @@ export default function DashboardContainer({
 
       console.log("[ADD CREDIT DEBUG] Server Action Response:", res);
 
-      if (res && res.success && res.transaction) {
+      if (res && res.success) {
         // Reset input fields cleanly
         setIndentNumber('');
         setCreditLitres(0);
@@ -527,7 +531,7 @@ export default function DashboardContainer({
         setCreditAmount(0);
         setCreditDesc('');
 
-        // Authoritatively update state from database
+        // Refresh active duty and customer ledger state from database
         await refreshActiveDuty();
 
         flashMessage(
@@ -1067,9 +1071,15 @@ export default function DashboardContainer({
           </div>
 
           <div className="flex items-center gap-4">
-            <div className="text-xs text-slate-400 font-medium">
-              System Time: <span className="font-mono text-slate-200 font-semibold" suppressHydrationWarning>{currentClock || ''}</span>
-            </div>
+            {isMounted ? (
+              <div className="text-xs text-slate-400 font-medium">
+                System Time: <span className="font-mono text-slate-200 font-semibold">{currentClock}</span>
+              </div>
+            ) : (
+              <div className="text-xs text-slate-400 font-medium">
+                System Time: <span className="font-mono text-slate-200 font-semibold">&nbsp;</span>
+              </div>
+            )}
 
             {/* Change Duty Action */}
             {activeDuty ? (
@@ -4027,6 +4037,7 @@ export default function DashboardContainer({
 
           </div>
         </div>
+      )}
       {/* OWNER METER READING CORRECTION MODAL */}
       {editingReading && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
