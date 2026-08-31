@@ -1,0 +1,1624 @@
+{
+  "period": "01-Aug-2026 to 31-Aug-2026",
+  "stationName": "IOCL Swastik Fuel Center",
+  "summary": {
+    "totalDuties": 20,
+    "msLitres": 73074.90000000004,
+    "hsdLitres": 41638.04000000003,
+    "totalLitres": 114712.94000000006,
+    "msRev": 8189875.720600004,
+    "hsdRev": 4166617.1872000024,
+    "fuelRev": 12356492.907800008,
+    "oilRev": 11545,
+    "totalRevenue": 12368037.907800008,
+    "grossInflow": 12390037.907800008,
+    "totalDigital": 713000,
+    "digitalBreakdown": {
+      "phonePe": 37000,
+      "gpay": 88000,
+      "paytm": 95000,
+      "bharatPe": 65000,
+      "cards": 149000,
+      "bankTransfer": 279000
+    },
+    "totalExpectedCash": 10559206.741400007,
+    "totalActualCash": 9516209.68,
+    "totalBankDeposit": 6964274.68,
+    "totalCashDiff": -1042997.0600000074,
+    "totalExpenses": 16170,
+    "creditGiven": 29803.45,
+    "creditCollected": 22000,
+    "netCreditChange": 7803.450000000001,
+    "msTestingLitres": 80,
+    "hsdTestingLitres": 79.91,
+    "totalTestingLitres": 159.91,
+    "totalTestingAmt": 16960.590000000004
+  },
+  "expenseCategories": {
+    "Cleaning": 1100,
+    "Transport": 4200,
+    "Maintenance": 1120,
+    "Miscellaneous": 650,
+    "Stationery": 700,
+    "Electricity": 8000,
+    "Bank charges": 400
+  },
+  "creditCustomers": {
+    "ABC Transport": {
+      "given": 5587.75,
+      "collected": 0
+    },
+    "Hotel Mayura": {
+      "given": 11368.099999999999,
+      "collected": 2000
+    },
+    "TMC KUL": {
+      "given": 12847.599999999999,
+      "collected": 0
+    },
+    "smarth transport": {
+      "given": 0,
+      "collected": 20000
+    }
+  },
+  "staffStats": {
+    "Ramesh": {
+      "dutiesCount": 4,
+      "pumps": [
+        "Pump 1",
+        "Pump 2"
+      ]
+    },
+    "govinda": {
+      "dutiesCount": 16,
+      "pumps": [
+        "Pump 1",
+        "Pump 2"
+      ]
+    },
+    "honnurswamy": {
+      "dutiesCount": 8,
+      "pumps": [
+        "Pump 1",
+        "Pump 2"
+      ]
+    },
+    "chowdesh": {
+      "dutiesCount": 5,
+      "pumps": [
+        "Pump 1",
+        "Pump 2"
+      ]
+    },
+    "Anwar": {
+      "dutiesCount": 11,
+      "pumps": [
+        "Pump 1",
+        "Pump 2"
+      ]
+    },
+    "Nandish K": {
+      "dutiesCount": 11,
+      "pumps": [
+        "Pump 1",
+        "Pump 2"
+      ]
+    },
+    "Krishna": {
+      "dutiesCount": 14,
+      "pumps": [
+        "Pump 2",
+        "Pump 1"
+      ]
+    },
+    "sharmas ": {
+      "dutiesCount": 12,
+      "pumps": [
+        "Pump 2",
+        "Pump 1"
+      ]
+    },
+    "Yamnur": {
+      "dutiesCount": 7,
+      "pumps": [
+        "Pump 1",
+        "Pump 2"
+      ]
+    }
+  },
+  "duties": [
+    {
+      "dutyNumber": 100,
+      "status": "CLOSED",
+      "date": "22/8/2026",
+      "manager": "owner",
+      "msLitres": 3382.66,
+      "hsdLitres": 3708.5699999999997,
+      "totalFuelLitres": 7091.23,
+      "totalRevenue": 750519.0046,
+      "expectedCash": 0,
+      "actualCash": 0,
+      "cashDiff": 0,
+      "digital": 0,
+      "expenses": 0
+    },
+    {
+      "dutyNumber": 101,
+      "status": "CLOSED",
+      "date": "22/8/2026",
+      "manager": "owner",
+      "msLitres": 0,
+      "hsdLitres": 0,
+      "totalFuelLitres": 0,
+      "totalRevenue": 0,
+      "expectedCash": 0,
+      "actualCash": 0,
+      "cashDiff": 0,
+      "digital": 0,
+      "expenses": 0
+    },
+    {
+      "dutyNumber": 102,
+      "status": "CLOSED",
+      "date": "22/8/2026",
+      "manager": "owner",
+      "msLitres": 855.9300000000002,
+      "hsdLitres": 1515.8,
+      "totalFuelLitres": 2371.73,
+      "totalRevenue": 248393.81350000002,
+      "expectedCash": 177342.7635,
+      "actualCash": 177354,
+      "cashDiff": 11.23649999999907,
+      "digital": 0,
+      "expenses": 100
+    },
+    {
+      "dutyNumber": 103,
+      "status": "CLOSED",
+      "date": "23/8/2026",
+      "manager": "owner",
+      "msLitres": 615.78,
+      "hsdLitres": 3612.83,
+      "totalFuelLitres": 4228.61,
+      "totalRevenue": 431831.7534,
+      "expectedCash": 431407.4534,
+      "actualCash": 0,
+      "cashDiff": -431407.4534,
+      "digital": 0,
+      "expenses": 200
+    },
+    {
+      "dutyNumber": 104,
+      "status": "CLOSED",
+      "date": "23/8/2026",
+      "manager": "owner",
+      "msLitres": 3503.0200000000386,
+      "hsdLitres": 2563.9700000000303,
+      "totalFuelLitres": 6066.990000000069,
+      "totalRevenue": 650195.8106000073,
+      "expectedCash": 611472.1106000073,
+      "actualCash": 0,
+      "cashDiff": -611472.1106000073,
+      "digital": 0,
+      "expenses": 670
+    },
+    {
+      "dutyNumber": 105,
+      "status": "CLOSED",
+      "date": "23/8/2026",
+      "manager": "owner",
+      "msLitres": 3891.77,
+      "hsdLitres": 2422.4300000000003,
+      "totalFuelLitres": 6314.200000000001,
+      "totalRevenue": 679993.7999,
+      "expectedCash": 597755.8887,
+      "actualCash": 597756,
+      "cashDiff": 0.1112999999895692,
+      "digital": 0,
+      "expenses": 100
+    },
+    {
+      "dutyNumber": 106,
+      "status": "CLOSED",
+      "date": "23/8/2026",
+      "manager": "owner",
+      "msLitres": 0,
+      "hsdLitres": 0,
+      "totalFuelLitres": 0,
+      "totalRevenue": 0,
+      "expectedCash": -1121.5,
+      "actualCash": 0,
+      "cashDiff": 1121.5,
+      "digital": 0,
+      "expenses": 0
+    },
+    {
+      "dutyNumber": 107,
+      "status": "CLOSED",
+      "date": "23/8/2026",
+      "manager": "manager",
+      "msLitres": 0,
+      "hsdLitres": 0,
+      "totalFuelLitres": 0,
+      "totalRevenue": 0,
+      "expectedCash": 0,
+      "actualCash": 11,
+      "cashDiff": 11,
+      "digital": 0,
+      "expenses": 0
+    },
+    {
+      "dutyNumber": 108,
+      "status": "CLOSED",
+      "date": "23/8/2026",
+      "manager": "manager",
+      "msLitres": 2951.7,
+      "hsdLitres": 1921.45,
+      "totalFuelLitres": 4873.15,
+      "totalRevenue": 524176.218,
+      "expectedCash": 479813.618,
+      "actualCash": 479814,
+      "cashDiff": 0.3820000000414439,
+      "digital": 0,
+      "expenses": 5200
+    },
+    {
+      "dutyNumber": 109,
+      "status": "CLOSED",
+      "date": "23/8/2026",
+      "manager": "owner",
+      "msLitres": 8743.47,
+      "hsdLitres": 3843.9600000000005,
+      "totalFuelLitres": 12587.43,
+      "totalRevenue": 1364719.8858,
+      "expectedCash": 1297357.4858,
+      "actualCash": 1297000,
+      "cashDiff": -357.4858000001404,
+      "digital": 0,
+      "expenses": 1000
+    },
+    {
+      "dutyNumber": 110,
+      "status": "CLOSED",
+      "date": "27/8/2026",
+      "manager": "owner",
+      "msLitres": 8743.47,
+      "hsdLitres": 3843.8800000000006,
+      "totalFuelLitres": 12587.35,
+      "totalRevenue": 1365451.881,
+      "expectedCash": 1361770.381,
+      "actualCash": 1361770,
+      "cashDiff": -0.38,
+      "digital": 0,
+      "expenses": 1000
+    },
+    {
+      "dutyNumber": 111,
+      "status": "CLOSED",
+      "date": "27/8/2026",
+      "manager": "owner",
+      "msLitres": 8743.47,
+      "hsdLitres": 3843.8800000000006,
+      "totalFuelLitres": 12587.35,
+      "totalRevenue": 1364861.881,
+      "expectedCash": 1029499.481,
+      "actualCash": 1029500,
+      "cashDiff": 0.52,
+      "digital": 330000,
+      "expenses": 1000
+    },
+    {
+      "dutyNumber": 112,
+      "status": "CLOSED",
+      "date": "27/8/2026",
+      "manager": "owner",
+      "msLitres": 8743.47,
+      "hsdLitres": 3843.9200000000005,
+      "totalFuelLitres": 12587.39,
+      "totalRevenue": 1364415.8900000001,
+      "expectedCash": 1321101.8888,
+      "actualCash": 1321102,
+      "cashDiff": 0.11,
+      "digital": 38000,
+      "expenses": 200
+    },
+    {
+      "dutyNumber": 113,
+      "status": "CLOSED",
+      "date": "27/8/2026",
+      "manager": "owner",
+      "msLitres": 8743.47,
+      "hsdLitres": 3843.8800000000006,
+      "totalFuelLitres": 12587.35,
+      "totalRevenue": 1364711.88,
+      "expectedCash": 1313728.881,
+      "actualCash": 1313728,
+      "cashDiff": -0.88,
+      "digital": 45000,
+      "expenses": 500
+    },
+    {
+      "dutyNumber": 114,
+      "status": "CLOSED",
+      "date": "27/8/2026",
+      "manager": "owner",
+      "msLitres": 0,
+      "hsdLitres": 0,
+      "totalFuelLitres": 0,
+      "totalRevenue": 900,
+      "expectedCash": 900,
+      "actualCash": 0,
+      "cashDiff": -900,
+      "digital": 0,
+      "expenses": 0
+    },
+    {
+      "dutyNumber": 115,
+      "status": "CLOSED",
+      "date": "28/8/2026",
+      "manager": "owner",
+      "msLitres": 0,
+      "hsdLitres": 0,
+      "totalFuelLitres": 0,
+      "totalRevenue": 0,
+      "expectedCash": 0,
+      "actualCash": 0,
+      "cashDiff": 0,
+      "digital": 0,
+      "expenses": 0
+    },
+    {
+      "dutyNumber": 116,
+      "status": "CLOSED",
+      "date": "28/8/2026",
+      "manager": "owner",
+      "msLitres": 7943.469999999999,
+      "hsdLitres": 3843.8800000000006,
+      "totalFuelLitres": 11787.35,
+      "totalRevenue": 1276103.88,
+      "expectedCash": 1164379.681,
+      "actualCash": 1164379.68,
+      "cashDiff": 0,
+      "digital": 100000,
+      "expenses": 4600
+    },
+    {
+      "dutyNumber": 117,
+      "status": "CLOSED",
+      "date": "28/8/2026",
+      "manager": "owner",
+      "msLitres": 4033.2200000000003,
+      "hsdLitres": 1229.59,
+      "totalFuelLitres": 5262.81,
+      "totalRevenue": 577075.41,
+      "expectedCash": 576475.4086000001,
+      "actualCash": 576475,
+      "cashDiff": -0.41,
+      "digital": 0,
+      "expenses": 600
+    },
+    {
+      "dutyNumber": 118,
+      "status": "CLOSED",
+      "date": "31/8/2026",
+      "manager": "owner",
+      "msLitres": 2180,
+      "hsdLitres": 1600,
+      "totalFuelLitres": 3780,
+      "totalRevenue": 404686.8,
+      "expectedCash": 197323.2,
+      "actualCash": 197320,
+      "cashDiff": -3.2,
+      "digital": 200000,
+      "expenses": 1000
+    },
+    {
+      "dutyNumber": 119,
+      "status": "OPEN",
+      "date": "31/8/2026",
+      "manager": "owner",
+      "msLitres": 0,
+      "hsdLitres": 0,
+      "totalFuelLitres": 0,
+      "totalRevenue": 0,
+      "expectedCash": 0,
+      "actualCash": 0,
+      "cashDiff": 0,
+      "digital": 0,
+      "expenses": 0
+    }
+  ],
+  "shortages": [],
+  "fuelReceipts": [
+    {
+      "id": "0f38faf0-9621-4d65-8077-f287626855f6",
+      "invoiceNumber": "inv-00",
+      "invoiceDate": "2026-08-28T00:00:00.000Z",
+      "receivedDate": "2026-08-28T11:48:56.339Z",
+      "supplier": "IOCL Depot / Terminal",
+      "fuelType": "MS",
+      "quantityLitres": 17000,
+      "remarks": null,
+      "createdById": "67faf12a-27b6-451d-bc39-2c5ee64c2d19",
+      "createdAt": "2026-08-28T11:48:56.342Z",
+      "createdBy": {
+        "id": "67faf12a-27b6-451d-bc39-2c5ee64c2d19",
+        "username": "owner",
+        "passwordHash": "43a0d17178a9d26c9e0fe9a74b0b45e38d32f27aed887a008a54bf6e033bf7b9",
+        "roleId": "2687c0d6-31df-4544-8a47-cb96f065855f",
+        "active": true,
+        "createdAt": "2026-08-22T12:22:12.606Z"
+      }
+    },
+    {
+      "id": "a46a646f-5015-493c-aa38-43928f37e01f",
+      "invoiceNumber": "inv-0",
+      "invoiceDate": "2026-08-28T00:00:00.000Z",
+      "receivedDate": "2026-08-28T11:49:08.629Z",
+      "supplier": "IOCL Depot / Terminal",
+      "fuelType": "MS",
+      "quantityLitres": 6000,
+      "remarks": null,
+      "createdById": "67faf12a-27b6-451d-bc39-2c5ee64c2d19",
+      "createdAt": "2026-08-28T11:49:08.631Z",
+      "createdBy": {
+        "id": "67faf12a-27b6-451d-bc39-2c5ee64c2d19",
+        "username": "owner",
+        "passwordHash": "43a0d17178a9d26c9e0fe9a74b0b45e38d32f27aed887a008a54bf6e033bf7b9",
+        "roleId": "2687c0d6-31df-4544-8a47-cb96f065855f",
+        "active": true,
+        "createdAt": "2026-08-22T12:22:12.606Z"
+      }
+    },
+    {
+      "id": "89be1a4b-75e3-479f-85b9-331e3bc466c7",
+      "invoiceNumber": "inv",
+      "invoiceDate": "2026-08-28T00:00:00.000Z",
+      "receivedDate": "2026-08-28T11:49:25.700Z",
+      "supplier": "IOCL Depot / Terminal",
+      "fuelType": "HSD",
+      "quantityLitres": 20000,
+      "remarks": null,
+      "createdById": "67faf12a-27b6-451d-bc39-2c5ee64c2d19",
+      "createdAt": "2026-08-28T11:49:25.701Z",
+      "createdBy": {
+        "id": "67faf12a-27b6-451d-bc39-2c5ee64c2d19",
+        "username": "owner",
+        "passwordHash": "43a0d17178a9d26c9e0fe9a74b0b45e38d32f27aed887a008a54bf6e033bf7b9",
+        "roleId": "2687c0d6-31df-4544-8a47-cb96f065855f",
+        "active": true,
+        "createdAt": "2026-08-22T12:22:12.606Z"
+      }
+    }
+  ],
+  "auditLogs": [
+    {
+      "action": "START_DUTY_SESSION",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-31T06:08:48.412Z"
+    },
+    {
+      "action": "CLOSE_DUTY_SESSION",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-31T06:07:29.850Z"
+    },
+    {
+      "action": "ADD_CREDIT_TRANSACTION",
+      "recordType": "CreditTransaction",
+      "user": "owner",
+      "time": "2026-08-31T06:06:39.793Z"
+    },
+    {
+      "action": "ADD_CREDIT_TRANSACTION",
+      "recordType": "CreditTransaction",
+      "user": "owner",
+      "time": "2026-08-31T06:06:21.602Z"
+    },
+    {
+      "action": "ADD_EXPENSE",
+      "recordType": "Expense",
+      "user": "owner",
+      "time": "2026-08-31T06:06:06.311Z"
+    },
+    {
+      "action": "ADD_EXPENSE",
+      "recordType": "Expense",
+      "user": "owner",
+      "time": "2026-08-31T06:05:55.092Z"
+    },
+    {
+      "action": "ADD_OIL_SALE",
+      "recordType": "OilSale",
+      "user": "owner",
+      "time": "2026-08-31T06:05:36.897Z"
+    },
+    {
+      "action": "START_DUTY_SESSION",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-31T05:48:28.713Z"
+    },
+    {
+      "action": "CLOSE_DUTY_SESSION",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-31T05:46:12.894Z"
+    },
+    {
+      "action": "DELETE_CREDIT_TRANSACTION",
+      "recordType": "CreditTransaction",
+      "user": "owner",
+      "time": "2026-08-31T05:41:57.885Z"
+    },
+    {
+      "action": "DELETE_CREDIT_TRANSACTION",
+      "recordType": "CreditTransaction",
+      "user": "owner",
+      "time": "2026-08-31T05:41:53.923Z"
+    },
+    {
+      "action": "ADD_FUEL_RECEIPT",
+      "recordType": "FuelReceipt",
+      "user": "owner",
+      "time": "2026-08-28T11:49:25.711Z"
+    },
+    {
+      "action": "ADD_FUEL_RECEIPT",
+      "recordType": "FuelReceipt",
+      "user": "owner",
+      "time": "2026-08-28T11:49:08.644Z"
+    },
+    {
+      "action": "ADD_FUEL_RECEIPT",
+      "recordType": "FuelReceipt",
+      "user": "owner",
+      "time": "2026-08-28T11:48:56.353Z"
+    },
+    {
+      "action": "DELETE_FUEL_RECEIPT",
+      "recordType": "FuelReceipt",
+      "user": "owner",
+      "time": "2026-08-28T11:48:33.167Z"
+    },
+    {
+      "action": "DELETE_FUEL_RECEIPT",
+      "recordType": "FuelReceipt",
+      "user": "owner",
+      "time": "2026-08-28T11:48:31.054Z"
+    },
+    {
+      "action": "DELETE_FUEL_RECEIPT",
+      "recordType": "FuelReceipt",
+      "user": "owner",
+      "time": "2026-08-28T11:47:27.651Z"
+    },
+    {
+      "action": "DELETE_STOCK_MOVEMENT",
+      "recordType": "FuelStockMovement",
+      "user": "owner",
+      "time": "2026-08-28T11:44:57.705Z"
+    },
+    {
+      "action": "ADD_FUEL_RECEIPT",
+      "recordType": "FuelReceipt",
+      "user": "owner",
+      "time": "2026-08-28T11:29:03.357Z"
+    },
+    {
+      "action": "ADD_CREDIT_TRANSACTION",
+      "recordType": "CreditTransaction",
+      "user": "owner",
+      "time": "2026-08-27T20:14:46.851Z"
+    },
+    {
+      "action": "ADD_EXPENSE",
+      "recordType": "Expense",
+      "user": "owner",
+      "time": "2026-08-27T20:14:30.497Z"
+    },
+    {
+      "action": "ADD_OIL_SALE",
+      "recordType": "OilSale",
+      "user": "owner",
+      "time": "2026-08-27T20:14:19.825Z"
+    },
+    {
+      "action": "ADD_FUEL_RECEIPT",
+      "recordType": "FuelReceipt",
+      "user": "owner",
+      "time": "2026-08-27T20:13:24.166Z"
+    },
+    {
+      "action": "ADD_FUEL_RECEIPT",
+      "recordType": "FuelReceipt",
+      "user": "owner",
+      "time": "2026-08-27T20:13:05.317Z"
+    },
+    {
+      "action": "EDIT_FUEL_RECEIPT",
+      "recordType": "FuelReceipt",
+      "user": "owner",
+      "time": "2026-08-27T20:10:56.866Z"
+    },
+    {
+      "action": "EDIT_FUEL_RECEIPT",
+      "recordType": "FuelReceipt",
+      "user": "owner",
+      "time": "2026-08-27T20:10:37.271Z"
+    },
+    {
+      "action": "EDIT_FUEL_RECEIPT",
+      "recordType": "FuelReceipt",
+      "user": "owner",
+      "time": "2026-08-27T20:10:22.821Z"
+    },
+    {
+      "action": "DELETE_FUEL_RECEIPT",
+      "recordType": "FuelReceipt",
+      "user": "owner",
+      "time": "2026-08-27T20:08:05.660Z"
+    },
+    {
+      "action": "DELETE_FUEL_RECEIPT",
+      "recordType": "FuelReceipt",
+      "user": "owner",
+      "time": "2026-08-27T20:07:57.853Z"
+    },
+    {
+      "action": "ADD_FUEL_RECEIPT",
+      "recordType": "FuelReceipt",
+      "user": "owner",
+      "time": "2026-08-27T20:01:57.732Z"
+    },
+    {
+      "action": "ADD_CREDIT_TRANSACTION",
+      "recordType": "CreditTransaction",
+      "user": "owner",
+      "time": "2026-08-27T19:59:38.940Z"
+    },
+    {
+      "action": "ADD_EXPENSE",
+      "recordType": "Expense",
+      "user": "owner",
+      "time": "2026-08-27T19:59:25.092Z"
+    },
+    {
+      "action": "ADD_OIL_SALE",
+      "recordType": "OilSale",
+      "user": "owner",
+      "time": "2026-08-27T19:59:11.576Z"
+    },
+    {
+      "action": "START_DUTY_SESSION",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-27T19:02:48.314Z"
+    },
+    {
+      "action": "CLOSE_DUTY_SESSION",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-27T19:02:30.044Z"
+    },
+    {
+      "action": "ADD_CREDIT_TRANSACTION",
+      "recordType": "CreditTransaction",
+      "user": "owner",
+      "time": "2026-08-27T19:00:01.362Z"
+    },
+    {
+      "action": "ADD_EXPENSE",
+      "recordType": "Expense",
+      "user": "owner",
+      "time": "2026-08-27T18:59:32.514Z"
+    },
+    {
+      "action": "ADD_EXPENSE",
+      "recordType": "Expense",
+      "user": "owner",
+      "time": "2026-08-27T18:59:21.523Z"
+    },
+    {
+      "action": "ADD_OIL_SALE",
+      "recordType": "OilSale",
+      "user": "owner",
+      "time": "2026-08-27T18:59:10.731Z"
+    },
+    {
+      "action": "ADD_OIL_SALE",
+      "recordType": "OilSale",
+      "user": "owner",
+      "time": "2026-08-27T18:59:04.356Z"
+    },
+    {
+      "action": "START_DUTY_SESSION",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-27T18:51:36.513Z"
+    },
+    {
+      "action": "CLOSE_DUTY_SESSION",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-27T18:50:23.744Z"
+    },
+    {
+      "action": "START_DUTY_SESSION",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-27T18:38:13.205Z"
+    },
+    {
+      "action": "CLOSE_DUTY_SESSION",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-27T18:34:51.321Z"
+    },
+    {
+      "action": "DELETE_EXPENSE",
+      "recordType": "Expense",
+      "user": "owner",
+      "time": "2026-08-27T18:19:56.666Z"
+    },
+    {
+      "action": "DELETE_CREDIT_TRANSACTION",
+      "recordType": "CreditTransaction",
+      "user": "owner",
+      "time": "2026-08-27T18:19:53.433Z"
+    },
+    {
+      "action": "ADD_CREDIT_TRANSACTION",
+      "recordType": "CreditTransaction",
+      "user": "owner",
+      "time": "2026-08-27T16:57:25.205Z"
+    },
+    {
+      "action": "ADD_EXPENSE",
+      "recordType": "Expense",
+      "user": "owner",
+      "time": "2026-08-27T16:57:12.251Z"
+    },
+    {
+      "action": "ADD_OIL_SALE",
+      "recordType": "OilSale",
+      "user": "owner",
+      "time": "2026-08-27T16:56:51.357Z"
+    },
+    {
+      "action": "START_DUTY_SESSION",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-27T16:55:54.321Z"
+    },
+    {
+      "action": "CLOSE_DUTY_SESSION",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-27T16:18:20.247Z"
+    },
+    {
+      "action": "ADD_CREDIT_TRANSACTION",
+      "recordType": "CreditTransaction",
+      "user": "owner",
+      "time": "2026-08-27T16:17:28.496Z"
+    },
+    {
+      "action": "ADD_EXPENSE",
+      "recordType": "Expense",
+      "user": "owner",
+      "time": "2026-08-27T16:17:16.149Z"
+    },
+    {
+      "action": "ADD_OIL_SALE",
+      "recordType": "OilSale",
+      "user": "owner",
+      "time": "2026-08-27T16:17:06.634Z"
+    },
+    {
+      "action": "START_DUTY_SESSION",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-27T14:29:27.841Z"
+    },
+    {
+      "action": "CLOSE_DUTY_SESSION",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-27T14:29:13.852Z"
+    },
+    {
+      "action": "ADD_CREDIT_TRANSACTION",
+      "recordType": "CreditTransaction",
+      "user": "owner",
+      "time": "2026-08-27T14:28:27.768Z"
+    },
+    {
+      "action": "ADD_EXPENSE",
+      "recordType": "Expense",
+      "user": "owner",
+      "time": "2026-08-27T14:28:15.431Z"
+    },
+    {
+      "action": "RECORD_OIL_PURCHASE",
+      "recordType": "OilPurchase",
+      "user": "owner",
+      "time": "2026-08-27T14:14:43.273Z"
+    },
+    {
+      "action": "START_DUTY_SESSION",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-27T14:09:20.444Z"
+    },
+    {
+      "action": "CLOSE_DUTY_SESSION",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-27T14:09:11.590Z"
+    },
+    {
+      "action": "RECORD_TANK_SAMPLE",
+      "recordType": "TankSample",
+      "user": "owner",
+      "time": "2026-08-27T14:09:11.506Z"
+    },
+    {
+      "action": "SAVE_METER_READINGS",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-27T14:09:11.300Z"
+    },
+    {
+      "action": "ADD_CREDIT_TRANSACTION",
+      "recordType": "CreditTransaction",
+      "user": "owner",
+      "time": "2026-08-27T14:08:46.631Z"
+    },
+    {
+      "action": "ADD_EXPENSE",
+      "recordType": "Expense",
+      "user": "owner",
+      "time": "2026-08-27T14:08:35.350Z"
+    },
+    {
+      "action": "ADD_OIL_SALE",
+      "recordType": "OilSale",
+      "user": "owner",
+      "time": "2026-08-27T14:08:24.058Z"
+    },
+    {
+      "action": "START_DUTY_SESSION",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-27T13:30:34.018Z"
+    },
+    {
+      "action": "CLOSE_DUTY_SESSION",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-27T13:30:20.111Z"
+    },
+    {
+      "action": "RECORD_TANK_SAMPLE",
+      "recordType": "TankSample",
+      "user": "owner",
+      "time": "2026-08-27T13:30:19.924Z"
+    },
+    {
+      "action": "SAVE_METER_READINGS",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-27T13:30:19.761Z"
+    },
+    {
+      "action": "RECORD_TANK_SAMPLE",
+      "recordType": "TankSample",
+      "user": "owner",
+      "time": "2026-08-27T13:26:16.912Z"
+    },
+    {
+      "action": "SAVE_METER_READINGS",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-27T13:26:16.689Z"
+    },
+    {
+      "action": "RECORD_TANK_SAMPLE",
+      "recordType": "TankSample",
+      "user": "owner",
+      "time": "2026-08-27T13:26:07.528Z"
+    },
+    {
+      "action": "SAVE_METER_READINGS",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-27T13:26:07.290Z"
+    },
+    {
+      "action": "RECORD_TANK_SAMPLE",
+      "recordType": "TankSample",
+      "user": "owner",
+      "time": "2026-08-27T13:17:43.136Z"
+    },
+    {
+      "action": "SAVE_METER_READINGS",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-27T13:17:42.798Z"
+    },
+    {
+      "action": "RECORD_TANK_SAMPLE",
+      "recordType": "TankSample",
+      "user": "owner",
+      "time": "2026-08-27T13:17:37.765Z"
+    },
+    {
+      "action": "SAVE_METER_READINGS",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-27T13:17:37.523Z"
+    },
+    {
+      "action": "RECORD_TANK_SAMPLE",
+      "recordType": "TankSample",
+      "user": "owner",
+      "time": "2026-08-27T13:17:19.972Z"
+    },
+    {
+      "action": "SAVE_METER_READINGS",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-27T13:17:19.171Z"
+    },
+    {
+      "action": "ADD_CREDIT_TRANSACTION",
+      "recordType": "CreditTransaction",
+      "user": "owner",
+      "time": "2026-08-27T13:16:33.115Z"
+    },
+    {
+      "action": "ADD_EXPENSE",
+      "recordType": "Expense",
+      "user": "owner",
+      "time": "2026-08-27T13:16:22.506Z"
+    },
+    {
+      "action": "ADD_OIL_SALE",
+      "recordType": "OilSale",
+      "user": "owner",
+      "time": "2026-08-27T13:16:03.673Z"
+    },
+    {
+      "action": "ADD_OIL_SALE",
+      "recordType": "OilSale",
+      "user": "owner",
+      "time": "2026-08-27T13:15:55.682Z"
+    },
+    {
+      "action": "START_DUTY_SESSION",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-27T12:37:50.668Z"
+    },
+    {
+      "action": "CLOSE_DUTY_SESSION",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-27T12:37:41.229Z"
+    },
+    {
+      "action": "RECORD_TANK_SAMPLE",
+      "recordType": "TankSample",
+      "user": "owner",
+      "time": "2026-08-27T12:37:41.129Z"
+    },
+    {
+      "action": "SAVE_METER_READINGS",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-27T12:37:40.910Z"
+    },
+    {
+      "action": "ADD_CREDIT_TRANSACTION",
+      "recordType": "CreditTransaction",
+      "user": "owner",
+      "time": "2026-08-27T12:37:16.692Z"
+    },
+    {
+      "action": "ADD_EXPENSE",
+      "recordType": "Expense",
+      "user": "owner",
+      "time": "2026-08-27T12:37:01.122Z"
+    },
+    {
+      "action": "ADD_OIL_SALE",
+      "recordType": "OilSale",
+      "user": "owner",
+      "time": "2026-08-27T12:36:52.708Z"
+    },
+    {
+      "action": "START_DUTY_SESSION",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-23T16:01:54.628Z"
+    },
+    {
+      "action": "CLOSE_DUTY_SESSION",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-23T16:01:11.618Z"
+    },
+    {
+      "action": "RECORD_TANK_SAMPLE",
+      "recordType": "TankSample",
+      "user": "owner",
+      "time": "2026-08-23T16:01:11.146Z"
+    },
+    {
+      "action": "SAVE_METER_READINGS",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-23T16:01:10.480Z"
+    },
+    {
+      "action": "ADD_CREDIT_TRANSACTION",
+      "recordType": "CreditTransaction",
+      "user": "owner",
+      "time": "2026-08-23T15:59:18.489Z"
+    },
+    {
+      "action": "ADD_EXPENSE",
+      "recordType": "Expense",
+      "user": "owner",
+      "time": "2026-08-23T15:56:57.147Z"
+    },
+    {
+      "action": "ADD_EXPENSE",
+      "recordType": "Expense",
+      "user": "owner",
+      "time": "2026-08-23T15:55:52.319Z"
+    },
+    {
+      "action": "ADD_CREDIT_TRANSACTION",
+      "recordType": "CreditTransaction",
+      "user": "owner",
+      "time": "2026-08-23T15:54:46.678Z"
+    },
+    {
+      "action": "ADD_OIL_SALE",
+      "recordType": "OilSale",
+      "user": "owner",
+      "time": "2026-08-23T15:53:08.097Z"
+    },
+    {
+      "action": "CREATE_FUEL_PRICE",
+      "recordType": "FuelPrice",
+      "user": "owner",
+      "time": "2026-08-23T15:48:21.134Z"
+    },
+    {
+      "action": "DELETE_OIL_PRODUCT",
+      "recordType": "OilProduct",
+      "user": "owner",
+      "time": "2026-08-23T15:48:01.952Z"
+    },
+    {
+      "action": "UPDATE_OIL_PRICE",
+      "recordType": "OilProduct",
+      "user": "owner",
+      "time": "2026-08-23T15:47:51.550Z"
+    },
+    {
+      "action": "CREATE_OIL_PRODUCT",
+      "recordType": "OilProduct",
+      "user": "owner",
+      "time": "2026-08-23T15:47:36.108Z"
+    },
+    {
+      "action": "TOGGLE_CUSTOMER_STATUS",
+      "recordType": "Customer",
+      "user": "owner",
+      "time": "2026-08-23T15:47:10.191Z"
+    },
+    {
+      "action": "CREATE_CUSTOMER",
+      "recordType": "Customer",
+      "user": "owner",
+      "time": "2026-08-23T15:46:53.619Z"
+    },
+    {
+      "action": "TOGGLE_STAFF_STATUS",
+      "recordType": "Staff",
+      "user": "owner",
+      "time": "2026-08-23T15:46:23.945Z"
+    },
+    {
+      "action": "CREATE_STAFF",
+      "recordType": "Staff",
+      "user": "owner",
+      "time": "2026-08-23T15:46:15.124Z"
+    },
+    {
+      "action": "START_DUTY_SESSION",
+      "recordType": "DutySession",
+      "user": "manager",
+      "time": "2026-08-23T14:02:21.081Z"
+    },
+    {
+      "action": "CLOSE_DUTY_SESSION",
+      "recordType": "DutySession",
+      "user": "manager",
+      "time": "2026-08-23T14:01:27.842Z"
+    },
+    {
+      "action": "SAVE_METER_READINGS",
+      "recordType": "DutySession",
+      "user": "manager",
+      "time": "2026-08-23T14:01:25.709Z"
+    },
+    {
+      "action": "START_DUTY_SESSION",
+      "recordType": "DutySession",
+      "user": "manager",
+      "time": "2026-08-23T14:00:48.881Z"
+    },
+    {
+      "action": "CREATE_FUEL_PRICE",
+      "recordType": "FuelPrice",
+      "user": "owner",
+      "time": "2026-08-23T13:58:46.152Z"
+    },
+    {
+      "action": "CREATE_FUEL_PRICE",
+      "recordType": "FuelPrice",
+      "user": "owner",
+      "time": "2026-08-23T13:58:32.161Z"
+    },
+    {
+      "action": "CREATE_FUEL_PRICE",
+      "recordType": "FuelPrice",
+      "user": "owner",
+      "time": "2026-08-23T13:55:52.893Z"
+    },
+    {
+      "action": "CREATE_FUEL_PRICE",
+      "recordType": "FuelPrice",
+      "user": "owner",
+      "time": "2026-08-23T13:55:44.028Z"
+    },
+    {
+      "action": "CREATE_FUEL_PRICE",
+      "recordType": "FuelPrice",
+      "user": "owner",
+      "time": "2026-08-23T13:55:36.540Z"
+    },
+    {
+      "action": "CLOSE_DUTY_SESSION",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-23T13:48:32.159Z"
+    },
+    {
+      "action": "SAVE_METER_READINGS",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-23T13:48:29.314Z"
+    },
+    {
+      "action": "ADD_CREDIT_TRANSACTION",
+      "recordType": "CreditTransaction",
+      "user": "owner",
+      "time": "2026-08-23T13:47:39.895Z"
+    },
+    {
+      "action": "START_DUTY_SESSION",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-23T13:37:55.915Z"
+    },
+    {
+      "action": "CLOSE_DUTY_SESSION",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-23T13:36:34.881Z"
+    },
+    {
+      "action": "SAVE_METER_READINGS",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-23T13:36:34.699Z"
+    },
+    {
+      "action": "ADD_CREDIT_TRANSACTION",
+      "recordType": "CreditTransaction",
+      "user": "owner",
+      "time": "2026-08-23T13:33:37.940Z"
+    },
+    {
+      "action": "ADD_CREDIT_TRANSACTION",
+      "recordType": "CreditTransaction",
+      "user": "owner",
+      "time": "2026-08-23T13:31:34.629Z"
+    },
+    {
+      "action": "ADD_EXPENSE",
+      "recordType": "Expense",
+      "user": "owner",
+      "time": "2026-08-23T13:30:32.755Z"
+    },
+    {
+      "action": "CREATE_OIL_PRODUCT",
+      "recordType": "OilProduct",
+      "user": "owner",
+      "time": "2026-08-23T13:29:52.021Z"
+    },
+    {
+      "action": "ADD_OIL_SALE",
+      "recordType": "OilSale",
+      "user": "owner",
+      "time": "2026-08-23T13:29:17.802Z"
+    },
+    {
+      "action": "CREATE_CUSTOMER",
+      "recordType": "Customer",
+      "user": "owner",
+      "time": "2026-08-23T13:25:30.106Z"
+    },
+    {
+      "action": "TOGGLE_STAFF_STATUS",
+      "recordType": "Staff",
+      "user": "owner",
+      "time": "2026-08-23T13:25:10.694Z"
+    },
+    {
+      "action": "TOGGLE_STAFF_STATUS",
+      "recordType": "Staff",
+      "user": "owner",
+      "time": "2026-08-23T13:25:01.922Z"
+    },
+    {
+      "action": "CREATE_STAFF",
+      "recordType": "Staff",
+      "user": "owner",
+      "time": "2026-08-23T13:24:52.120Z"
+    },
+    {
+      "action": "START_DUTY_SESSION",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-23T13:12:06.287Z"
+    },
+    {
+      "action": "CLOSE_DUTY_SESSION",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-23T13:11:58.842Z"
+    },
+    {
+      "action": "SAVE_METER_READINGS",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-23T13:11:53.379Z"
+    },
+    {
+      "action": "ADD_CREDIT_TRANSACTION",
+      "recordType": "CreditTransaction",
+      "user": "owner",
+      "time": "2026-08-23T13:10:28.012Z"
+    },
+    {
+      "action": "DELETE_CREDIT_TRANSACTION",
+      "recordType": "CreditTransaction",
+      "user": "owner",
+      "time": "2026-08-23T13:10:01.947Z"
+    },
+    {
+      "action": "ADD_EXPENSE",
+      "recordType": "Expense",
+      "user": "owner",
+      "time": "2026-08-23T13:09:52.579Z"
+    },
+    {
+      "action": "DELETE_EXPENSE",
+      "recordType": "Expense",
+      "user": "owner",
+      "time": "2026-08-23T13:09:40.297Z"
+    },
+    {
+      "action": "ADD_EXPENSE",
+      "recordType": "Expense",
+      "user": "owner",
+      "time": "2026-08-23T13:09:22.473Z"
+    },
+    {
+      "action": "ADD_EXPENSE",
+      "recordType": "Expense",
+      "user": "owner",
+      "time": "2026-08-23T13:08:58.363Z"
+    },
+    {
+      "action": "ADD_OIL_SALE",
+      "recordType": "OilSale",
+      "user": "owner",
+      "time": "2026-08-23T13:07:54.339Z"
+    },
+    {
+      "action": "CREATE_OIL_PRODUCT",
+      "recordType": "OilProduct",
+      "user": "owner",
+      "time": "2026-08-23T12:59:04.304Z"
+    },
+    {
+      "action": "DISABLE_OIL_PRODUCT",
+      "recordType": "OilProduct",
+      "user": "owner",
+      "time": "2026-08-23T12:58:53.820Z"
+    },
+    {
+      "action": "CREATE_STAFF",
+      "recordType": "Staff",
+      "user": "owner",
+      "time": "2026-08-23T12:58:31.494Z"
+    },
+    {
+      "action": "CREATE_STAFF",
+      "recordType": "Staff",
+      "user": "owner",
+      "time": "2026-08-23T12:58:24.737Z"
+    },
+    {
+      "action": "CREATE_STAFF",
+      "recordType": "Staff",
+      "user": "owner",
+      "time": "2026-08-23T12:58:13.381Z"
+    },
+    {
+      "action": "CREATE_STAFF",
+      "recordType": "Staff",
+      "user": "owner",
+      "time": "2026-08-23T12:58:06.732Z"
+    },
+    {
+      "action": "ADD_CREDIT_TRANSACTION",
+      "recordType": "CreditTransaction",
+      "user": "owner",
+      "time": "2026-08-23T12:51:31.638Z"
+    },
+    {
+      "action": "START_DUTY_SESSION",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-23T12:51:05.638Z"
+    },
+    {
+      "action": "CLOSE_DUTY_SESSION",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-23T12:50:54.855Z"
+    },
+    {
+      "action": "SAVE_METER_READINGS",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-23T12:50:54.572Z"
+    },
+    {
+      "action": "ADD_CREDIT_TRANSACTION",
+      "recordType": "CreditTransaction",
+      "user": "owner",
+      "time": "2026-08-23T12:50:29.445Z"
+    },
+    {
+      "action": "DELETE_CREDIT_TRANSACTION",
+      "recordType": "CreditTransaction",
+      "user": "owner",
+      "time": "2026-08-23T12:45:45.214Z"
+    },
+    {
+      "action": "ADD_EXPENSE",
+      "recordType": "Expense",
+      "user": "owner",
+      "time": "2026-08-23T12:45:37.794Z"
+    },
+    {
+      "action": "DELETE_EXPENSE",
+      "recordType": "Expense",
+      "user": "owner",
+      "time": "2026-08-23T12:45:27.145Z"
+    },
+    {
+      "action": "ADD_CREDIT_TRANSACTION",
+      "recordType": "CreditTransaction",
+      "user": "owner",
+      "time": "2026-08-23T12:36:54.637Z"
+    },
+    {
+      "action": "DELETE_CREDIT_TRANSACTION",
+      "recordType": "CreditTransaction",
+      "user": "owner",
+      "time": "2026-08-23T12:36:04.755Z"
+    },
+    {
+      "action": "DELETE_CREDIT_TRANSACTION",
+      "recordType": "CreditTransaction",
+      "user": "owner",
+      "time": "2026-08-23T12:36:00.586Z"
+    },
+    {
+      "action": "ADD_CREDIT_TRANSACTION",
+      "recordType": "CreditTransaction",
+      "user": "owner",
+      "time": "2026-08-23T11:22:21.208Z"
+    },
+    {
+      "action": "ADD_CREDIT_TRANSACTION",
+      "recordType": "CreditTransaction",
+      "user": "owner",
+      "time": "2026-08-23T11:21:09.426Z"
+    },
+    {
+      "action": "ADD_EXPENSE",
+      "recordType": "Expense",
+      "user": "owner",
+      "time": "2026-08-23T11:20:50.151Z"
+    },
+    {
+      "action": "ADD_OIL_SALE",
+      "recordType": "OilSale",
+      "user": "owner",
+      "time": "2026-08-23T11:20:36.914Z"
+    },
+    {
+      "action": "SAVE_METER_READINGS",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-23T11:20:22.924Z"
+    },
+    {
+      "action": "START_DUTY_SESSION",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-23T11:08:47.791Z"
+    },
+    {
+      "action": "CLOSE_DUTY_SESSION",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-23T11:08:38.688Z"
+    },
+    {
+      "action": "SAVE_METER_READINGS",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-23T11:08:38.100Z"
+    },
+    {
+      "action": "ADD_EXPENSE",
+      "recordType": "Expense",
+      "user": "owner",
+      "time": "2026-08-23T11:07:57.955Z"
+    },
+    {
+      "action": "ADD_OIL_SALE",
+      "recordType": "OilSale",
+      "user": "owner",
+      "time": "2026-08-23T11:07:26.802Z"
+    },
+    {
+      "action": "ADD_CREDIT_TRANSACTION",
+      "recordType": "CreditTransaction",
+      "user": "owner",
+      "time": "2026-08-23T11:05:41.537Z"
+    },
+    {
+      "action": "START_DUTY_SESSION",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-22T13:18:23.494Z"
+    },
+    {
+      "action": "CLOSE_DUTY_SESSION",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-22T13:18:12.521Z"
+    },
+    {
+      "action": "SAVE_METER_READINGS",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-22T13:18:12.234Z"
+    },
+    {
+      "action": "START_DUTY_SESSION",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-22T13:06:27.533Z"
+    },
+    {
+      "action": "CLOSE_DUTY_SESSION",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-22T12:54:42.553Z"
+    },
+    {
+      "action": "SAVE_METER_READINGS",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-22T12:54:42.222Z"
+    },
+    {
+      "action": "CREATE_STAFF",
+      "recordType": "Staff",
+      "user": "owner",
+      "time": "2026-08-22T12:52:47.262Z"
+    },
+    {
+      "action": "CREATE_STAFF",
+      "recordType": "Staff",
+      "user": "owner",
+      "time": "2026-08-22T12:52:40.864Z"
+    },
+    {
+      "action": "CREATE_STAFF",
+      "recordType": "Staff",
+      "user": "owner",
+      "time": "2026-08-22T12:52:33.644Z"
+    },
+    {
+      "action": "TOGGLE_STAFF_STATUS",
+      "recordType": "Staff",
+      "user": "owner",
+      "time": "2026-08-22T12:52:18.672Z"
+    },
+    {
+      "action": "TOGGLE_STAFF_STATUS",
+      "recordType": "Staff",
+      "user": "owner",
+      "time": "2026-08-22T12:52:18.245Z"
+    },
+    {
+      "action": "TOGGLE_STAFF_STATUS",
+      "recordType": "Staff",
+      "user": "owner",
+      "time": "2026-08-22T12:52:17.865Z"
+    },
+    {
+      "action": "TOGGLE_STAFF_STATUS",
+      "recordType": "Staff",
+      "user": "owner",
+      "time": "2026-08-22T12:52:16.876Z"
+    },
+    {
+      "action": "TOGGLE_STAFF_STATUS",
+      "recordType": "Staff",
+      "user": "owner",
+      "time": "2026-08-22T12:51:24.589Z"
+    },
+    {
+      "action": "TOGGLE_STAFF_STATUS",
+      "recordType": "Staff",
+      "user": "owner",
+      "time": "2026-08-22T12:51:21.409Z"
+    },
+    {
+      "action": "TOGGLE_STAFF_STATUS",
+      "recordType": "Staff",
+      "user": "owner",
+      "time": "2026-08-22T12:51:19.807Z"
+    },
+    {
+      "action": "TOGGLE_STAFF_STATUS",
+      "recordType": "Staff",
+      "user": "owner",
+      "time": "2026-08-22T12:51:18.447Z"
+    },
+    {
+      "action": "START_DUTY_SESSION",
+      "recordType": "DutySession",
+      "user": "owner",
+      "time": "2026-08-22T12:26:28.438Z"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/auth';
-import { getStaticData, getActiveDutySession, getDashboardStats, getHistoricalDuties, getStaffPerformanceReport, getCreditLedgerReport, getExpenseReport, getOilSalesReport, getStockReport, getAuditLogs } from '@/lib/actions';
+import { getStaticData, getActiveDutySession, getDashboardStats, getHistoricalDuties, getStaffPerformanceReport, getCreditLedgerReport, getExpenseReport, getOilSalesReport, getOilPurchasesReport, getStockReport, getAuditLogs } from '@/lib/actions';
 import DashboardContainer from '@/components/DashboardContainer';
 
 export default async function DashboardPage() {
@@ -21,6 +21,7 @@ export default async function DashboardPage() {
   const creditLedger = await getCreditLedgerReport();
   const expenses = await getExpenseReport();
   const oilSales = await getOilSalesReport();
+  const oilPurchases = await getOilPurchasesReport();
   const stockHistory = await getStockReport();
   const auditLogs = session.role === 'OWNER' ? await getAuditLogs() : [];
 
@@ -35,6 +36,7 @@ export default async function DashboardPage() {
       initialCreditLedger={creditLedger}
       initialExpenses={expenses}
       initialOilSales={oilSales}
+      initialOilPurchases={oilPurchases}
       initialStockHistory={stockHistory}
       initialAuditLogs={auditLogs}
     />

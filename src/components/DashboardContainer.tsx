@@ -17,11 +17,18 @@ import {
   deleteStaffAction, addCustomerAction, toggleCustomerStatusAction, deleteCustomerAction,
   addOilProductAction, updateOilPriceAction, toggleOilProductStatusAction, deleteOilProductAction,
   getStaticData, getCreditLedgerReport, updateMeterReadingAction,
-  getHistoricalDuties, getExpenseReport, getOilSalesReport, recordTankSampleAction
+  getHistoricalDuties, getExpenseReport, getOilSalesReport, getOilPurchasesReport, recordTankSampleAction,
+  recordOilPurchaseAction, assignShortageAction
 } from '@/lib/actions';
 import * as XLSX from 'xlsx';
+import OwnerPastDutyReport from './OwnerPastDutyReport';
+import OwnerCreditLedger from './OwnerCreditLedger';
+import OilInventoryManager from './OilInventoryManager';
+import FuelInventoryManagement from './FuelInventoryManagement';
+import { getChartCalculatedStock } from '@/lib/dipChart20KL';
+import { calculateStockMetrics } from '@/lib/stockCalculations';
 
-const GUN_SORT_ORDER = ['MS-1', 'HSD-1', 'MS-2', 'HSD-2', 'MS-3', 'HSD-3', 'MS-4', 'HSD-4'];
+const GUN_SORT_ORDER = ['MS-1', 'MS-2', 'HSD-1', 'HSD-2', 'MS-3', 'MS-4', 'HSD-3', 'HSD-4'];
 
 function getSortedReadings(meterReadings: any[]) {
   if (!meterReadings) return [];
@@ -43,6 +50,7 @@ interface DashboardContainerProps {
   initialCreditLedger: any[];
   initialExpenses: any[];
   initialOilSales: any[];
+  initialOilPurchases?: any[];
   initialStockHistory: any[];
   initialAuditLogs: any[];
 }
@@ -57,13 +65,14 @@ export default function DashboardContainer({
   initialCreditLedger,
   initialExpenses,
   initialOilSales,
+  initialOilPurchases,
   initialStockHistory,
   initialAuditLogs
 }: DashboardContainerProps) {
   const router = useRouter();
 
   // Navigation State
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'current-duty' | 'history' | 'reports' | 'pricing' | 'settings' | 'audit'>(
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'current-duty' | 'past-duty' | 'credit-ledger' | 'oil-purchases' | 'oil-sales' | 'oil-inventory' | 'reports' | 'pricing' | 'settings' | 'audit' | 'history'>(
     session.role === 'MANAGER' ? 'current-duty' : 'dashboard'
   );
 
@@ -75,6 +84,7 @@ export default function DashboardContainer({
   const [creditLedger, setCreditLedger] = useState<any[]>(initialCreditLedger);
   const [expenses, setExpenses] = useState<any[]>(initialExpenses);
   const [oilSales, setOilSales] = useState<any[]>(initialOilSales);
+  const [oilPurchases, setOilPurchases] = useState<any[]>(initialOilPurchases || []);
   const [stockHistory, setStockHistory] = useState<any[]>(initialStockHistory);
   const [auditLogs, setAuditLogs] = useState<any[]>(initialAuditLogs);
 
@@ -85,7 +95,9 @@ export default function DashboardContainer({
 
   // --- Change Duty Wizard State ---
   const [wizardOpen, setWizardOpen] = useState(false);
-  const [wizardStep, setWizardStep] = useState<1 | 2>(1); // 1: Close active duty, 2: Start new duty
+  const [wizardStep, setWizardStep] = useState<1 | 2 | 'review' | 'firstDuty'>(1); // 1: Close active duty, review: Final report review, 2: Start new duty, firstDuty: First duty setup
+  const [initialFirstReadings, setInitialFirstReadings] = useState<Record<string, number>>({});
+  const [justClosedDutyNumber, setJustClosedDutyNumber] = useState<number | null>(null);
 
   // Closing form state
   const [closingReadings, setClosingReadings] = useState<Record<string, number>>({});
@@ -100,6 +112,9 @@ export default function DashboardContainer({
     bank: number;
   }>({ phonepe: 0, gpay: 0, paytm: 0, bharatpe: 0, cards: 0, bank: 0 });
 
+  // Bank deposit state
+  const [bankDeposit, setBankDeposit] = useState<number>(0);
+
   // Testing/Sample deduction state (both Owner and Manager can enter)
   const [msTestingLitres, setMsTestingLitres] = useState<number>(0);
   const [hsdTestingLitres, setHsdTestingLitres] = useState<number>(0);
@@ -107,10 +122,14 @@ export default function DashboardContainer({
   // Starting new duty form state
   const [newDutyStartTime, setNewDutyStartTime] = useState<string>('');
   const [assignments, setAssignments] = useState<Record<string, string>>({
-    'Pump1_MS': '',
-    'Pump1_HSD': '',
-    'Pump2_MS': '',
-    'Pump2_HSD': '',
+    'MS-1': '',
+    'MS-2': '',
+    'HSD-1': '',
+    'HSD-2': '',
+    'MS-3': '',
+    'MS-4': '',
+    'HSD-3': '',
+    'HSD-4': '',
   });
 
   // Current readings form state (when saving ongoing readings without closing)
@@ -427,6 +446,16 @@ export default function DashboardContainer({
     setCreditUnitPrice(0);
     setCreditAmount(0);
     setCreditDesc('');
+    setAssignments({
+      'MS-1': '',
+      'MS-2': '',
+      'HSD-1': '',
+      'HSD-2': '',
+      'MS-3': '',
+      'MS-4': '',
+      'HSD-3': '',
+      'HSD-4': '',
+    });
   };
 
   // Update readings state cleanly when activeDuty session initializes or changes ID
@@ -478,7 +507,7 @@ export default function DashboardContainer({
   };
 
   // Sort helper for Guns
-  const GUN_SORT_ORDER = ['MS-1', 'HSD-1', 'MS-2', 'HSD-2', 'MS-3', 'HSD-3', 'MS-4', 'HSD-4'];
+  const GUN_SORT_ORDER = ['MS-1', 'MS-2', 'HSD-1', 'HSD-2', 'MS-3', 'MS-4', 'HSD-3', 'HSD-4'];
   const getSortedReadings = (readings: any[]) => {
     if (!readings) return [];
     return [...readings].sort((a, b) => {
@@ -486,6 +515,67 @@ export default function DashboardContainer({
       const idxB = GUN_SORT_ORDER.indexOf(b.gun?.name);
       return (idxA === -1 ? 99 : idxA) - (idxB === -1 ? 99 : idxB);
     });
+  };
+
+  const getAssignedStaffForGun = (dutySession: any, gun: any): string => {
+    if (!gun) return 'Unassigned';
+
+    const normalizePump = (val: string | undefined | null): string => {
+      if (!val) return '';
+      return val.toLowerCase().replace(/[\s\-_]/g, '');
+    };
+
+    const gunName = gun.name;
+    const gunId = gun.id;
+    const gunFuelType = gun.fuelType;
+    const gunPumpId = gun.pumpId;
+    const gunPumpName = gun.pump?.name;
+
+    // 1. Try matching against dutySession.assignments from DB
+    if (dutySession?.assignments && Array.isArray(dutySession.assignments) && dutySession.assignments.length > 0) {
+      // Direct gun match
+      const gunMatch = dutySession.assignments.find(
+        (a: any) =>
+          (gunId && a.gunId === gunId) ||
+          (gunName && a.gunId === gunName) ||
+          (gunName && a.gun?.name === gunName)
+      );
+      if (gunMatch?.staff?.name) return gunMatch.staff.name;
+
+      // Pump & FuelType match (handles legacy sessions or pump-level assignments)
+      const pumpMatch = dutySession.assignments.find((a: any) => {
+        if (a.fuelType && gunFuelType && a.fuelType !== gunFuelType) return false;
+        const aPumpStr = normalizePump(a.pumpId || a.pump?.name);
+        const gPumpIdStr = normalizePump(gunPumpId);
+        const gPumpNameStr = normalizePump(gunPumpName);
+
+        return (
+          (aPumpStr && gPumpIdStr && aPumpStr === gPumpIdStr) ||
+          (aPumpStr && gPumpNameStr && aPumpStr === gPumpNameStr)
+        );
+      });
+      if (pumpMatch?.staff?.name) return pumpMatch.staff.name;
+    }
+
+    // 2. Fallback to current UI form assignments state
+    if (assignments) {
+      const staffVal = assignments[gunName] || (gunId ? assignments[gunId] : undefined);
+      if (staffVal && staticData?.staff) {
+        const staffObj = staticData.staff.find((s: any) => s.id === staffVal || s.name === staffVal);
+        if (staffObj?.name) return staffObj.name;
+      }
+
+      // Legacy key fallback in form state (e.g. Pump1_MS)
+      const pNum = (gunPumpName || '').includes('2') || gunName?.includes('3') || gunName?.includes('4') ? 'Pump2' : 'Pump1';
+      const legacyKey = `${pNum}_${gunFuelType}`;
+      const legacyStaffVal = assignments[legacyKey];
+      if (legacyStaffVal && staticData?.staff) {
+        const staffObj = staticData.staff.find((s: any) => s.id === legacyStaffVal || s.name === legacyStaffVal);
+        if (staffObj?.name) return staffObj.name;
+      }
+    }
+
+    return 'Unassigned';
   };
 
   const handleSaveOngoingReadings = async () => {
@@ -539,6 +629,10 @@ export default function DashboardContainer({
       const updatedOil = await getOilSalesReport();
       if (updatedOil) {
         setOilSales(updatedOil);
+      }
+      const updatedPurchases = await getOilPurchasesReport();
+      if (updatedPurchases) {
+        setOilPurchases(updatedPurchases);
       }
       const updatedStatic = await getStaticData();
       if (updatedStatic) {
@@ -867,75 +961,369 @@ export default function DashboardContainer({
   const expectedCash = grossRevenueInflow - totalDeductions;
   const cashDiff = actualCash - expectedCash;
 
-  const handleCloseActiveDutyStep = async () => {
+  // Step 1 -> Move to Step 4 Final Review Screen
+  const handleProceedToReview = () => {
     if (!activeDuty) return;
+    setErrorMessage(null);
+
+    // Validate that all closing readings are >= opening readings
+    for (const mr of activeDuty.meterReadings) {
+      const prevVal = openingReadings[mr.gunId] !== undefined ? openingReadings[mr.gunId] : mr.previousReading;
+      const currentVal = closingReadings[mr.gunId] !== undefined ? closingReadings[mr.gunId] : mr.currentReading;
+      if (currentVal < prevVal) {
+        setErrorMessage(`Closing reading (${currentVal}) cannot be lower than opening reading (${prevVal}) for ${mr.gun.name}.`);
+        return;
+      }
+    }
+
+    // Density validation
+    const msDens = msDensityInput !== '' ? Number(msDensityInput) : NaN;
+    const hsdDens = hsdDensityInput !== '' ? Number(hsdDensityInput) : NaN;
+
+    if (isNaN(msDens) || msDens < 710 || msDens > 780) {
+      setErrorMessage('MS density must be between 710 and 780 kg/m³ at 15°C.');
+      return;
+    }
+    if (isNaN(hsdDens) || hsdDens < 810 || hsdDens > 870) {
+      setErrorMessage('HSD density must be between 810 and 870 kg/m³ at 15°C.');
+      return;
+    }
+
+    // Dip validation
+    if (msMetrics.dipCm === null || isNaN(msMetrics.dipCm) || msMetrics.dipCm < 0 || msMetrics.dipCm > 211) {
+      setErrorMessage('Please enter a valid MS tank physical dip reading (0.0 to 211.0 cm).');
+      return;
+    }
+    if (hsdMetrics.dipCm === null || isNaN(hsdMetrics.dipCm) || hsdMetrics.dipCm < 0 || hsdMetrics.dipCm > 211) {
+      setErrorMessage('Please enter a valid HSD tank physical dip reading (0.0 to 211.0 cm).');
+      return;
+    }
+
+    if (msIsEditingStock && (msMetrics.correctedStock === null || isNaN(msMetrics.correctedStock) || !msCorrectionReasonInput.trim())) {
+      setErrorMessage('Please enter both the corrected stock volume and reason for MS stock correction.');
+      return;
+    }
+
+    if (hsdIsEditingStock && (hsdMetrics.correctedStock === null || isNaN(hsdMetrics.correctedStock) || !hsdCorrectionReasonInput.trim())) {
+      setErrorMessage('Please enter both the corrected stock volume and reason for HSD stock correction.');
+      return;
+    }
+
+    setWizardStep('review');
+  };
+
+  const [shortageStaffId, setShortageStaffId] = useState<string>('');
+  const [shortageReason, setShortageReason] = useState<string>('Duty Cash Shortage');
+  const [msDensityInput, setMsDensityInput] = useState<string>('');
+  const [hsdDensityInput, setHsdDensityInput] = useState<string>('');
+
+  // Tank Dip state variables
+  const [msDipCmInput, setMsDipCmInput] = useState<string>('');
+  const [msIsEditingStock, setMsIsEditingStock] = useState<boolean>(false);
+  const [msCorrectedStockInput, setMsCorrectedStockInput] = useState<string>('');
+  const [msCorrectionReasonInput, setMsCorrectionReasonInput] = useState<string>('');
+
+  const [hsdDipCmInput, setHsdDipCmInput] = useState<string>('');
+  const [hsdIsEditingStock, setHsdIsEditingStock] = useState<boolean>(false);
+  const [hsdCorrectedStockInput, setHsdCorrectedStockInput] = useState<string>('');
+  const [hsdCorrectionReasonInput, setHsdCorrectionReasonInput] = useState<string>('');
+
+  // Find Opening Tank Stock from central inventory state (previous finalized stock)
+  const getOpeningStockFromHistory = (fType: 'MS' | 'HSD') => {
+    if (staticData?.inventoryState?.[fType]?.openingStock && staticData.inventoryState[fType].openingStock > 0) {
+      return staticData.inventoryState[fType].openingStock;
+    }
+    const previousClosedDuty = historicalDuties?.find((d: any) => d.status === 'CLOSED');
+    const prevDip = previousClosedDuty?.tankDips?.find((t: any) => t.fuelType === fType);
+    if (prevDip?.finalLitres !== null && prevDip?.finalLitres !== undefined && Number(prevDip.finalLitres) > 0) {
+      return Number(prevDip.finalLitres);
+    }
+    if (prevDip?.physicalDip !== null && prevDip?.physicalDip !== undefined && Number(prevDip.physicalDip) > 0) {
+      return Number(prevDip.physicalDip);
+    }
+    if (prevDip?.openingStock !== null && prevDip?.openingStock !== undefined && Number(prevDip.openingStock) > 0) {
+      return Number(prevDip.openingStock);
+    }
+
+    return fType === 'MS' ? 12000 : 15000;
+  };
+
+  const msOpeningTankStock = getOpeningStockFromHistory('MS');
+  const hsdOpeningTankStock = getOpeningStockFromHistory('HSD');
+
+  // Meter dispensing litres for current active duty
+  const msActiveDispensedLitres = activeDuty ? activeDuty.meterReadings
+    .filter((mr: any) => mr.gun?.fuelType === 'MS')
+    .reduce((sum: number, mr: any) => {
+      const prevVal = openingReadings[mr.gunId] !== undefined ? openingReadings[mr.gunId] : mr.previousReading;
+      const currentVal = closingReadings[mr.gunId] !== undefined ? closingReadings[mr.gunId] : mr.currentReading;
+      return sum + Math.max(0, currentVal - prevVal);
+    }, 0) : 0;
+
+  const hsdActiveDispensedLitres = activeDuty ? activeDuty.meterReadings
+    .filter((mr: any) => mr.gun?.fuelType === 'HSD')
+    .reduce((sum: number, mr: any) => {
+      const prevVal = openingReadings[mr.gunId] !== undefined ? openingReadings[mr.gunId] : mr.previousReading;
+      const currentVal = closingReadings[mr.gunId] !== undefined ? closingReadings[mr.gunId] : mr.currentReading;
+      return sum + Math.max(0, currentVal - prevVal);
+    }, 0) : 0;
+
+  // Active receipts during current duty session
+  const msActiveReceipts = activeDuty ? (activeDuty.fuelStockMovements || [])
+    .filter((m: any) => m.fuelType === 'MS' && m.movementType === 'RECEIPT')
+    .reduce((sum: number, m: any) => sum + (m.quantityLitres || 0), 0) : (staticData?.inventoryState?.MS?.activeReceipts || 0);
+
+  const hsdActiveReceipts = activeDuty ? (activeDuty.fuelStockMovements || [])
+    .filter((m: any) => m.fuelType === 'HSD' && m.movementType === 'RECEIPT')
+    .reduce((sum: number, m: any) => sum + (m.quantityLitres || 0), 0) : (staticData?.inventoryState?.HSD?.activeReceipts || 0);
+
+  // Derived stock metrics using centralized stockCalculations module
+  const msMetrics = calculateStockMetrics({
+    fuelType: 'MS',
+    openingStock: msOpeningTankStock,
+    receipts: msActiveReceipts,
+    physicalDispensing: msActiveDispensedLitres,
+    dipCm: msDipCmInput,
+    isCorrected: msIsEditingStock,
+    correctedLitres: msCorrectedStockInput,
+  });
+
+  const hsdMetrics = calculateStockMetrics({
+    fuelType: 'HSD',
+    openingStock: hsdOpeningTankStock,
+    receipts: hsdActiveReceipts,
+    physicalDispensing: hsdActiveDispensedLitres,
+    dipCm: hsdDipCmInput,
+    isCorrected: hsdIsEditingStock,
+    correctedLitres: hsdCorrectedStockInput,
+  });
+
+  // Step 4 Final Review Screen -> Perform Atomic Database Closing
+  const handleConfirmCloseDuty = async () => {
+    if (!activeDuty) return;
+
+    // Density validation before closing
+    const msDens = msDensityInput !== '' ? Number(msDensityInput) : NaN;
+    const hsdDens = hsdDensityInput !== '' ? Number(hsdDensityInput) : NaN;
+
+    if (isNaN(msDens) || msDens < 710 || msDens > 780) {
+      flashMessage('MS density must be between 710 and 780 kg/m³ at 15°C.', 'error');
+      return;
+    }
+    if (isNaN(hsdDens) || hsdDens < 810 || hsdDens > 870) {
+      flashMessage('HSD density must be between 810 and 870 kg/m³ at 15°C.', 'error');
+      return;
+    }
+
+    const shortageAmt = Number((expectedCash - Number(bankDeposit || 0)).toFixed(2));
+    if (shortageAmt > 10 && !shortageStaffId) {
+      flashMessage(`Cash shortage is ₹${shortageAmt.toFixed(2)} (exceeds ₹10 threshold). Please select the staff member responsible for the shortage before closing.`, 'error');
+      return;
+    }
+
     setActionLoading(true);
     setErrorMessage(null);
     try {
-      // 1. Save meter readings entered in the form
       const readingsPayload = activeDuty.meterReadings.map((mr: any) => ({
         gunId: mr.gunId,
         currentReading: closingReadings[mr.gunId] !== undefined ? Number(closingReadings[mr.gunId]) : mr.currentReading,
         previousReading: openingReadings[mr.gunId] !== undefined ? Number(openingReadings[mr.gunId]) : mr.previousReading,
       }));
 
-      await saveMeterReadingsAction(activeDuty.id, readingsPayload);
+      const testingPayload = {
+        msTestingLitres: Number(msTestingLitres || 0),
+        hsdTestingLitres: Number(hsdTestingLitres || 0),
+      };
 
-      // 2. Save Tank Sample Sale / Testing Litres
-      await recordTankSampleAction(activeDuty.id, msTestingLitres, hsdTestingLitres);
+      const shortagePayload = (shortageAmt > 10 && shortageStaffId) ? {
+        staffId: shortageStaffId,
+        amount: shortageAmt,
+        reason: shortageReason || `Duty Cash Shortage (-₹${shortageAmt})`,
+      } : undefined;
 
-      // 3. Call the close action
+      const densityPayload = {
+        msDensity: msDens,
+        hsdDensity: hsdDens,
+      };
+
+      const tankDipPayload = {
+        ms: {
+          dipCm: msMetrics.dipCm ?? 0,
+          chartCalculatedLitres: msMetrics.chartCalculatedStock ?? 0,
+          correctedLitres: msMetrics.correctedStock,
+          finalLitres: msMetrics.finalVerifiedStock ?? 0,
+          isCorrected: msMetrics.isCorrected,
+          correctionReason: msCorrectionReasonInput || undefined,
+        },
+        hsd: {
+          dipCm: hsdMetrics.dipCm ?? 0,
+          chartCalculatedLitres: hsdMetrics.chartCalculatedStock ?? 0,
+          correctedLitres: hsdMetrics.correctedStock,
+          finalLitres: hsdMetrics.finalVerifiedStock ?? 0,
+          isCorrected: hsdMetrics.isCorrected,
+          correctionReason: hsdCorrectionReasonInput || undefined,
+        },
+      };
+
       const res = await closeDutySessionAction(
         activeDuty.id,
-        Number(actualCash),
+        Number(bankDeposit || 0),
         digitalPaymentsSum,
-        0, // Card payments represented in digitalPayments.cards
-        expectedCash
+        Number(digitalPayments.cards || 0),
+        expectedCash,
+        {
+          phonePe: Number(digitalPayments.phonepe || 0),
+          gpay: Number(digitalPayments.gpay || 0),
+          paytm: Number(digitalPayments.paytm || 0),
+          bharatPe: Number(digitalPayments.bharatpe || 0),
+          cardPayments: Number(digitalPayments.cards || 0),
+          bankTransfer: Number(digitalPayments.bank || 0),
+          totalDigital: digitalPaymentsSum,
+        },
+        {
+          bankDeposit: Number(bankDeposit || 0),
+          cashRetained: 0,
+        },
+        readingsPayload,
+        testingPayload,
+        shortagePayload,
+        densityPayload,
+        tankDipPayload
       );
 
       if (res.success) {
-        // Move to starting new duty configuration
-        setWizardStep(2);
-        flashMessage('Current duty session closed successfully. Now, set up the next duty.', 'success');
+        const closedNo = activeDuty.dutyNumber;
+        setJustClosedDutyNumber(closedNo);
+        // Reset density and dip state so next duty gets fresh blank inputs
+        setMsDensityInput('');
+        setHsdDensityInput('');
+        setMsDipCmInput('');
+        setMsIsEditingStock(false);
+        setMsCorrectedStockInput('');
+        setMsCorrectionReasonInput('');
+        setHsdDipCmInput('');
+        setHsdIsEditingStock(false);
+        setHsdCorrectedStockInput('');
+        setHsdCorrectionReasonInput('');
+        setWizardStep(2); // Immediately transition to Assign Next Duty
+        flashMessage(`Duty #${closedNo} successfully closed. Now select staff for the next duty shift.`, 'success');
+        await refreshActiveDuty();
       }
     } catch (err: any) {
-      setErrorMessage(err.message || 'Failed to close duty');
+      setErrorMessage(err.message || 'Unable to close duty session. Nothing was changed.');
     } finally {
       setActionLoading(false);
     }
   };
 
+  // Helper to resolve active guns list reliably from staticData
+  const getResolvedActiveGuns = () => {
+    let activeGuns = staticData?.guns || [];
+    if (!activeGuns || activeGuns.length === 0) {
+      activeGuns = (staticData?.pumps || []).flatMap((p: any) =>
+        (p.guns || []).map((g: any) => ({ ...g, pumpId: p.id, pump: p }))
+      );
+    }
+    return activeGuns;
+  };
+
+  // Handler for First-Ever Duty Start
+  const handleStartFirstDutyStep = async () => {
+    setActionLoading(true);
+    setErrorMessage(null);
+    try {
+      const activeGuns = getResolvedActiveGuns();
+      const requiredGunOrder = ['MS-1', 'MS-2', 'HSD-1', 'HSD-2', 'MS-3', 'MS-4', 'HSD-3', 'HSD-4'];
+      const pumpAssignments: { pumpId: string, fuelType: string, gunId?: string, staffId: string }[] = [];
+
+      for (const gunName of requiredGunOrder) {
+        const gun = activeGuns.find((g: any) => g.name === gunName);
+        const assignedStaffId = assignments[gunName] || (gun ? assignments[gun.id] : undefined);
+        if (!assignedStaffId) {
+          throw new Error(`Please assign staff for ${gunName}.`);
+        }
+        if (!gun) {
+          throw new Error(`Gun ${gunName} not found in database configuration.`);
+        }
+        pumpAssignments.push({
+          pumpId: gun.pumpId,
+          fuelType: gun.fuelType,
+          gunId: gun.id,
+          staffId: assignedStaffId,
+        });
+      }
+
+      if (pumpAssignments.length !== 8) {
+        throw new Error('All 8 gun staff assignments are required to start a duty session.');
+      }
+
+      // Ensure initial baseline readings exist for active guns
+      const readingsPayload: Record<string, number> = {};
+
+      for (const gunName of requiredGunOrder) {
+        const gun = activeGuns.find((g: any) => g.name === gunName);
+        const gunKey = gun ? gun.id : gunName;
+        const val = initialFirstReadings[gunKey] !== undefined ? initialFirstReadings[gunKey] : initialFirstReadings[gunName];
+        if (val === undefined || val === null || isNaN(Number(val)) || Number(val) < 0) {
+          throw new Error(`Please enter a valid initial meter reading for ${gunName}`);
+        }
+        readingsPayload[gunName] = Number(val);
+        if (gun) readingsPayload[gun.id] = Number(val);
+      }
+
+      const res = await startNewDutySession(newDutyStartTime || new Date().toISOString(), pumpAssignments, readingsPayload);
+      if (res.success) {
+        flashMessage(`First Duty session started successfully with baseline meter readings.`, 'success');
+        resetDutyFormState();
+        setWizardOpen(false);
+        setWizardStep(1);
+        await refreshActiveDuty();
+        router.refresh();
+      }
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Failed to start first duty session');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Handler for Normal Next Duty Start
   const handleStartNewDutyStep = async () => {
     setActionLoading(true);
     setErrorMessage(null);
     try {
-      const pumpAssignments: { pumpId: string, fuelType: string, staffId: string }[] = [];
+      const activeGuns = getResolvedActiveGuns();
+      const requiredGunOrder = ['MS-1', 'MS-2', 'HSD-1', 'HSD-2', 'MS-3', 'MS-4', 'HSD-3', 'HSD-4'];
+      const pumpAssignments: { pumpId: string, fuelType: string, gunId?: string, staffId: string }[] = [];
 
-      const pump1 = staticData.pumps.find((p: any) => p.name === 'Pump 1');
-      const pump2 = staticData.pumps.find((p: any) => p.name === 'Pump 2');
-
-      if (pump1) {
-        if (!assignments.Pump1_MS || !assignments.Pump1_HSD) {
-          throw new Error('Please assign staff to both MS and HSD for Pump 1');
+      for (const gunName of requiredGunOrder) {
+        const gun = activeGuns.find((g: any) => g.name === gunName);
+        const assignedStaffId = assignments[gunName] || (gun ? assignments[gun.id] : undefined);
+        if (!assignedStaffId) {
+          throw new Error(`Please assign staff for ${gunName}.`);
         }
-        pumpAssignments.push({ pumpId: pump1.id, fuelType: 'MS', staffId: assignments.Pump1_MS });
-        pumpAssignments.push({ pumpId: pump1.id, fuelType: 'HSD', staffId: assignments.Pump1_HSD });
+        if (!gun) {
+          throw new Error(`Gun ${gunName} not found in database configuration.`);
+        }
+        pumpAssignments.push({
+          pumpId: gun.pumpId,
+          fuelType: gun.fuelType,
+          gunId: gun.id,
+          staffId: assignedStaffId,
+        });
       }
 
-      if (pump2) {
-        if (!assignments.Pump2_MS || !assignments.Pump2_HSD) {
-          throw new Error('Please assign staff to both MS and HSD for Pump 2');
-        }
-        pumpAssignments.push({ pumpId: pump2.id, fuelType: 'MS', staffId: assignments.Pump2_MS });
-        pumpAssignments.push({ pumpId: pump2.id, fuelType: 'HSD', staffId: assignments.Pump2_HSD });
+      if (pumpAssignments.length !== 8) {
+        throw new Error('All 8 gun staff assignments are required to start a duty session.');
       }
 
-      const res = await startNewDutySession(newDutyStartTime, pumpAssignments);
+      const res = await startNewDutySession(newDutyStartTime || new Date().toISOString(), pumpAssignments);
       if (res.success) {
-        flashMessage(`Duty session #${activeDuty ? activeDuty.dutyNumber + 1 : 100} started.`, 'success');
+        flashMessage(`New Duty session started successfully.`, 'success');
         
         // Reset working inputs for the new duty session
         resetDutyFormState();
+        setJustClosedDutyNumber(null);
         setWizardOpen(false);
         setWizardStep(1);
 
@@ -1162,99 +1550,205 @@ export default function DashboardContainer({
             </div>
           </div>
 
-          {/* Nav List */}
-          <nav className="p-4 space-y-1">
-            {session.role === 'OWNER' && (
-              <button
-                onClick={() => setActiveTab('dashboard')}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all ${activeTab === 'dashboard'
-                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-                  }`}
-              >
-                <LayoutDashboard className="h-5 w-5" />
-                Dashboard
-              </button>
-            )}
-
-            <button
-              onClick={() => setActiveTab('current-duty')}
-              className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-semibold transition-all ${activeTab === 'current-duty'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-                }`}
-            >
-              <div className="flex items-center gap-3">
-                <Activity className="h-5 w-5" />
-                Current Duty Entry
-              </div>
-              {activeDuty ? (
-                <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-              ) : (
-                <span className="h-2 w-2 rounded-full bg-red-500" />
-              )}
-            </button>
-
-            <button
-              onClick={() => setActiveTab('history')}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all ${activeTab === 'history'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-                }`}
-            >
-              <History className="h-5 w-5" />
-              ACC History Logs
-            </button>
-
-            <button
-              onClick={() => setActiveTab('reports')}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all ${activeTab === 'reports'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-                }`}
-            >
-              <FileSpreadsheet className="h-5 w-5" />
-              Reports Ledger
-            </button>
-
-            {session.role === 'OWNER' && (
-              <>
-                <div className="h-px bg-slate-800 my-4" />
-                <span className="px-4 text-[10px] text-slate-500 font-bold uppercase tracking-widest block mb-2">Master Config</span>
-
+          <nav className="p-4 space-y-3">
+            {/* OVERVIEW */}
+            <div>
+              <span className="px-3 text-[10px] text-slate-500 font-extrabold uppercase tracking-widest block mb-1">Overview</span>
+              {session.role === 'OWNER' && (
                 <button
-                  onClick={() => setActiveTab('pricing')}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all ${activeTab === 'pricing'
+                  onClick={() => setActiveTab('dashboard')}
+                  className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${activeTab === 'dashboard'
                       ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
                       : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
                     }`}
                 >
-                  <DollarSign className="h-5 w-5" />
+                  <LayoutDashboard className="h-4 w-4" />
+                  Dashboard
+                </button>
+              )}
+            </div>
+
+            {/* DAILY OPERATIONS */}
+            <div>
+              <span className="px-3 text-[10px] text-slate-500 font-extrabold uppercase tracking-widest block mb-1">Daily Operations</span>
+              <button
+                onClick={() => setActiveTab('current-duty')}
+                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${activeTab === 'current-duty'
+                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                  }`}
+              >
+                <div className="flex items-center gap-3">
+                  <Activity className="h-4 w-4" />
+                  Current Duty
+                </div>
+                {activeDuty ? (
+                  <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                ) : (
+                  <span className="h-2 w-2 rounded-full bg-red-500" />
+                )}
+              </button>
+
+              <button
+                onClick={() => setActiveTab('past-duty')}
+                className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${activeTab === 'past-duty' || activeTab === 'history'
+                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                  }`}
+              >
+                <History className="h-4 w-4" />
+                Past Duty Reports
+              </button>
+            </div>
+
+            {/* LEDGERS */}
+            <div>
+              <span className="px-3 text-[10px] text-slate-500 font-extrabold uppercase tracking-widest block mb-1">Ledgers</span>
+              <button
+                onClick={() => setActiveTab('credit-ledger')}
+                className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${activeTab === 'credit-ledger'
+                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                  }`}
+              >
+                <FileSpreadsheet className="h-4 w-4" />
+                Credit Ledger
+              </button>
+            </div>
+
+            {/* INVENTORY */}
+            <div>
+              <span className="px-3 text-[10px] text-slate-500 font-extrabold uppercase tracking-widest block mb-1">Oil Inventory</span>
+              <button
+                onClick={() => setActiveTab('oil-purchases')}
+                className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${activeTab === 'oil-purchases'
+                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                  }`}
+              >
+                <Building2 className="h-4 w-4" />
+                Oil Purchases / Invoices
+              </button>
+              <button
+                onClick={() => setActiveTab('oil-sales')}
+                className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${activeTab === 'oil-sales'
+                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                  }`}
+              >
+                <DollarSign className="h-4 w-4" />
+                Oil Sales
+              </button>
+              <button
+                onClick={() => setActiveTab('oil-inventory')}
+                className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${activeTab === 'oil-inventory'
+                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                  }`}
+              >
+                <HardDrive className="h-4 w-4" />
+                Oil Inventory & Valuation
+              </button>
+            </div>
+
+            {/* REPORTS */}
+            <div>
+              <span className="px-3 text-[10px] text-slate-500 font-extrabold uppercase tracking-widest block mb-1">Reports</span>
+              <button
+                onClick={() => { setActiveTab('reports'); setReportsTab('sales'); }}
+                className={`w-full flex items-center gap-3 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all ${activeTab === 'reports' && reportsTab === 'sales'
+                    ? 'bg-slate-800 text-indigo-400 font-bold'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'
+                  }`}
+              >
+                <BarChart3 className="h-3.5 w-3.5" />
+                Fuel Sales
+              </button>
+              <button
+                onClick={() => { setActiveTab('reports'); setReportsTab('staff'); }}
+                className={`w-full flex items-center gap-3 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all ${activeTab === 'reports' && reportsTab === 'staff'
+                    ? 'bg-slate-800 text-indigo-400 font-bold'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'
+                  }`}
+              >
+                <Users className="h-3.5 w-3.5" />
+                Staff Attendance
+              </button>
+              <button
+                onClick={() => { setActiveTab('reports'); setReportsTab('expenses'); }}
+                className={`w-full flex items-center gap-3 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all ${activeTab === 'reports' && reportsTab === 'expenses'
+                    ? 'bg-slate-800 text-indigo-400 font-bold'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'
+                  }`}
+              >
+                <Wallet className="h-3.5 w-3.5" />
+                Expenses
+              </button>
+              <button
+                onClick={() => { setActiveTab('reports'); setReportsTab('stock'); }}
+                className={`w-full flex items-center gap-3 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all ${activeTab === 'reports' && reportsTab === 'stock'
+                    ? 'bg-slate-800 text-indigo-400 font-bold'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'
+                  }`}
+              >
+                <FlaskConical className="h-3.5 w-3.5" />
+                Stock & Variance
+              </button>
+              <button
+                onClick={() => { setActiveTab('reports'); setReportsTab('cash'); }}
+                className={`w-full flex items-center gap-3 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all ${activeTab === 'reports' && reportsTab === 'cash'
+                    ? 'bg-slate-800 text-indigo-400 font-bold'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'
+                  }`}
+              >
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                Cash Reconciliation
+              </button>
+            </div>
+
+            {/* MASTER CONFIG */}
+            {session.role === 'OWNER' && (
+              <div>
+                <span className="px-3 text-[10px] text-slate-500 font-extrabold uppercase tracking-widest block mb-1">Master Config</span>
+                <button
+                  onClick={() => setActiveTab('pricing')}
+                  className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${activeTab === 'pricing'
+                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                    }`}
+                >
+                  <DollarSign className="h-4 w-4" />
                   Fuel Pricing
                 </button>
 
                 <button
                   onClick={() => setActiveTab('settings')}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all ${activeTab === 'settings'
+                  className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${activeTab === 'settings'
                       ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
                       : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
                     }`}
                 >
-                  <Settings className="h-5 w-5" />
+                  <Settings className="h-4 w-4" />
                   System Config
                 </button>
+              </div>
+            )}
 
+            {/* SECURITY */}
+            {session.role === 'OWNER' && (
+              <div>
+                <span className="px-3 text-[10px] text-slate-500 font-extrabold uppercase tracking-widest block mb-1">Security</span>
                 <button
                   onClick={() => setActiveTab('audit')}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all ${activeTab === 'audit'
+                  className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${activeTab === 'audit'
                       ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
                       : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
                     }`}
                 >
-                  <ShieldAlert className="h-5 w-5" />
+                  <ShieldAlert className="h-4 w-4" />
                   Audit Security Logs
                 </button>
-              </>
+              </div>
             )}
           </nav>
         </div>
@@ -1318,7 +1812,11 @@ export default function DashboardContainer({
               <button
                 onClick={() => {
                   setWizardOpen(true);
-                  setWizardStep(2);
+                  if (initialHistoricalDuties && initialHistoricalDuties.length > 0) {
+                    setWizardStep(2);
+                  } else {
+                    setWizardStep('firstDuty');
+                  }
                 }}
                 className="flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all shadow-md shadow-indigo-600/10"
               >
@@ -1700,8 +2198,10 @@ export default function DashboardContainer({
                           const pumpMsSales = pData.msGuns.reduce((sum: number, mr: any) => sum + (mr.salesAmount || Math.max(0, mr.currentReading - mr.previousReading) * mr.priceUsed), 0);
                           const pumpHsdSales = pData.hsdGuns.reduce((sum: number, mr: any) => sum + (mr.salesAmount || Math.max(0, mr.currentReading - mr.previousReading) * mr.priceUsed), 0);
 
-                          const msStaff = pData.assignments.find((a: any) => a.fuelType === 'MS')?.staff?.name || 'Assigned Staff';
-                          const hsdStaff = pData.assignments.find((a: any) => a.fuelType === 'HSD')?.staff?.name || 'Assigned Staff';
+                          const msG1Staff = pData.msGuns[0]?.gun ? getAssignedStaffForGun(activeDuty, pData.msGuns[0].gun) : 'Assigned Staff';
+                          const msG2Staff = pData.msGuns[1]?.gun ? getAssignedStaffForGun(activeDuty, pData.msGuns[1].gun) : msG1Staff;
+                          const hsdG1Staff = pData.hsdGuns[0]?.gun ? getAssignedStaffForGun(activeDuty, pData.hsdGuns[0].gun) : 'Assigned Staff';
+                          const hsdG2Staff = pData.hsdGuns[1]?.gun ? getAssignedStaffForGun(activeDuty, pData.hsdGuns[1].gun) : hsdG1Staff;
 
                           const isExpanded = expandedPumpId === pump.id;
 
@@ -1715,7 +2215,7 @@ export default function DashboardContainer({
                                   </div>
                                   <div>
                                     <h4 className="font-extrabold text-white text-sm uppercase">{pump.name} Sales Summary</h4>
-                                    <p className="text-[11px] text-slate-400">Staff: <strong className="text-slate-200">MS: {msStaff}</strong> | <strong className="text-slate-200">HSD: {hsdStaff}</strong></p>
+                                    <p className="text-[11px] text-slate-400">Duty Staff: <strong className="text-slate-200">MS: {msG1Staff}{msG2Staff !== msG1Staff ? `, ${msG2Staff}` : ''}</strong> | <strong className="text-slate-200">HSD: {hsdG1Staff}{hsdG2Staff !== hsdG1Staff ? `, ${hsdG2Staff}` : ''}</strong></p>
                                   </div>
                                 </div>
 
@@ -1759,7 +2259,7 @@ export default function DashboardContainer({
                                       <td className="py-2.5 font-bold text-indigo-400 flex items-center gap-1.5">
                                         <Fuel className="h-3.5 w-3.5" /> MS Petrol
                                       </td>
-                                      <td className="py-2.5 font-semibold text-slate-300">{msStaff}</td>
+                                      <td className="py-2.5 font-semibold text-slate-300">{msG1Staff}{msG2Staff !== msG1Staff ? `, ${msG2Staff}` : ''}</td>
                                       <td className="py-2.5 text-right font-mono text-slate-400">
                                         {pData.msGuns.length > 0 ? (pData.msGuns.reduce((s: number, g: any) => s + g.previousReading, 0) / pData.msGuns.length).toFixed(2) : '-'}
                                       </td>
@@ -1775,7 +2275,7 @@ export default function DashboardContainer({
                                       <td className="py-2.5 font-bold text-emerald-400 flex items-center gap-1.5">
                                         <Fuel className="h-3.5 w-3.5" /> HSD Diesel
                                       </td>
-                                      <td className="py-2.5 font-semibold text-slate-300">{hsdStaff}</td>
+                                      <td className="py-2.5 font-semibold text-slate-300">{hsdG1Staff}{hsdG2Staff !== hsdG1Staff ? `, ${hsdG2Staff}` : ''}</td>
                                       <td className="py-2.5 text-right font-mono text-slate-400">
                                         {pData.hsdGuns.length > 0 ? (pData.hsdGuns.reduce((s: number, g: any) => s + g.previousReading, 0) / pData.hsdGuns.length).toFixed(2) : '-'}
                                       </td>
@@ -1801,6 +2301,7 @@ export default function DashboardContainer({
                                       <div key={gIdx} className="bg-slate-950 p-3 rounded-lg border border-slate-800 flex items-center justify-between text-xs">
                                         <div>
                                           <span className="font-bold text-white block">{mr.gun?.name} ({mr.gun?.fuelType})</span>
+                                          <span className="text-[11px] text-emerald-400 font-semibold block">Duty Staff: {getAssignedStaffForGun(activeDuty, mr.gun)}</span>
                                           <span className="text-[11px] text-slate-400 font-mono">Opening: {mr.previousReading} &rarr; Closing: {mr.currentReading}</span>
                                           <span className="text-[11px] text-indigo-400 font-mono block font-bold mt-0.5">Litres: {mr.litresSold || (mr.currentReading - mr.previousReading)} L | ₹{mr.salesAmount || ((mr.currentReading - mr.previousReading) * mr.priceUsed)}</span>
                                         </div>
@@ -2237,7 +2738,11 @@ export default function DashboardContainer({
                   <button
                     onClick={() => {
                       setWizardOpen(true);
-                      setWizardStep(2);
+                      if (initialHistoricalDuties && initialHistoricalDuties.length > 0) {
+                        setWizardStep(2);
+                      } else {
+                        setWizardStep('firstDuty');
+                      }
                     }}
                     className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm transition-all"
                   >
@@ -2376,7 +2881,12 @@ export default function DashboardContainer({
                               return (
                                 <div key={idx} className="bg-slate-950 border border-slate-850 p-4 rounded-xl space-y-3">
                                   <div className="flex justify-between items-center">
-                                    <span className="text-sm font-bold text-slate-200">{mr.gun.name}</span>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-sm font-bold text-slate-200">{mr.gun.name}</span>
+                                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">
+                                        Staff: {getAssignedStaffForGun(activeDuty, mr.gun)}
+                                      </span>
+                                    </div>
                                     <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-slate-900 text-indigo-400 border border-indigo-500/10">
                                       {mr.gun.fuelType} (₹{mr.priceUsed.toFixed(2)})
                                     </span>
@@ -2434,7 +2944,12 @@ export default function DashboardContainer({
                               return (
                                 <div key={idx} className="bg-slate-950 border border-slate-850 p-4 rounded-xl space-y-3">
                                   <div className="flex justify-between items-center">
-                                    <span className="text-sm font-bold text-slate-200">{mr.gun.name}</span>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-sm font-bold text-slate-200">{mr.gun.name}</span>
+                                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
+                                        Staff: {getAssignedStaffForGun(activeDuty, mr.gun)}
+                                      </span>
+                                    </div>
                                     <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-slate-900 text-emerald-400 border border-emerald-500/10">
                                       {mr.gun.fuelType} (₹{mr.priceUsed.toFixed(2)})
                                     </span>
@@ -2940,7 +3455,68 @@ export default function DashboardContainer({
           </div>
         )}
 
-          {/* TAB 3: ACC HISTORY LOGS */}
+        {/* TAB: PAST DUTY REPORTS */}
+        {activeTab === 'past-duty' && (
+          <OwnerPastDutyReport
+            activeDuty={activeDuty}
+            historicalDuties={historicalDuties}
+            staticData={staticData}
+            onRefresh={refreshActiveDuty}
+            flashMessage={flashMessage}
+          />
+        )}
+
+        {/* TAB: CREDIT LEDGER */}
+        {activeTab === 'credit-ledger' && (
+          <OwnerCreditLedger
+            creditLedger={creditLedger}
+            staticData={staticData}
+            historicalDuties={historicalDuties}
+            onRefresh={refreshActiveDuty}
+            flashMessage={flashMessage}
+          />
+        )}
+
+        {/* TAB: OIL PURCHASES */}
+        {activeTab === 'oil-purchases' && (
+          <OilInventoryManager
+            initialSubTab="purchases"
+            staticData={staticData}
+            oilSales={oilSales}
+            oilPurchases={oilPurchases}
+            activeDuty={activeDuty}
+            onRefresh={refreshActiveDuty}
+            flashMessage={flashMessage}
+          />
+        )}
+
+        {/* TAB: OIL SALES */}
+        {activeTab === 'oil-sales' && (
+          <OilInventoryManager
+            initialSubTab="sales"
+            staticData={staticData}
+            oilSales={oilSales}
+            oilPurchases={oilPurchases}
+            activeDuty={activeDuty}
+            onRefresh={refreshActiveDuty}
+            flashMessage={flashMessage}
+          />
+        )}
+
+        {/* TAB: OIL INVENTORY */}
+        {activeTab === 'oil-inventory' && (
+          <OilInventoryManager
+            initialSubTab="inventory"
+            staticData={staticData}
+            oilSales={oilSales}
+            oilPurchases={oilPurchases}
+            activeDuty={activeDuty}
+            onRefresh={refreshActiveDuty}
+            flashMessage={flashMessage}
+          />
+        )}
+
+        {/* TAB 3: ACC HISTORY LOGS */}
           {activeTab === 'history' && (
             <div className="space-y-8">
               <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden">
@@ -4617,19 +5193,22 @@ export default function DashboardContainer({
 
               {/* STOCK REPORT SUB-TAB */}
               {reportsTab === 'stock' && (
-                <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden">
-                  <div className="p-6 border-b border-slate-800 flex justify-between items-center">
-                    <div>
-                      <h4 className="font-extrabold text-white text-base">Underground Fuel Stock & Variance Log</h4>
-                      <p className="text-xs text-slate-400 mt-1">Monitors opening levels, sales volumes, physical dip measurements, and variance shortages.</p>
+                <div className="space-y-8">
+                  <FuelInventoryManagement userRole={session.role} initialStockMap={staticData?.fuelStock} />
+
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden">
+                    <div className="p-6 border-b border-slate-800 flex justify-between items-center">
+                      <div>
+                        <h4 className="font-extrabold text-white text-base">Underground Fuel Tank Stock & Dip Variance Log</h4>
+                        <p className="text-xs text-slate-400 mt-1">Monitors opening levels, sales volumes, physical dip measurements, and variance shortages per duty.</p>
+                      </div>
+                      <button
+                        onClick={() => handleExportExcel('stock-report-table', 'Stock_Variance_Report')}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-850 text-indigo-400 hover:text-indigo-300 text-xs font-bold transition-all"
+                      >
+                        Export to Excel
+                      </button>
                     </div>
-                    <button
-                      onClick={() => handleExportExcel('stock-report-table', 'Stock_Variance_Report')}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-850 text-indigo-400 hover:text-indigo-300 text-xs font-bold transition-all"
-                    >
-                      Export to Excel
-                    </button>
-                  </div>
                   <div className="overflow-x-auto">
                     <table id="stock-report-table" className="w-full text-left border-collapse text-xs">
                       <thead>
@@ -4668,7 +5247,8 @@ export default function DashboardContainer({
                     </table>
                   </div>
                 </div>
-              )}
+              </div>
+            )}
 
               {/* CASH REPORT SUB-TAB */}
               {reportsTab === 'cash' && (
@@ -5081,7 +5661,6 @@ export default function DashboardContainer({
                             <td className="p-4 text-slate-450" suppressHydrationWarning>{new Date(log.timestamp).toLocaleString()}</td>
                             <td className="p-4 font-bold text-indigo-400">{log.user.username}</td>
                             <td className="p-4 font-bold text-slate-205">{log.action}</td>
-                            <td className="p-4 text-slate-400">{log.recordType}</td>
                             <td className="p-4 text-slate-350">
                               {log.oldValue && <span className="text-red-400 line-through mr-2">{log.oldValue}</span>}
                               {log.newValue && <span className="text-emerald-400 font-bold">{log.newValue}</span>}
@@ -5103,14 +5682,17 @@ export default function DashboardContainer({
       {/* CHANGE DUTY WIZARD MODAL POPUP */}
       {wizardOpen && (
         <div className="fixed inset-0 z-50 flex items-start justify-center bg-slate-950/80 backdrop-blur-md p-4 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-850 w-full max-w-3xl rounded-2xl overflow-hidden shadow-2xl animate-scale-up my-8">
+          <div className="bg-slate-900 border border-slate-850 w-full max-w-4xl rounded-2xl overflow-hidden shadow-2xl animate-scale-up my-8">
 
             {/* Modal Header */}
             <div className="bg-slate-950 px-8 py-5 border-b border-slate-850 flex justify-between items-center">
               <div>
                 <span className="text-[10px] text-indigo-400 font-black uppercase tracking-widest block">Operational Shift Change Wizard</span>
                 <h3 className="text-lg font-black text-white">
-                  {wizardStep === 1 ? 'Step 1: Record Closing Readings & Cash' : 'Step 2: Assign Staff for Next Duty Shift'}
+                  {wizardStep === 'firstDuty' && 'Assign First Duty & Set Opening Baseline Readings'}
+                  {wizardStep === 1 && `Step 1: Closing Inputs & Cash Deposit (Duty #${activeDuty?.dutyNumber || ''})`}
+                  {wizardStep === 'review' && `Step 2: Verify & Review Settlement Report (Duty #${activeDuty?.dutyNumber || ''})`}
+                  {wizardStep === 2 && `Step 3: Assign Staff for Next Duty Shift`}
                 </h3>
               </div>
               <button
@@ -5121,8 +5703,180 @@ export default function DashboardContainer({
               </button>
             </div>
 
+            {/* Step Visual Progress Indicator */}
+            {wizardStep === 'firstDuty' ? (
+              <div className="bg-slate-950/60 px-8 py-3 border-b border-slate-900 flex items-center gap-3 text-xs font-bold text-amber-400">
+                <span className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] bg-amber-500 text-slate-950 font-black">1</span>
+                <span>Assign First Duty Staff & Initial Baseline Meter Readings</span>
+              </div>
+            ) : (
+              <div className="bg-slate-950/60 px-8 py-3 border-b border-slate-900 flex justify-between items-center text-xs font-bold text-slate-400">
+                <div className={`flex items-center gap-2 ${wizardStep === 1 ? 'text-indigo-400 font-extrabold' : ''}`}>
+                  <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] ${wizardStep === 1 ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400'}`}>1</span>
+                  <span>1. Closing Inputs</span>
+                </div>
+                <ChevronRight className="h-4 w-4 text-slate-700" />
+                <div className={`flex items-center gap-2 ${wizardStep === 'review' ? 'text-indigo-400 font-extrabold' : ''}`}>
+                  <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] ${wizardStep === 'review' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400'}`}>2</span>
+                  <span>2. Verify & Review</span>
+                </div>
+                <ChevronRight className="h-4 w-4 text-slate-700" />
+                <div className={`flex items-center gap-2 ${wizardStep === 2 ? 'text-emerald-400 font-extrabold' : ''}`}>
+                  <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] ${wizardStep === 2 ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-400'}`}>3</span>
+                  <span>3. Assign Next Duty</span>
+                </div>
+              </div>
+            )}
+
             {/* Modal Body */}
             <div className="p-8 space-y-6">
+
+              {/* FIRST-EVER DUTY SETUP */}
+              {wizardStep === 'firstDuty' && (
+                <div className="space-y-6">
+                  <div className="rounded-xl bg-amber-950/20 border border-amber-500/25 p-4 flex gap-3 text-xs text-amber-400 font-medium">
+                    <Info className="h-5 w-5 shrink-0" />
+                    <span>
+                      No previous completed duty session found. Please enter initial baseline meter readings for all 8 nozzles and assign staff. Initial readings become the opening baseline (zero initial sales).
+                    </span>
+                  </div>
+
+                  {/* Initial Meter Readings Table */}
+                  <div className="bg-slate-950 border border-slate-850 p-4 rounded-xl space-y-3">
+                    <span className="text-xs font-extrabold text-white uppercase tracking-wider block border-b border-slate-900 pb-2">
+                      INITIAL OPENING METER READINGS (ALL 8 GUNS)
+                    </span>
+                    <div className="grid grid-cols-2 gap-4">
+                      {(staticData.guns || []).map((gun: any) => (
+                        <div key={gun.id} className="bg-slate-900 p-3 rounded-lg border border-slate-850 flex justify-between items-center">
+                          <div>
+                            <span className="text-xs font-bold text-white block">{gun.name}</span>
+                            <span className="text-[10px] text-slate-500 font-mono">Pump: {gun.pump?.name || 'Pump 1'} | Fuel: {gun.fuelType}</span>
+                          </div>
+                          <input
+                            type="number"
+                            step="0.01"
+                            required
+                            min="0"
+                            value={initialFirstReadings[gun.id] !== undefined ? initialFirstReadings[gun.id] : ''}
+                            onChange={(e) => setInitialFirstReadings({ ...initialFirstReadings, [gun.id]: Number(e.target.value), [gun.name]: Number(e.target.value) })}
+                            className="w-32 rounded border border-indigo-500/50 bg-slate-950 py-1.5 px-3 text-xs text-indigo-300 font-bold font-mono text-right focus:outline-none"
+                            placeholder="Initial Reading"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Staff Assignments */}
+                  <div className="bg-slate-950 border border-slate-850 p-6 rounded-xl space-y-4">
+                    <span className="text-[10px] text-slate-500 font-extrabold uppercase tracking-wider block border-b border-slate-900 pb-2">
+                      INDIVIDUAL GUN STAFF ASSIGNMENTS (8 GUNS)
+                    </span>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {/* Pump 1 Staff */}
+                      <div className="space-y-4 bg-slate-900/50 p-4 rounded-xl border border-slate-850">
+                        <div className="flex justify-between items-center border-b border-slate-800 pb-2">
+                          <span className="text-xs font-extrabold text-indigo-400">PUMP 1</span>
+                          <span className="text-[10px] font-mono text-slate-400 bg-indigo-500/10 px-2 py-0.5 rounded border border-indigo-500/20">4 Nozzles</span>
+                        </div>
+                        <div className="space-y-3">
+                          <span className="text-[10px] font-bold text-indigo-300 uppercase tracking-wider block">MS (Petrol)</span>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-xs font-bold text-slate-200">MS-1</label>
+                              <span className="text-[10px] text-slate-400 block mb-1">Assigned Staff:</span>
+                              <select required value={assignments['MS-1'] || ''} onChange={(e) => setAssignments({ ...assignments, 'MS-1': e.target.value })} className="block w-full rounded-lg border border-slate-700 bg-slate-950 py-2 px-2 text-xs text-slate-100 font-medium focus:outline-none focus:border-indigo-500">
+                                <option value="">-- Select Staff ▼ --</option>
+                                {staticData.staff.map((s: any) => (<option key={s.id} value={s.id}>{s.name}</option>))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-xs font-bold text-slate-200">MS-2</label>
+                              <span className="text-[10px] text-slate-400 block mb-1">Assigned Staff:</span>
+                              <select required value={assignments['MS-2'] || ''} onChange={(e) => setAssignments({ ...assignments, 'MS-2': e.target.value })} className="block w-full rounded-lg border border-slate-700 bg-slate-950 py-2 px-2 text-xs text-slate-100 font-medium focus:outline-none focus:border-indigo-500">
+                                <option value="">-- Select Staff ▼ --</option>
+                                {staticData.staff.map((s: any) => (<option key={s.id} value={s.id}>{s.name}</option>))}
+                              </select>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="space-y-3 pt-2 border-t border-slate-850">
+                          <span className="text-[10px] font-bold text-emerald-300 uppercase tracking-wider block">HSD (Diesel)</span>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-xs font-bold text-slate-200">HSD-1</label>
+                              <span className="text-[10px] text-slate-400 block mb-1">Assigned Staff:</span>
+                              <select required value={assignments['HSD-1'] || ''} onChange={(e) => setAssignments({ ...assignments, 'HSD-1': e.target.value })} className="block w-full rounded-lg border border-slate-700 bg-slate-950 py-2 px-2 text-xs text-slate-100 font-medium focus:outline-none focus:border-indigo-500">
+                                <option value="">-- Select Staff ▼ --</option>
+                                {staticData.staff.map((s: any) => (<option key={s.id} value={s.id}>{s.name}</option>))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-xs font-bold text-slate-200">HSD-2</label>
+                              <span className="text-[10px] text-slate-400 block mb-1">Assigned Staff:</span>
+                              <select required value={assignments['HSD-2'] || ''} onChange={(e) => setAssignments({ ...assignments, 'HSD-2': e.target.value })} className="block w-full rounded-lg border border-slate-700 bg-slate-950 py-2 px-2 text-xs text-slate-100 font-medium focus:outline-none focus:border-indigo-500">
+                                <option value="">-- Select Staff ▼ --</option>
+                                {staticData.staff.map((s: any) => (<option key={s.id} value={s.id}>{s.name}</option>))}
+                              </select>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Pump 2 Staff */}
+                      <div className="space-y-4 bg-slate-900/50 p-4 rounded-xl border border-slate-850">
+                        <div className="flex justify-between items-center border-b border-slate-800 pb-2">
+                          <span className="text-xs font-extrabold text-emerald-400">PUMP 2</span>
+                          <span className="text-[10px] font-mono text-slate-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">4 Nozzles</span>
+                        </div>
+                        <div className="space-y-3">
+                          <span className="text-[10px] font-bold text-indigo-300 uppercase tracking-wider block">MS (Petrol)</span>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-xs font-bold text-slate-200">MS-3</label>
+                              <span className="text-[10px] text-slate-400 block mb-1">Assigned Staff:</span>
+                              <select required value={assignments['MS-3'] || ''} onChange={(e) => setAssignments({ ...assignments, 'MS-3': e.target.value })} className="block w-full rounded-lg border border-slate-700 bg-slate-950 py-2 px-2 text-xs text-slate-100 font-medium focus:outline-none focus:border-emerald-500">
+                                <option value="">-- Select Staff ▼ --</option>
+                                {staticData.staff.map((s: any) => (<option key={s.id} value={s.id}>{s.name}</option>))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-xs font-bold text-slate-200">MS-4</label>
+                              <span className="text-[10px] text-slate-400 block mb-1">Assigned Staff:</span>
+                              <select required value={assignments['MS-4'] || ''} onChange={(e) => setAssignments({ ...assignments, 'MS-4': e.target.value })} className="block w-full rounded-lg border border-slate-700 bg-slate-950 py-2 px-2 text-xs text-slate-100 font-medium focus:outline-none focus:border-emerald-500">
+                                <option value="">-- Select Staff ▼ --</option>
+                                {staticData.staff.map((s: any) => (<option key={s.id} value={s.id}>{s.name}</option>))}
+                              </select>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="space-y-3 pt-2 border-t border-slate-850">
+                          <span className="text-[10px] font-bold text-emerald-300 uppercase tracking-wider block">HSD (Diesel)</span>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-xs font-bold text-slate-200">HSD-3</label>
+                              <span className="text-[10px] text-slate-400 block mb-1">Assigned Staff:</span>
+                              <select required value={assignments['HSD-3'] || ''} onChange={(e) => setAssignments({ ...assignments, 'HSD-3': e.target.value })} className="block w-full rounded-lg border border-slate-700 bg-slate-950 py-2 px-2 text-xs text-slate-100 font-medium focus:outline-none focus:border-emerald-500">
+                                <option value="">-- Select Staff ▼ --</option>
+                                {staticData.staff.map((s: any) => (<option key={s.id} value={s.id}>{s.name}</option>))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-xs font-bold text-slate-200">HSD-4</label>
+                              <span className="text-[10px] text-slate-400 block mb-1">Assigned Staff:</span>
+                              <select required value={assignments['HSD-4'] || ''} onChange={(e) => setAssignments({ ...assignments, 'HSD-4': e.target.value })} className="block w-full rounded-lg border border-slate-700 bg-slate-950 py-2 px-2 text-xs text-slate-100 font-medium focus:outline-none focus:border-emerald-500">
+                                <option value="">-- Select Staff ▼ --</option>
+                                {staticData.staff.map((s: any) => (<option key={s.id} value={s.id}>{s.name}</option>))}
+                              </select>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* STEP 1: CLOSE ACTIVE DUTY */}
               {wizardStep === 1 && activeDuty && (
@@ -5131,8 +5885,87 @@ export default function DashboardContainer({
                   <div className="rounded-xl bg-indigo-950/20 border border-indigo-500/25 p-4 flex gap-3 text-xs text-indigo-400 font-medium">
                     <Info className="h-5 w-5 shrink-0" />
                     <span>
-                      Please enter the final closing meter readings for the active shift. The system will calculate litres sold, total revenue, digital payments, and expected cash drawer balance dynamically.
+                      Please enter density at 15°C, closing meter readings, and physical tank dip (cm) for the active shift. System auto-calculates stock and sales dynamically.
                     </span>
+                  </div>
+
+                  {/* 1. DENSITY @ 15°C - TOP OF THE FORM */}
+                  <div className="bg-slate-950 border border-blue-500/40 p-5 rounded-xl space-y-4">
+                    <div className="flex justify-between items-center border-b border-slate-850 pb-2">
+                      <div>
+                        <span className="text-xs font-extrabold text-blue-400 uppercase tracking-wider block">DENSITY @ 15°C</span>
+                        <span className="text-[10px] text-slate-400">Mandatory fuel quality density checks recorded for Duty #{activeDuty.dutyNumber}. Stored per duty session.</span>
+                      </div>
+                      <span className="px-2.5 py-0.5 rounded text-[10px] font-bold bg-blue-500/10 text-blue-400 border border-blue-500/20 uppercase">
+                        Mandatory Entry
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* MS Density Input */}
+                      <div className="bg-slate-900/80 p-4 rounded-xl border border-amber-500/30 space-y-2">
+                        <div className="flex justify-between items-center">
+                          <label htmlFor="ms-density-input-top" className="text-xs font-extrabold text-amber-400 uppercase tracking-wider">
+                            MS / PETROL DENSITY *
+                          </label>
+                          <span className="text-[10px] font-mono font-bold text-slate-400">Valid: 710 – 780 kg/m³</span>
+                        </div>
+                        <div className="relative">
+                          <input
+                            id="ms-density-input-top"
+                            type="number"
+                            step="0.1"
+                            required
+                            value={msDensityInput}
+                            onChange={(e) => setMsDensityInput(e.target.value)}
+                            className={`w-full rounded-lg border bg-slate-950 py-2.5 px-3 text-sm text-white font-mono font-bold focus:outline-none ${
+                              msDensityInput !== '' && (Number(msDensityInput) < 710 || Number(msDensityInput) > 780)
+                                ? 'border-red-500 text-red-400 focus:border-red-400'
+                                : 'border-slate-700 focus:border-amber-400'
+                            }`}
+                            placeholder="e.g. 750.0"
+                          />
+                          <span className="absolute right-3 top-2.5 text-xs text-slate-400 font-mono">kg/m³ @ 15°C</span>
+                        </div>
+                        {msDensityInput !== '' && (Number(msDensityInput) < 710 || Number(msDensityInput) > 780) && (
+                          <p className="text-[11px] font-bold text-red-400">
+                            ⚠️ MS density must be between 710 and 780 kg/m³ at 15°C.
+                          </p>
+                        )}
+                      </div>
+
+                      {/* HSD Density Input */}
+                      <div className="bg-slate-900/80 p-4 rounded-xl border border-emerald-500/30 space-y-2">
+                        <div className="flex justify-between items-center">
+                          <label htmlFor="hsd-density-input-top" className="text-xs font-extrabold text-emerald-400 uppercase tracking-wider">
+                            HSD / DIESEL DENSITY *
+                          </label>
+                          <span className="text-[10px] font-mono font-bold text-slate-400">Valid: 810 – 870 kg/m³</span>
+                        </div>
+                        <div className="relative">
+                          <input
+                            id="hsd-density-input-top"
+                            type="number"
+                            step="0.1"
+                            required
+                            value={hsdDensityInput}
+                            onChange={(e) => setHsdDensityInput(e.target.value)}
+                            className={`w-full rounded-lg border bg-slate-950 py-2.5 px-3 text-sm text-white font-mono font-bold focus:outline-none ${
+                              hsdDensityInput !== '' && (Number(hsdDensityInput) < 810 || Number(hsdDensityInput) > 870)
+                                ? 'border-red-500 text-red-400 focus:border-red-400'
+                                : 'border-slate-700 focus:border-emerald-400'
+                            }`}
+                            placeholder="e.g. 842.0"
+                          />
+                          <span className="absolute right-3 top-2.5 text-xs text-slate-400 font-mono">kg/m³ @ 15°C</span>
+                        </div>
+                        {hsdDensityInput !== '' && (Number(hsdDensityInput) < 810 || Number(hsdDensityInput) > 870) && (
+                          <p className="text-[11px] font-bold text-red-400">
+                            ⚠️ HSD density must be between 810 and 870 kg/m³ at 15°C.
+                          </p>
+                        )}
+                      </div>
+                    </div>
                   </div>
 
                   {/* SHIFT CLOSING READINGS Table */}
@@ -5147,6 +5980,7 @@ export default function DashboardContainer({
                       <thead>
                         <tr className="border-b border-slate-850 text-slate-400 uppercase font-bold text-[10px]">
                           <th className="p-2.5">Gun</th>
+                          <th className="p-2.5">Duty Staff</th>
                           <th className="p-2.5 text-right">Opening</th>
                           <th className="p-2.5 text-right">Closing</th>
                           <th className="p-2.5 text-right">Litres Sold</th>
@@ -5161,9 +5995,12 @@ export default function DashboardContainer({
                           const litres = Math.max(0, currentVal - prevVal);
                           const sales = litres * mr.priceUsed;
                           const isOwner = session?.role === 'OWNER';
+                          const assignedStaff = getAssignedStaffForGun(activeDuty, mr.gun);
+
                           return (
                             <tr key={idx} className="hover:bg-slate-900/50">
                               <td className="p-2.5 font-sans font-bold text-slate-200">{mr.gun.name} <span className="text-[10px] text-slate-500 font-normal">({mr.gun.fuelType})</span></td>
+                              <td className="p-2.5 font-sans font-semibold text-emerald-400 text-xs">{assignedStaff}</td>
                               <td className="p-2.5 text-right">
                                 {isOwner ? (
                                   <input
@@ -5207,6 +6044,295 @@ export default function DashboardContainer({
                         })}
                       </tbody>
                     </table>
+                  </div>
+
+                  {/* 2. TANK DIP / PHYSICAL STOCK SECTION */}
+                  <div className="bg-slate-950 border border-indigo-500/40 p-5 rounded-xl space-y-4">
+                    <div className="flex justify-between items-center border-b border-slate-850 pb-2">
+                      <div>
+                        <span className="text-xs font-extrabold text-indigo-400 uppercase tracking-wider block">TANK DIP / PHYSICAL STOCK</span>
+                        <span className="text-[10px] text-slate-400">
+                          Enter physical dip measurement (cm). Software automatically calculates stock using verified 20 KL Dip Chart.
+                        </span>
+                      </div>
+                      <span className="px-2.5 py-0.5 rounded text-[10px] font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 uppercase">
+                        20 KL Dip Chart Integrated
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                      {/* MS Tank Dip Input */}
+                      <div className="bg-slate-900/80 p-4 rounded-xl border border-amber-500/30 space-y-3">
+                        <div className="flex justify-between items-center border-b border-slate-800 pb-2">
+                          <span className="text-xs font-extrabold text-amber-400 uppercase tracking-wider">MS TANK DIP</span>
+                          <span className="text-[10px] font-mono text-slate-400">Capacity: 20,000 L</span>
+                        </div>
+
+                        <div className="space-y-1">
+                          <label htmlFor="ms-dip-cm-input" className="block text-[10px] font-bold text-slate-300 uppercase">
+                            Dip Reading (cm) *
+                          </label>
+                          <div className="relative">
+                            <input
+                              id="ms-dip-cm-input"
+                              type="number"
+                              step="0.1"
+                              min="0"
+                              max="211"
+                              value={msDipCmInput}
+                              onChange={(e) => setMsDipCmInput(e.target.value)}
+                              className="w-full rounded-lg border border-slate-700 bg-slate-950 py-2.5 px-3 text-sm text-white font-mono font-bold focus:border-amber-400 focus:outline-none"
+                              placeholder="e.g. 100.4"
+                            />
+                            <span className="absolute right-3 top-2.5 text-xs text-slate-400 font-mono">cm</span>
+                          </div>
+                        </div>
+
+                        {/* Auto Chart Calculated Litres */}
+                        <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 space-y-1">
+                          <div className="flex justify-between items-center text-xs font-sans">
+                            <span className="text-slate-400 font-semibold">Chart Calculated Stock:</span>
+                            <span className="font-mono font-extrabold text-indigo-300 text-sm">
+                              {msMetrics.chartStockText}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Edit / Correct Stock Button */}
+                        <div className="pt-1">
+                          {!msIsEditingStock ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setMsIsEditingStock(true);
+                                setMsCorrectedStockInput(msMetrics.chartCalculatedStock ? String(msMetrics.chartCalculatedStock) : '');
+                              }}
+                              className="text-[11px] font-bold text-amber-400 hover:text-amber-300 flex items-center gap-1 bg-amber-950/30 px-3 py-1.5 rounded-md border border-amber-500/30 transition-all"
+                            >
+                              <Edit className="h-3 w-3" /> Edit / Correct Stock
+                            </button>
+                          ) : (
+                            <div className="space-y-2 bg-amber-950/20 p-3 rounded-lg border border-amber-500/40">
+                              <div className="flex justify-between items-center">
+                                <span className="text-[10px] font-extrabold text-amber-400 uppercase">Corrected Stock Entry</span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setMsIsEditingStock(false);
+                                    setMsCorrectedStockInput('');
+                                    setMsCorrectionReasonInput('');
+                                  }}
+                                  className="text-[10px] text-slate-400 hover:text-white underline"
+                                >
+                                  Cancel Override
+                                </button>
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-bold text-slate-300 uppercase">Verified Corrected Stock (L) *</label>
+                                <input
+                                  type="number"
+                                  step="0.1"
+                                  value={msCorrectedStockInput}
+                                  onChange={(e) => setMsCorrectedStockInput(e.target.value)}
+                                  className="w-full rounded border border-amber-500/60 bg-slate-950 py-1.5 px-2.5 text-xs text-amber-300 font-mono font-bold focus:outline-none"
+                                  placeholder="e.g. 10250.0"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-bold text-slate-300 uppercase">Reason for Stock Correction *</label>
+                                <input
+                                  type="text"
+                                  value={msCorrectionReasonInput}
+                                  onChange={(e) => setMsCorrectionReasonInput(e.target.value)}
+                                  className="w-full rounded border border-slate-700 bg-slate-950 py-1.5 px-2.5 text-xs text-white focus:outline-none"
+                                  placeholder="e.g. Verified via manual gauge stick"
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Stock Summary Box */}
+                        <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 space-y-1.5 text-xs">
+                          <div className="flex justify-between text-slate-400">
+                            <span>Opening / Carry-forward:</span>
+                            <span className="font-mono font-semibold text-slate-300">{msMetrics.openingStockText}</span>
+                          </div>
+                          <div className="flex justify-between text-slate-400">
+                            <span>Receipts (+):</span>
+                            <span className="font-mono font-semibold text-emerald-400">+{msMetrics.receipts.toFixed(1)} L</span>
+                          </div>
+                          <div className="flex justify-between text-slate-400">
+                            <span>Meter Dispensed (-):</span>
+                            <span className="font-mono font-semibold text-amber-400">-{msActiveDispensedLitres.toFixed(1)} L</span>
+                          </div>
+                          <div className="flex justify-between text-slate-300 font-bold border-t border-slate-850 pt-1">
+                            <span>BOOK / EXPECTED STOCK:</span>
+                            <span className="font-mono font-bold text-indigo-300">{msMetrics.expectedClosingText}</span>
+                          </div>
+                          <div className="flex justify-between text-slate-400">
+                            <span>Chart Stock:</span>
+                            <span className="font-mono font-semibold text-slate-300">{msMetrics.chartStockText}</span>
+                          </div>
+                          {msIsEditingStock && (
+                            <div className="flex justify-between text-amber-400">
+                              <span>Corrected Stock:</span>
+                              <span className="font-mono font-bold">{msMetrics.correctedStock !== null ? `${msMetrics.correctedStock.toFixed(1)} L` : 'Pending'}</span>
+                            </div>
+                          )}
+                          <div className="flex justify-between text-white font-bold border-t border-slate-850 pt-1">
+                            <span>PHYSICAL VERIFIED STOCK:</span>
+                            <span className="font-mono font-black text-amber-400">{msMetrics.finalVerifiedStockText}</span>
+                          </div>
+                          <div className="flex justify-between text-slate-400 border-t border-slate-850 pt-1">
+                            <span>VARIATION:</span>
+                            <span className={`font-mono font-bold ${
+                              msMetrics.stockVariation === null ? 'text-slate-400 font-normal italic' :
+                              msMetrics.stockVariation < -0.01 ? 'text-red-400' :
+                              msMetrics.stockVariation > 0.01 ? 'text-emerald-400' : 'text-slate-300'
+                            }`}>
+                              {msMetrics.variationText}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* HSD Tank Dip Input */}
+                      <div className="bg-slate-900/80 p-4 rounded-xl border border-emerald-500/30 space-y-3">
+                        <div className="flex justify-between items-center border-b border-slate-800 pb-2">
+                          <span className="text-xs font-extrabold text-emerald-400 uppercase tracking-wider">HSD TANK DIP</span>
+                          <span className="text-[10px] font-mono text-slate-400">Capacity: 20,000 L</span>
+                        </div>
+
+                        <div className="space-y-1">
+                          <label htmlFor="hsd-dip-cm-input" className="block text-[10px] font-bold text-slate-300 uppercase">
+                            Dip Reading (cm) *
+                          </label>
+                          <div className="relative">
+                            <input
+                              id="hsd-dip-cm-input"
+                              type="number"
+                              step="0.1"
+                              min="0"
+                              max="211"
+                              value={hsdDipCmInput}
+                              onChange={(e) => setHsdDipCmInput(e.target.value)}
+                              className="w-full rounded-lg border border-slate-700 bg-slate-950 py-2.5 px-3 text-sm text-white font-mono font-bold focus:border-emerald-400 focus:outline-none"
+                              placeholder="e.g. 150.2"
+                            />
+                            <span className="absolute right-3 top-2.5 text-xs text-slate-400 font-mono">cm</span>
+                          </div>
+                        </div>
+
+                        {/* Auto Chart Calculated Litres */}
+                        <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 space-y-1">
+                          <div className="flex justify-between items-center text-xs font-sans">
+                            <span className="text-slate-400 font-semibold">Chart Calculated Stock:</span>
+                            <span className="font-mono font-extrabold text-indigo-300 text-sm">
+                              {hsdMetrics.chartStockText}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Edit / Correct Stock Button */}
+                        <div className="pt-1">
+                          {!hsdIsEditingStock ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setHsdIsEditingStock(true);
+                                setHsdCorrectedStockInput(hsdMetrics.chartCalculatedStock ? String(hsdMetrics.chartCalculatedStock) : '');
+                              }}
+                              className="text-[11px] font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-1 bg-emerald-950/30 px-3 py-1.5 rounded-md border border-emerald-500/30 transition-all"
+                            >
+                              <Edit className="h-3 w-3" /> Edit / Correct Stock
+                            </button>
+                          ) : (
+                            <div className="space-y-2 bg-emerald-950/20 p-3 rounded-lg border border-emerald-500/40">
+                              <div className="flex justify-between items-center">
+                                <span className="text-[10px] font-extrabold text-emerald-400 uppercase">Corrected Stock Entry</span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setHsdIsEditingStock(false);
+                                    setHsdCorrectedStockInput('');
+                                    setHsdCorrectionReasonInput('');
+                                  }}
+                                  className="text-[10px] text-slate-400 hover:text-white underline"
+                                >
+                                  Cancel Override
+                                </button>
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-bold text-slate-300 uppercase">Verified Corrected Stock (L) *</label>
+                                <input
+                                  type="number"
+                                  step="0.1"
+                                  value={hsdCorrectedStockInput}
+                                  onChange={(e) => setHsdCorrectedStockInput(e.target.value)}
+                                  className="w-full rounded border border-emerald-500/60 bg-slate-950 py-1.5 px-2.5 text-xs text-emerald-300 font-mono font-bold focus:outline-none"
+                                  placeholder="e.g. 14500.0"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-bold text-slate-300 uppercase">Reason for Stock Correction *</label>
+                                <input
+                                  type="text"
+                                  value={hsdCorrectionReasonInput}
+                                  onChange={(e) => setHsdCorrectionReasonInput(e.target.value)}
+                                  className="w-full rounded border border-slate-700 bg-slate-950 py-1.5 px-2.5 text-xs text-white focus:outline-none"
+                                  placeholder="e.g. Verified via manual gauge stick"
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Stock Summary Box */}
+                        <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 space-y-1.5 text-xs">
+                          <div className="flex justify-between text-slate-400">
+                            <span>Opening / Carry-forward:</span>
+                            <span className="font-mono font-semibold text-slate-300">{hsdMetrics.openingStockText}</span>
+                          </div>
+                          <div className="flex justify-between text-slate-400">
+                            <span>Receipts (+):</span>
+                            <span className="font-mono font-semibold text-emerald-400">+{hsdMetrics.receipts.toFixed(1)} L</span>
+                          </div>
+                          <div className="flex justify-between text-slate-400">
+                            <span>Meter Dispensed (-):</span>
+                            <span className="font-mono font-semibold text-amber-400">-{hsdActiveDispensedLitres.toFixed(1)} L</span>
+                          </div>
+                          <div className="flex justify-between text-slate-300 font-bold border-t border-slate-850 pt-1">
+                            <span>BOOK / EXPECTED STOCK:</span>
+                            <span className="font-mono font-bold text-indigo-300">{hsdMetrics.expectedClosingText}</span>
+                          </div>
+                          <div className="flex justify-between text-slate-400">
+                            <span>Chart Stock:</span>
+                            <span className="font-mono font-semibold text-slate-300">{hsdMetrics.chartStockText}</span>
+                          </div>
+                          {hsdIsEditingStock && (
+                            <div className="flex justify-between text-emerald-400">
+                              <span>Corrected Stock:</span>
+                              <span className="font-mono font-bold">{hsdMetrics.correctedStock !== null ? `${hsdMetrics.correctedStock.toFixed(1)} L` : 'Pending'}</span>
+                            </div>
+                          )}
+                          <div className="flex justify-between text-white font-bold border-t border-slate-850 pt-1">
+                            <span>PHYSICAL VERIFIED STOCK:</span>
+                            <span className="font-mono font-black text-emerald-400">{hsdMetrics.finalVerifiedStockText}</span>
+                          </div>
+                          <div className="flex justify-between text-slate-400 border-t border-slate-850 pt-1">
+                            <span>VARIATION:</span>
+                            <span className={`font-mono font-bold ${
+                              hsdMetrics.stockVariation === null ? 'text-slate-400 font-normal italic' :
+                              hsdMetrics.stockVariation < -0.01 ? 'text-red-400' :
+                              hsdMetrics.stockVariation > 0.01 ? 'text-emerald-400' : 'text-slate-300'
+                            }`}>
+                              {hsdMetrics.variationText}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                   </div>
 
                   {/* Testing / Sample Deduction */}
@@ -5475,7 +6601,7 @@ export default function DashboardContainer({
 
                       {/* 2. DEDUCTIONS / DEBIT (NON-CASH) */}
                       <div className="space-y-1.5 bg-slate-900/60 p-3 rounded-lg border border-slate-850">
-                        <span className="text-[10px] font-bold text-red-400 uppercase tracking-wider block border-b border-slate-800 pb-1">2. DEDUCTIONS / DEBIT (NON-CASH)</span>
+                        <span className="text-[10px] font-bold text-red-400 uppercase tracking-wider block border-b border-slate-880 pb-1">2. DEDUCTIONS / DEBIT (NON-CASH)</span>
                         <div className="flex justify-between text-slate-300 font-sans">
                           <span className="font-semibold text-amber-300">Credit Given (Debit):</span>
                           <span className="font-mono font-bold text-amber-400">-₹{creditSalesAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
@@ -5507,30 +6633,348 @@ export default function DashboardContainer({
                     </div>
                   </div>
 
-                  {/* Cash Drawer Reconciliation */}
-                  <div className="bg-slate-950 border border-slate-850 p-4 rounded-xl grid grid-cols-2 gap-6 items-center">
-                    <div>
-                      <label htmlFor="actual-cash" className="block text-xs font-bold text-slate-300 uppercase">PHYSICAL CASH COUNTED IN DRAWER (₹)</label>
-                      <input id="actual-cash" type="number" required value={actualCash || ''} onChange={(e) => setActualCash(Number(e.target.value))} className="block w-full rounded border border-slate-700 bg-slate-900 py-2 px-3 mt-1.5 text-sm text-white font-bold font-mono focus:border-indigo-500 focus:outline-none" placeholder="Enter counted cash drawer" />
-                    </div>
-                    <div className="space-y-1.5 text-xs font-semibold text-slate-300">
-                      <div className="flex justify-between"><span>EXPECTED FOR DEPOSIT:</span><span className="font-mono text-white">₹{expectedCash.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
-                      <div className="flex justify-between"><span>PHYSICAL COUNTED:</span><span className="font-mono text-white">₹{actualCash.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
-                      <div className="flex justify-between border-t border-slate-850 pt-1.5 font-bold">
-                        <span>SHORT / SURPLUS:</span>
-                        <span className={`font-mono ${cashDiff < 0 ? 'text-red-400' : cashDiff > 0 ? 'text-emerald-400' : 'text-slate-400'}`}>
-                          {cashDiff < 0 ? `-₹${Math.abs(cashDiff).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (SHORTAGE)` : cashDiff > 0 ? `+₹${cashDiff.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (SURPLUS)` : '₹0 (BALANCED)'}
+                  {/* FINAL BANK DEPOSIT */}
+                  <div className="bg-slate-950 border border-slate-800 p-5 rounded-xl space-y-4 text-xs">
+                    <span className="text-xs font-extrabold text-indigo-400 uppercase tracking-wider block border-b border-slate-850 pb-2 flex justify-between items-center">
+                      <span>FINAL BANK DEPOSIT</span>
+                      <span className="text-[10px] text-slate-400 font-normal">Auto-Calculated Reconciliation</span>
+                    </span>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
+                      <div className="bg-slate-900 p-3.5 rounded-lg border border-slate-800">
+                        <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">EXPECTED CASH TO DEPOSIT</span>
+                        <span className="font-mono text-base font-extrabold text-indigo-300 block mt-1">
+                          ₹{expectedCash.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </span>
+                      </div>
+
+                      <div>
+                        <label htmlFor="bank-deposit-input" className="block text-[10px] font-bold text-slate-300 uppercase tracking-wider mb-1">BANK DEPOSITED CASH (₹) *</label>
+                        <input
+                          id="bank-deposit-input"
+                          type="number"
+                          required
+                          min="0"
+                          value={bankDeposit || ''}
+                          onChange={(e) => {
+                            const val = Number(e.target.value);
+                            setBankDeposit(val);
+                            setActualCash(val);
+                          }}
+                          className="block w-full rounded-lg border border-emerald-500/50 bg-slate-900 py-2.5 px-3 text-sm text-emerald-400 font-bold font-mono focus:border-emerald-500 focus:outline-none shadow-sm"
+                          placeholder="Enter amount deposited to bank"
+                        />
+                      </div>
+
+                      <div className="bg-slate-900 p-3.5 rounded-lg border border-slate-800">
+                        <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">DIFFERENCE</span>
+                        {(() => {
+                          const diff = Number(((bankDeposit || 0) - expectedCash).toFixed(2));
+                          if (diff < -0.01) {
+                            return <span className="font-mono text-base font-extrabold text-red-400 block mt-1">₹{Math.abs(diff).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} SHORTAGE</span>;
+                          } else if (diff > 0.01) {
+                            return <span className="font-mono text-base font-extrabold text-emerald-400 block mt-1">₹{diff.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} SURPLUS</span>;
+                          } else {
+                            return <span className="font-mono text-base font-extrabold text-slate-300 block mt-1">₹0 BALANCED</span>;
+                          }
+                        })()}
+                      </div>
+                    </div>
+
+                    {/* Shortage Attribution Component (> ₹10) */}
+                    {((expectedCash - (bankDeposit || 0)) > 10) && (
+                      <div className="mt-4 bg-red-950/40 border border-red-500/50 p-4 rounded-xl space-y-3">
+                        <div className="flex items-center gap-2 text-red-400 font-extrabold text-xs uppercase tracking-wider">
+                          <AlertTriangle className="h-4 w-4 shrink-0 text-red-400" />
+                          <span>CASH SHORTAGE DETECTED: ₹{(expectedCash - (bankDeposit || 0)).toFixed(2)} (Exceeds ₹10 Threshold)</span>
+                        </div>
+                        <p className="text-[11px] text-slate-300">
+                          A cash shortage of ₹{(expectedCash - (bankDeposit || 0)).toFixed(2)} was detected. Select the staff member responsible for this shortage to record responsibility:
+                        </p>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-300 uppercase mb-1">Staff Member Responsible *</label>
+                            <select
+                              required
+                              value={shortageStaffId}
+                              onChange={(e) => setShortageStaffId(e.target.value)}
+                              className="w-full rounded-lg border border-red-500/60 bg-slate-900 py-2.5 px-3 text-xs text-white font-bold focus:outline-none focus:border-red-400"
+                            >
+                              <option value="">-- Select Staff Member ▼ --</option>
+                              {staticData.staff.map((s: any) => (
+                                <option key={s.id} value={s.id}>
+                                  {s.name} ({s.role})
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-300 uppercase mb-1">Shortage Remark / Reason</label>
+                            <input
+                              type="text"
+                              value={shortageReason}
+                              onChange={(e) => setShortageReason(e.target.value)}
+                              className="w-full rounded-lg border border-slate-700 bg-slate-900 py-2.5 px-3 text-xs text-white focus:outline-none focus:border-red-400"
+                              placeholder="Reason for shortage"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* DENSITY AT 15°C INPUTS */}
+                    <div className="bg-slate-950 border border-slate-800 p-5 rounded-xl space-y-4 text-xs mt-4">
+                      <span className="text-xs font-extrabold text-blue-400 uppercase tracking-wider block border-b border-slate-850 pb-2 flex justify-between items-center">
+                        <span>FUEL DENSITY RECORDING @ 15°C</span>
+                        <span className="text-[10px] text-slate-400 font-normal">Mandatory Operational Quality Standard</span>
+                      </span>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* MS Density */}
+                        <div className="bg-slate-900/80 p-4 rounded-xl border border-amber-500/30 space-y-2">
+                          <div className="flex justify-between items-center">
+                            <label htmlFor="ms-density-input" className="text-xs font-extrabold text-amber-400 uppercase tracking-wider">
+                              MS / PETROL DENSITY *
+                            </label>
+                            <span className="text-[10px] font-mono font-bold text-slate-400">Valid: 710 - 780 kg/m³</span>
+                          </div>
+                          <div className="relative">
+                            <input
+                              id="ms-density-input"
+                              type="number"
+                              step="0.1"
+                              required
+                              value={msDensityInput}
+                              onChange={(e) => setMsDensityInput(e.target.value)}
+                              className={`w-full rounded-lg border bg-slate-950 py-2.5 px-3 text-sm text-white font-mono font-bold focus:outline-none ${
+                                msDensityInput !== '' && (Number(msDensityInput) < 710 || Number(msDensityInput) > 780)
+                                  ? 'border-red-500 text-red-400 focus:border-red-400'
+                                  : 'border-slate-700 focus:border-amber-400'
+                              }`}
+                              placeholder="e.g. 750.0"
+                            />
+                            <span className="absolute right-3 top-2.5 text-xs text-slate-400 font-mono">kg/m³ @ 15°C</span>
+                          </div>
+                          {msDensityInput !== '' && (Number(msDensityInput) < 710 || Number(msDensityInput) > 780) && (
+                            <p className="text-[11px] font-bold text-red-400">
+                              ⚠️ MS density must be between 710 and 780 kg/m³ at 15°C.
+                            </p>
+                          )}
+                        </div>
+
+                        {/* HSD Density */}
+                        <div className="bg-slate-900/80 p-4 rounded-xl border border-emerald-500/30 space-y-2">
+                          <div className="flex justify-between items-center">
+                            <label htmlFor="hsd-density-input" className="text-xs font-extrabold text-emerald-400 uppercase tracking-wider">
+                              HSD / DIESEL DENSITY *
+                            </label>
+                            <span className="text-[10px] font-mono font-bold text-slate-400">Valid: 810 - 870 kg/m³</span>
+                          </div>
+                          <div className="relative">
+                            <input
+                              id="hsd-density-input"
+                              type="number"
+                              step="0.1"
+                              required
+                              value={hsdDensityInput}
+                              onChange={(e) => setHsdDensityInput(e.target.value)}
+                              className={`w-full rounded-lg border bg-slate-950 py-2.5 px-3 text-sm text-white font-mono font-bold focus:outline-none ${
+                                hsdDensityInput !== '' && (Number(hsdDensityInput) < 810 || Number(hsdDensityInput) > 870)
+                                  ? 'border-red-500 text-red-400 focus:border-red-400'
+                                  : 'border-slate-700 focus:border-emerald-400'
+                              }`}
+                              placeholder="e.g. 842.0"
+                            />
+                            <span className="absolute right-3 top-2.5 text-xs text-slate-400 font-mono">kg/m³ @ 15°C</span>
+                          </div>
+                          {hsdDensityInput !== '' && (Number(hsdDensityInput) < 810 || Number(hsdDensityInput) > 870) && (
+                            <p className="text-[11px] font-bold text-red-400">
+                              ⚠️ HSD density must be between 810 and 870 kg/m³ at 15°C.
+                            </p>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
               )}
 
+              {/* STEP 4: FINAL REVIEW SCREEN BEFORE CLOSING */}
+              {wizardStep === 'review' && activeDuty && (
+                <div className="space-y-6">
+                  <div className="rounded-xl bg-indigo-950/30 border border-indigo-500/40 p-4 flex gap-3 text-xs text-indigo-300 font-medium">
+                    <CheckCircle2 className="h-5 w-5 shrink-0 text-indigo-400" />
+                    <span>
+                      Step 4: Review full duty closing report before committing. Inspect all numbers carefully. Clicking "CONFIRM & CLOSE DUTY #{activeDuty.dutyNumber}" will permanently seal this duty session in an atomic database transaction.
+                    </span>
+                  </div>
 
-              {/* STEP 2: START NEW DUTY */}
+                  {/* Review Summary Card */}
+                  <div className="bg-slate-950 border border-slate-800 rounded-xl p-6 space-y-6 text-xs">
+                    <div className="flex justify-between items-center border-b border-slate-850 pb-3">
+                      <div>
+                        <span className="text-[10px] text-slate-500 uppercase font-black tracking-widest block">SHIFT SETTLEMENT SUMMARY</span>
+                        <h4 className="text-base font-extrabold text-white">Duty #{activeDuty.dutyNumber} Closing Report</h4>
+                      </div>
+                      <span className="px-3 py-1 rounded-full text-xs font-extrabold bg-amber-500/10 border border-amber-500/30 text-amber-400">
+                        PENDING FINAL CONFIRMATION
+                      </span>
+                    </div>
+
+                    {/* Meter Readings Review Table */}
+                    <div className="space-y-2">
+                      <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block">Meter Readings & Nozzle Sales</span>
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="border-b border-slate-850 text-slate-500 uppercase font-bold text-[10px]">
+                            <th className="py-2">Gun</th>
+                            <th className="py-2">Duty Staff</th>
+                            <th className="py-2 text-right">Opening</th>
+                            <th className="py-2 text-right">Closing</th>
+                            <th className="py-2 text-right">Litres</th>
+                            <th className="py-2 text-right">Amount (₹)</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-900 font-mono text-xs">
+                          {getSortedReadings(activeDuty.meterReadings).map((mr: any, idx: number) => {
+                            const prevVal = openingReadings[mr.gunId] !== undefined ? openingReadings[mr.gunId] : mr.previousReading;
+                            const currentVal = closingReadings[mr.gunId] !== undefined ? closingReadings[mr.gunId] : mr.currentReading;
+                            const litres = Math.max(0, currentVal - prevVal);
+                            const sales = litres * mr.priceUsed;
+                            const pName = mr.gun?.pump?.name || 'Pump 1';
+                            const fType = mr.gun?.fuelType || 'MS';
+                            const assignedStaff = getAssignedStaffForGun(activeDuty, mr.gun);
+
+                            return (
+                              <tr key={idx}>
+                                <td className="py-2 font-sans font-bold text-slate-200">{mr.gun.name} ({mr.gun.fuelType})</td>
+                                <td className="py-2 font-sans text-emerald-400">{assignedStaff}</td>
+                                <td className="py-2 text-right text-slate-400">{prevVal.toFixed(2)}</td>
+                                <td className="py-2 text-right text-white font-bold">{currentVal.toFixed(2)}</td>
+                                <td className="py-2 text-right text-indigo-300 font-bold">{litres.toFixed(2)} L</td>
+                                <td className="py-2 text-right text-emerald-400 font-bold">₹{sales.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Financial Reconciliation Summary */}
+                    <div className="grid grid-cols-2 gap-4 border-t border-slate-850 pt-4">
+                      <div className="space-y-2 bg-slate-900/60 p-3 rounded-lg border border-slate-850">
+                        <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider block">REVENUE INFLOWS</span>
+                        <div className="flex justify-between text-slate-300"><span>Gross Fuel Sales:</span><span className="font-mono text-white font-bold">₹{grossFuelSalesTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></div>
+                        <div className="flex justify-between text-slate-300"><span>Oil/Lubricants Sales:</span><span className="font-mono text-white font-bold">₹{oilSalesTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></div>
+                        <div className="flex justify-between text-slate-300"><span>Credit Collections:</span><span className="font-mono text-emerald-400 font-bold">+₹{creditCollectionsCash.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></div>
+                        <div className="flex justify-between border-t border-slate-800 pt-1 font-bold text-emerald-300"><span>Total Gross Revenue:</span><span className="font-mono">₹{grossRevenueInflow.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></div>
+                      </div>
+
+                      <div className="space-y-2 bg-slate-900/60 p-3 rounded-lg border border-slate-850">
+                        <span className="text-[10px] font-bold text-red-400 uppercase tracking-wider block">NON-CASH DEDUCTIONS</span>
+                        <div className="flex justify-between text-slate-300"><span>Credit Given:</span><span className="font-mono text-amber-400 font-bold">-₹{creditSalesAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></div>
+                        <div className="flex justify-between text-slate-300"><span>Digital Payments:</span><span className="font-mono text-sky-400 font-bold">-₹{digitalPaymentsSum.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></div>
+                        <div className="flex justify-between text-slate-300"><span>Cash Expenses:</span><span className="font-mono text-red-400 font-bold">-₹{expensesPaidInCash.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></div>
+                        <div className="flex justify-between border-t border-slate-800 pt-1 font-bold text-red-300"><span>Total Deductions:</span><span className="font-mono">₹{totalDeductions.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></div>
+                      </div>
+                    </div>
+
+                    {/* Final Cash Comparison Box */}
+                    <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 grid grid-cols-3 gap-4 items-center">
+                      <div>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">EXPECTED CASH</span>
+                        <span className="font-mono text-sm font-extrabold text-indigo-300">₹{expectedCash.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">BANK DEPOSITED CASH</span>
+                        <span className="font-mono text-sm font-extrabold text-emerald-400">₹{Number(bankDeposit || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">SETTLEMENT STATUS</span>
+                        {(() => {
+                          const diff = Number(((bankDeposit || 0) - expectedCash).toFixed(2));
+                          if (diff < -0.01) {
+                            return <span className="font-mono text-sm font-extrabold text-red-400 block">₹{Math.abs(diff).toLocaleString(undefined, { minimumFractionDigits: 2 })} SHORTAGE</span>;
+                          } else if (diff > 0.01) {
+                            return <span className="font-mono text-sm font-extrabold text-emerald-400 block">₹{diff.toLocaleString(undefined, { minimumFractionDigits: 2 })} SURPLUS</span>;
+                          } else {
+                            return <span className="font-mono text-sm font-extrabold text-slate-300 block">₹0 BALANCED</span>;
+                          }
+                        })()}
+                      </div>
+                    </div>
+
+                    {/* DENSITY & TANK DIP VERIFICATION SUMMARY FOR STEP 4 REVIEW */}
+                    <div className="space-y-3 border-t border-slate-850 pt-4 bg-slate-900/40 p-4 rounded-xl border border-slate-850">
+                      <span className="text-[10px] font-extrabold text-blue-400 uppercase tracking-wider block">
+                        FUEL DENSITY & TANK DIP VERIFICATION SUMMARY
+                      </span>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-mono">
+                        {/* MS Summary */}
+                        <div className="bg-slate-950 p-3.5 rounded-lg border border-slate-800 space-y-1.5">
+                          <span className="text-amber-400 font-sans font-extrabold block text-xs">MS PETROL</span>
+                          <div className="flex justify-between text-slate-300"><span>Density @ 15°C:</span><span className="font-bold text-white">{msDensityInput ? `${msDensityInput} kg/m³` : 'N/A'}</span></div>
+                          <div className="flex justify-between text-slate-300"><span>Opening Stock:</span><span className="font-bold text-slate-200">{msMetrics.openingStockText}</span></div>
+                          <div className="flex justify-between text-slate-300"><span>Meter Dispensing:</span><span className="font-bold text-slate-200">{msActiveDispensedLitres.toFixed(1)} L</span></div>
+                          <div className="flex justify-between text-slate-300"><span>Expected Closing:</span><span className="font-bold text-slate-200">{msMetrics.expectedClosingText}</span></div>
+                          <div className="flex justify-between text-slate-300"><span>Dip Reading:</span><span className="font-bold text-indigo-300">{msDipCmInput !== '' ? `${msDipCmInput} cm` : 'Not entered'}</span></div>
+                          <div className="flex justify-between text-slate-300"><span>Chart Calculated Stock:</span><span className="font-bold text-white">{msMetrics.chartStockText}</span></div>
+                          {msIsEditingStock && msMetrics.correctedStock !== null && (
+                            <div className="flex justify-between text-amber-400"><span>Corrected Stock:</span><span className="font-bold">{msMetrics.correctedStock.toFixed(1)} L ✏️</span></div>
+                          )}
+                          <div className="flex justify-between text-amber-400 font-black text-sm border-t border-slate-850 pt-1"><span>Final Verified Stock:</span><span>{msMetrics.finalVerifiedStockText}</span></div>
+                          <div className="flex justify-between text-slate-400 border-t border-slate-850 pt-1">
+                            <span>Stock Variation:</span>
+                            <span className={`font-mono font-bold ${
+                              msMetrics.stockVariation === null ? 'text-slate-400 font-normal italic' :
+                              msMetrics.stockVariation < -0.01 ? 'text-red-400' :
+                              msMetrics.stockVariation > 0.01 ? 'text-emerald-400' : 'text-slate-300'
+                            }`}>
+                              {msMetrics.variationText}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* HSD Summary */}
+                        <div className="bg-slate-950 p-3.5 rounded-lg border border-slate-800 space-y-1.5">
+                          <span className="text-emerald-400 font-sans font-extrabold block text-xs">HSD HIGH SPEED DIESEL</span>
+                          <div className="flex justify-between text-slate-300"><span>Density @ 15°C:</span><span className="font-bold text-white">{hsdDensityInput ? `${hsdDensityInput} kg/m³` : 'N/A'}</span></div>
+                          <div className="flex justify-between text-slate-300"><span>Opening Stock:</span><span className="font-bold text-slate-200">{hsdMetrics.openingStockText}</span></div>
+                          <div className="flex justify-between text-slate-300"><span>Meter Dispensing:</span><span className="font-bold text-slate-200">{hsdActiveDispensedLitres.toFixed(1)} L</span></div>
+                          <div className="flex justify-between text-slate-300"><span>Expected Closing:</span><span className="font-bold text-slate-200">{hsdMetrics.expectedClosingText}</span></div>
+                          <div className="flex justify-between text-slate-300"><span>Dip Reading:</span><span className="font-bold text-indigo-300">{hsdDipCmInput !== '' ? `${hsdDipCmInput} cm` : 'Not entered'}</span></div>
+                          <div className="flex justify-between text-slate-300"><span>Chart Calculated Stock:</span><span className="font-bold text-white">{hsdMetrics.chartStockText}</span></div>
+                          {hsdIsEditingStock && hsdMetrics.correctedStock !== null && (
+                            <div className="flex justify-between text-emerald-400"><span>Corrected Stock:</span><span className="font-bold">{hsdMetrics.correctedStock.toFixed(1)} L ✏️</span></div>
+                          )}
+                          <div className="flex justify-between text-emerald-400 font-black text-sm border-t border-slate-850 pt-1"><span>Final Verified Stock:</span><span>{hsdMetrics.finalVerifiedStockText}</span></div>
+                          <div className="flex justify-between text-slate-400 border-t border-slate-850 pt-1">
+                            <span>Stock Variation:</span>
+                            <span className={`font-mono font-bold ${
+                              hsdMetrics.stockVariation === null ? 'text-slate-400 font-normal italic' :
+                              hsdMetrics.stockVariation < -0.01 ? 'text-red-400' :
+                              hsdMetrics.stockVariation > 0.01 ? 'text-emerald-400' : 'text-slate-300'
+                            }`}>
+                              {hsdMetrics.variationText}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* STEP 2: ASSIGN NEXT DUTY */}
               {wizardStep === 2 && (
                 <div className="space-y-6">
+                  {justClosedDutyNumber && (
+                    <div className="rounded-xl bg-emerald-950/30 border border-emerald-500/40 p-4 flex gap-3 text-xs text-emerald-400 font-bold">
+                      <CheckCircle2 className="h-5 w-5 shrink-0" />
+                      <span>✓ Duty #{justClosedDutyNumber} successfully closed and sealed. Now assign staff for Duty #{justClosedDutyNumber + 1}.</span>
+                    </div>
+                  )}
+
                   {/* Time and details */}
                   <div className="grid grid-cols-2 gap-4">
                     <div>
@@ -5545,89 +6989,119 @@ export default function DashboardContainer({
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold text-slate-355 select-none">Carried Readings</label>
-                      <span className="block text-xs font-bold text-slate-500 mt-2 bg-slate-950 px-3 py-2.5 rounded-lg border border-slate-850">
-                        Previous closed readings inherited.
+                      <label className="block text-xs font-semibold text-slate-350 select-none">Carried Meter Readings</label>
+                      <span className="block text-xs font-bold text-emerald-400 mt-1 bg-slate-950 px-3 py-2.5 rounded-lg border border-slate-850">
+                        Opening readings inherited automatically from previous closed duty.
                       </span>
                     </div>
                   </div>
 
                   {/* Staff Assignments */}
                   <div className="bg-slate-950 border border-slate-850 p-6 rounded-xl space-y-4">
-                    <span className="text-[10px] text-slate-500 font-extrabold uppercase tracking-wider block border-b border-slate-900 pb-2">Shift Staff Assignments</span>
-
-                    <div className="grid grid-cols-2 gap-6">
+                    <span className="text-[10px] text-slate-500 font-extrabold uppercase tracking-wider block border-b border-slate-900 pb-2">
+                      INDIVIDUAL GUN STAFF ASSIGNMENTS (8 GUNS)
+                    </span>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       {/* Pump 1 Staff */}
-                      <div className="space-y-4">
-                        <span className="text-xs font-bold text-indigo-400 block border-b border-slate-900 pb-1">Pump 1 (MS-1, HSD-1, MS-2, HSD-2)</span>
-                        <div>
-                          <label htmlFor="pump1-ms" className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">MS Staff Assignment</label>
-                          <select
-                            id="pump1-ms"
-                            required
-                            value={assignments.Pump1_MS}
-                            onChange={(e) => setAssignments({ ...assignments, Pump1_MS: e.target.value })}
-                            className="block w-full rounded border border-slate-700 bg-slate-900 py-1.5 px-3 mt-1 text-xs text-slate-100 focus:outline-none"
-                          >
-                            <option value="">-- Assign Staff --</option>
-                            {staticData.staff.map((s: any) => (
-                              <option key={s.id} value={s.id}>{s.name}</option>
-                            ))}
-                          </select>
+                      <div className="space-y-4 bg-slate-900/50 p-4 rounded-xl border border-slate-850">
+                        <div className="flex justify-between items-center border-b border-slate-800 pb-2">
+                          <span className="text-xs font-extrabold text-indigo-400">PUMP 1</span>
+                          <span className="text-[10px] font-mono text-slate-400 bg-indigo-500/10 px-2 py-0.5 rounded border border-indigo-500/20">4 Nozzles</span>
                         </div>
-                        <div>
-                          <label htmlFor="pump1-hsd" className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">HSD Staff Assignment</label>
-                          <select
-                            id="pump1-hsd"
-                            required
-                            value={assignments.Pump1_HSD}
-                            onChange={(e) => setAssignments({ ...assignments, Pump1_HSD: e.target.value })}
-                            className="block w-full rounded border border-slate-700 bg-slate-900 py-1.5 px-3 mt-1 text-xs text-slate-100 focus:outline-none"
-                          >
-                            <option value="">-- Assign Staff --</option>
-                            {staticData.staff.map((s: any) => (
-                              <option key={s.id} value={s.id}>{s.name}</option>
-                            ))}
-                          </select>
+                        <div className="space-y-3">
+                          <span className="text-[10px] font-bold text-indigo-300 uppercase tracking-wider block">MS (Petrol)</span>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-xs font-bold text-slate-200">MS-1</label>
+                              <span className="text-[10px] text-slate-400 block mb-1">Assigned Staff:</span>
+                              <select required value={assignments['MS-1'] || ''} onChange={(e) => setAssignments({ ...assignments, 'MS-1': e.target.value })} className="block w-full rounded-lg border border-slate-700 bg-slate-950 py-2 px-2 text-xs text-slate-100 font-medium focus:outline-none focus:border-indigo-500">
+                                <option value="">-- Select Staff ▼ --</option>
+                                {staticData.staff.map((s: any) => (<option key={s.id} value={s.id}>{s.name}</option>))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-xs font-bold text-slate-200">MS-2</label>
+                              <span className="text-[10px] text-slate-400 block mb-1">Assigned Staff:</span>
+                              <select required value={assignments['MS-2'] || ''} onChange={(e) => setAssignments({ ...assignments, 'MS-2': e.target.value })} className="block w-full rounded-lg border border-slate-700 bg-slate-950 py-2 px-2 text-xs text-slate-100 font-medium focus:outline-none focus:border-indigo-500">
+                                <option value="">-- Select Staff ▼ --</option>
+                                {staticData.staff.map((s: any) => (<option key={s.id} value={s.id}>{s.name}</option>))}
+                              </select>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="space-y-3 pt-2 border-t border-slate-850">
+                          <span className="text-[10px] font-bold text-emerald-300 uppercase tracking-wider block">HSD (Diesel)</span>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-xs font-bold text-slate-200">HSD-1</label>
+                              <span className="text-[10px] text-slate-400 block mb-1">Assigned Staff:</span>
+                              <select required value={assignments['HSD-1'] || ''} onChange={(e) => setAssignments({ ...assignments, 'HSD-1': e.target.value })} className="block w-full rounded-lg border border-slate-700 bg-slate-950 py-2 px-2 text-xs text-slate-100 font-medium focus:outline-none focus:border-indigo-500">
+                                <option value="">-- Select Staff ▼ --</option>
+                                {staticData.staff.map((s: any) => (<option key={s.id} value={s.id}>{s.name}</option>))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-xs font-bold text-slate-200">HSD-2</label>
+                              <span className="text-[10px] text-slate-400 block mb-1">Assigned Staff:</span>
+                              <select required value={assignments['HSD-2'] || ''} onChange={(e) => setAssignments({ ...assignments, 'HSD-2': e.target.value })} className="block w-full rounded-lg border border-slate-700 bg-slate-950 py-2 px-2 text-xs text-slate-100 font-medium focus:outline-none focus:border-indigo-500">
+                                <option value="">-- Select Staff ▼ --</option>
+                                {staticData.staff.map((s: any) => (<option key={s.id} value={s.id}>{s.name}</option>))}
+                              </select>
+                            </div>
+                          </div>
                         </div>
                       </div>
 
                       {/* Pump 2 Staff */}
-                      <div className="space-y-4">
-                        <span className="text-xs font-bold text-emerald-400 block border-b border-slate-900 pb-1">Pump 2 (MS-3, HSD-3, MS-4, HSD-4)</span>
-                        <div>
-                          <label htmlFor="pump2-ms" className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">MS Staff Assignment</label>
-                          <select
-                            id="pump2-ms"
-                            required
-                            value={assignments.Pump2_MS}
-                            onChange={(e) => setAssignments({ ...assignments, Pump2_MS: e.target.value })}
-                            className="block w-full rounded border border-slate-700 bg-slate-900 py-1.5 px-3 mt-1 text-xs text-slate-100 focus:outline-none"
-                          >
-                            <option value="">-- Assign Staff --</option>
-                            {staticData.staff.map((s: any) => (
-                              <option key={s.id} value={s.id}>{s.name}</option>
-                            ))}
-                          </select>
+                      <div className="space-y-4 bg-slate-900/50 p-4 rounded-xl border border-slate-850">
+                        <div className="flex justify-between items-center border-b border-slate-800 pb-2">
+                          <span className="text-xs font-extrabold text-emerald-400">PUMP 2</span>
+                          <span className="text-[10px] font-mono text-slate-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">4 Nozzles</span>
                         </div>
-                        <div>
-                          <label htmlFor="pump2-hsd" className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">HSD Staff Assignment</label>
-                          <select
-                            id="pump2-hsd"
-                            required
-                            value={assignments.Pump2_HSD}
-                            onChange={(e) => setAssignments({ ...assignments, Pump2_HSD: e.target.value })}
-                            className="block w-full rounded border border-slate-700 bg-slate-900 py-1.5 px-3 mt-1 text-xs text-slate-100 focus:outline-none"
-                          >
-                            <option value="">-- Assign Staff --</option>
-                            {staticData.staff.map((s: any) => (
-                              <option key={s.id} value={s.id}>{s.name}</option>
-                            ))}
-                          </select>
+                        <div className="space-y-3">
+                          <span className="text-[10px] font-bold text-indigo-300 uppercase tracking-wider block">MS (Petrol)</span>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-xs font-bold text-slate-200">MS-3</label>
+                              <span className="text-[10px] text-slate-400 block mb-1">Assigned Staff:</span>
+                              <select required value={assignments['MS-3'] || ''} onChange={(e) => setAssignments({ ...assignments, 'MS-3': e.target.value })} className="block w-full rounded-lg border border-slate-700 bg-slate-950 py-2 px-2 text-xs text-slate-100 font-medium focus:outline-none focus:border-emerald-500">
+                                <option value="">-- Select Staff ▼ --</option>
+                                {staticData.staff.map((s: any) => (<option key={s.id} value={s.id}>{s.name}</option>))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-xs font-bold text-slate-200">MS-4</label>
+                              <span className="text-[10px] text-slate-400 block mb-1">Assigned Staff:</span>
+                              <select required value={assignments['MS-4'] || ''} onChange={(e) => setAssignments({ ...assignments, 'MS-4': e.target.value })} className="block w-full rounded-lg border border-slate-700 bg-slate-950 py-2 px-2 text-xs text-slate-100 font-medium focus:outline-none focus:border-emerald-500">
+                                <option value="">-- Select Staff ▼ --</option>
+                                {staticData.staff.map((s: any) => (<option key={s.id} value={s.id}>{s.name}</option>))}
+                              </select>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="space-y-3 pt-2 border-t border-slate-850">
+                          <span className="text-[10px] font-bold text-emerald-300 uppercase tracking-wider block">HSD (Diesel)</span>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-xs font-bold text-slate-200">HSD-3</label>
+                              <span className="text-[10px] text-slate-400 block mb-1">Assigned Staff:</span>
+                              <select required value={assignments['HSD-3'] || ''} onChange={(e) => setAssignments({ ...assignments, 'HSD-3': e.target.value })} className="block w-full rounded-lg border border-slate-700 bg-slate-950 py-2 px-2 text-xs text-slate-100 font-medium focus:outline-none focus:border-emerald-500">
+                                <option value="">-- Select Staff ▼ --</option>
+                                {staticData.staff.map((s: any) => (<option key={s.id} value={s.id}>{s.name}</option>))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-xs font-bold text-slate-200">HSD-4</label>
+                              <span className="text-[10px] text-slate-400 block mb-1">Assigned Staff:</span>
+                              <select required value={assignments['HSD-4'] || ''} onChange={(e) => setAssignments({ ...assignments, 'HSD-4': e.target.value })} className="block w-full rounded-lg border border-slate-700 bg-slate-950 py-2 px-2 text-xs text-slate-100 font-medium focus:outline-none focus:border-emerald-500">
+                                <option value="">-- Select Staff ▼ --</option>
+                                {staticData.staff.map((s: any) => (<option key={s.id} value={s.id}>{s.name}</option>))}
+                              </select>
+                            </div>
+                          </div>
                         </div>
                       </div>
                     </div>
-
                   </div>
                 </div>
               )}
@@ -5635,31 +7109,66 @@ export default function DashboardContainer({
             </div>
 
             {/* Modal Footer */}
-            <div className="bg-slate-950 px-8 py-5 border-t border-slate-850 flex justify-end gap-4">
-              <button
-                onClick={() => setWizardOpen(false)}
-                className="px-5 py-2.5 rounded-lg border border-slate-800 text-slate-400 hover:text-slate-350 text-xs font-bold transition-all"
-              >
-                Close Wizard
-              </button>
+            <div className="bg-slate-950 px-8 py-5 border-t border-slate-850 flex justify-between items-center">
+              <div>
+                {wizardStep === 'review' && (
+                  <button
+                    onClick={() => setWizardStep(1)}
+                    className="px-5 py-2.5 rounded-lg border border-slate-700 text-slate-300 hover:text-white text-xs font-bold transition-all"
+                  >
+                    ← Back / Edit Inputs
+                  </button>
+                )}
+              </div>
 
-              {wizardStep === 1 ? (
+              <div className="flex gap-4">
                 <button
-                  onClick={handleCloseActiveDutyStep}
-                  disabled={actionLoading}
-                  className="px-6 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-all shadow-md"
+                  onClick={() => setWizardOpen(false)}
+                  className="px-5 py-2.5 rounded-lg border border-slate-800 text-slate-400 hover:text-slate-350 text-xs font-bold transition-all"
                 >
-                  {actionLoading ? 'Closing shift...' : 'Verify Readings & Close Shift'}
+                  Close Wizard
                 </button>
-              ) : (
-                <button
-                  onClick={handleStartNewDutyStep}
-                  disabled={actionLoading}
-                  className="px-6 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition-all shadow-md"
-                >
-                  {actionLoading ? 'Opening shift...' : 'Initialize Next Duty Shift'}
-                </button>
-              )}
+
+                {wizardStep === 'firstDuty' && (
+                  <button
+                    onClick={handleStartFirstDutyStep}
+                    disabled={actionLoading}
+                    className="px-6 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition-all shadow-md"
+                  >
+                    {actionLoading ? 'Initializing First Duty...' : 'Start First Duty'}
+                  </button>
+                )}
+
+                {wizardStep === 1 && (
+                  <button
+                    onClick={handleProceedToReview}
+                    disabled={actionLoading}
+                    className="px-6 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition-all shadow-md"
+                  >
+                    Proceed to Final Review →
+                  </button>
+                )}
+
+                {wizardStep === 'review' && (
+                  <button
+                    onClick={handleConfirmCloseDuty}
+                    disabled={actionLoading}
+                    className="px-6 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-all shadow-md"
+                  >
+                    {actionLoading ? 'Closing Duty...' : `CONFIRM & CLOSE DUTY #${activeDuty?.dutyNumber || ''}`}
+                  </button>
+                )}
+
+                {wizardStep === 2 && (
+                  <button
+                    onClick={handleStartNewDutyStep}
+                    disabled={actionLoading}
+                    className="px-6 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition-all shadow-md"
+                  >
+                    {actionLoading ? 'Opening Shift...' : 'Initialize Next Duty Shift'}
+                  </button>
+                )}
+              </div>
             </div>
 
           </div>

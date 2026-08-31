@@ -98,6 +98,7 @@ export default async function DutyReportPage({ params }: { params: Promise<{ id:
                 <tr className="bg-slate-950 border-b border-slate-850 text-slate-400 uppercase font-bold print:bg-slate-100 print:border-slate-300">
                   <th className="p-3">Gun Name</th>
                   <th className="p-3">Fuel Type</th>
+                  <th className="p-3">Employee Duty Taken</th>
                   <th className="p-3 text-right">Previous Reading</th>
                   <th className="p-3 text-right">Current Reading</th>
                   <th className="p-3 text-right">Volume (Litres)</th>
@@ -106,19 +107,28 @@ export default async function DutyReportPage({ params }: { params: Promise<{ id:
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/40 print:divide-slate-200">
-                {duty.meterReadings.map((mr, idx) => (
-                  <tr key={idx} className="hover:bg-slate-950/10">
-                    <td className="p-3 font-semibold text-slate-200 print:text-black">{mr.gun.name}</td>
-                    <td className="p-3 text-slate-350">{mr.gun.fuelType}</td>
-                    <td className="p-3 text-right font-mono text-slate-400">{mr.previousReading.toFixed(2)}</td>
-                    <td className="p-3 text-right font-mono text-slate-400">{mr.currentReading.toFixed(2)}</td>
-                    <td className="p-3 text-right font-mono text-white font-bold print:text-black">{mr.litresSold.toFixed(2)} L</td>
-                    <td className="p-3 text-right font-mono text-slate-400">₹{mr.priceUsed.toFixed(2)}</td>
-                    <td className="p-3 text-right font-mono font-bold text-indigo-400 print:text-black">₹{mr.salesAmount.toFixed(2)}</td>
-                  </tr>
-                ))}
+                {duty.meterReadings.map((mr, idx) => {
+                  const pName = mr.gun?.pump?.name || 'Pump 1';
+                  const fType = mr.gun?.fuelType || 'MS';
+                  const assignedStaff = duty.assignments.find((a: any) => 
+                    (a.pump?.name === pName || a.pumpId === pName) && a.fuelType === fType
+                  )?.staff?.name || 'Unassigned';
+
+                  return (
+                    <tr key={idx} className="hover:bg-slate-950/10">
+                      <td className="p-3 font-semibold text-slate-200 print:text-black">{mr.gun.name}</td>
+                      <td className="p-3 text-slate-350">{mr.gun.fuelType}</td>
+                      <td className="p-3 font-semibold text-emerald-400 print:text-black">{assignedStaff}</td>
+                      <td className="p-3 text-right font-mono text-slate-400">{mr.previousReading.toFixed(2)}</td>
+                      <td className="p-3 text-right font-mono text-slate-400">{mr.currentReading.toFixed(2)}</td>
+                      <td className="p-3 text-right font-mono text-white font-bold print:text-black">{mr.litresSold.toFixed(2)} L</td>
+                      <td className="p-3 text-right font-mono text-slate-400">₹{mr.priceUsed.toFixed(2)}</td>
+                      <td className="p-3 text-right font-mono font-bold text-indigo-400 print:text-black">₹{mr.salesAmount.toFixed(2)}</td>
+                    </tr>
+                  );
+                })}
                 <tr className="bg-slate-950/30 font-bold print:bg-slate-50">
-                  <td colSpan={4} className="p-3 text-slate-300 print:text-black">Total Fuel Sales</td>
+                  <td colSpan={5} className="p-3 text-slate-300 print:text-black">Total Fuel Sales</td>
                   <td className="p-3 text-right font-mono text-white print:text-black">
                     {duty.meterReadings.reduce((sum, mr) => sum + mr.litresSold, 0).toFixed(2)} L
                   </td>
@@ -247,7 +257,7 @@ export default async function DutyReportPage({ params }: { params: Promise<{ id:
                   <div className="grid grid-cols-3 gap-2 text-center text-xs pt-2">
                     <div>
                       <span className="text-[10px] text-slate-500 block">Expected Closing</span>
-                      <span className="font-mono font-semibold text-slate-300 print:text-black">{td.expectedClosing.toFixed(2)} L</span>
+                      <span className="font-mono font-semibold text-slate-300 print:text-black">{(td.expectedClosing ?? 0).toFixed(2)} L</span>
                     </div>
                     <div>
                       <span className="text-[10px] text-slate-500 block">Physical Dip</span>
@@ -255,8 +265,8 @@ export default async function DutyReportPage({ params }: { params: Promise<{ id:
                     </div>
                     <div>
                       <span className="text-[10px] text-slate-500 block">Variance L</span>
-                      <span className={`font-mono font-bold ${td.variance < 0 ? 'text-red-400 print:text-black' : 'text-slate-300 print:text-black'}`}>
-                        {td.variance < 0 ? `-${Math.abs(td.variance).toFixed(2)} L` : `+${td.variance.toFixed(2)} L`}
+                      <span className={`font-mono font-bold ${td.variance !== null && td.variance < 0 ? 'text-red-400 print:text-black' : 'text-slate-300 print:text-black'}`}>
+                        {td.variance === null ? 'Pending' : td.variance < 0 ? `-${Math.abs(td.variance).toFixed(2)} L` : `+${td.variance.toFixed(2)} L`}
                       </span>
                     </div>
                   </div>
