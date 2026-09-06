@@ -77,6 +77,24 @@ export interface DutySettlementResult {
   totalFuelSoldLitres: number;
   totalFuelSalesAmount: number;
 
+  // 6b. Sample Box / Load Sales (Paid Revenue Sales)
+  sampleBoxSales: Array<{
+    id: string;
+    fuelType: string;
+    quantity: number;
+    unitPrice: number;
+    totalAmount: number;
+    notes?: string;
+    paymentMethod: string;
+    enteredBy: string;
+    timestamp: Date | string;
+  }>;
+  totalSampleBoxSalesAmount: number;
+  totalMsSampleBoxLitres: number;
+  totalMsSampleBoxAmount: number;
+  totalHsdSampleBoxLitres: number;
+  totalHsdSampleBoxAmount: number;
+
   // 7. Tank Sample / Testing
   msTestingLitres: number;
   msTestingAmount: number;
@@ -203,7 +221,7 @@ export function calculateDutySettlement(
     };
   });
 
-  // 2. Fuel Summary (Section 6)
+  // 2. Fuel Summary (Meter Readings + Paid Sample Box / Load Sales)
   let totalMsSoldLitres = 0;
   let totalMsSalesAmount = 0;
   let totalHsdSoldLitres = 0;
@@ -218,6 +236,43 @@ export function calculateDutySettlement(
       totalHsdSalesAmount += mr.salesAmount;
     }
   });
+
+  // Process Paid Sample Box / Load Sales
+  const sampleBoxSalesRaw = dutySession.sampleBoxSales || [];
+  const sampleBoxSales = sampleBoxSalesRaw.map((s: any) => ({
+    id: s.id,
+    fuelType: s.fuelType,
+    quantity: Number(s.quantity || 0),
+    unitPrice: Number(s.unitPrice || 0),
+    totalAmount: Number(s.totalAmount || 0),
+    notes: s.notes || '',
+    paymentMethod: s.paymentMethod || 'CASH',
+    enteredBy: s.enteredBy?.username || 'Staff',
+    timestamp: s.timestamp,
+  }));
+
+  let totalMsSampleBoxLitres = 0;
+  let totalMsSampleBoxAmount = 0;
+  let totalHsdSampleBoxLitres = 0;
+  let totalHsdSampleBoxAmount = 0;
+
+  sampleBoxSales.forEach((s: any) => {
+    if (s.fuelType === 'MS') {
+      totalMsSampleBoxLitres += s.quantity;
+      totalMsSampleBoxAmount += s.totalAmount;
+    } else {
+      totalHsdSampleBoxLitres += s.quantity;
+      totalHsdSampleBoxAmount += s.totalAmount;
+    }
+  });
+
+  const totalSampleBoxSalesAmount = totalMsSampleBoxAmount + totalHsdSampleBoxAmount;
+
+  // Add Paid Sample Box / Load Sales directly into fuel revenue and litres
+  totalMsSoldLitres += totalMsSampleBoxLitres;
+  totalMsSalesAmount += totalMsSampleBoxAmount;
+  totalHsdSoldLitres += totalHsdSampleBoxLitres;
+  totalHsdSalesAmount += totalHsdSampleBoxAmount;
 
   const totalFuelSoldLitres = totalMsSoldLitres + totalHsdSoldLitres;
   const totalFuelSalesAmount = totalMsSalesAmount + totalHsdSalesAmount;
@@ -478,6 +533,12 @@ export function calculateDutySettlement(
     totalHsdSalesAmount,
     totalFuelSoldLitres,
     totalFuelSalesAmount,
+    sampleBoxSales,
+    totalSampleBoxSalesAmount,
+    totalMsSampleBoxLitres,
+    totalMsSampleBoxAmount,
+    totalHsdSampleBoxLitres,
+    totalHsdSampleBoxAmount,
     msTestingLitres,
     msTestingAmount,
     hsdTestingLitres,

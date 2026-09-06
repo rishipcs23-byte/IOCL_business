@@ -28,7 +28,9 @@ export default async function DutyReportPage({ params }: { params: Promise<{ id:
     );
   }
 
-  const fuelSalesTotal = duty.meterReadings.reduce((sum, mr) => sum + mr.salesAmount, 0);
+  const meterSalesTotal = duty.meterReadings.reduce((sum, mr) => sum + mr.salesAmount, 0);
+  const sampleBoxSalesTotal = (duty.sampleBoxSales || []).reduce((sum, s) => sum + s.totalAmount, 0);
+  const fuelSalesTotal = meterSalesTotal + sampleBoxSalesTotal;
   const oilSalesTotal = duty.oilSales.reduce((sum, os) => sum + os.totalAmount, 0);
   const totalSales = fuelSalesTotal + oilSalesTotal;
   const cashExpenses = duty.expenses.filter(e => e.paymentMethod === 'Cash').reduce((sum, e) => sum + e.amount, 0);
@@ -70,7 +72,7 @@ export default async function DutyReportPage({ params }: { params: Promise<{ id:
         </div>
 
         {/* Shift Details */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-xs bg-slate-950 p-6 rounded-2xl border border-slate-850 print:bg-slate-50 print:border-slate-200 print:text-black">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6 text-xs bg-slate-950 p-4 sm:p-6 rounded-2xl border border-slate-850 print:bg-slate-50 print:border-slate-200 print:text-black">
           <div>
             <span className="text-slate-450 block font-bold uppercase tracking-wider text-[10px]">Manager</span>
             <span className="font-bold text-slate-200 print:text-black">{duty.manager.username}</span>
@@ -92,7 +94,45 @@ export default async function DutyReportPage({ params }: { params: Promise<{ id:
         {/* Meter Readings */}
         <div className="space-y-4">
           <h4 className="font-extrabold text-white text-sm uppercase tracking-wider print:text-black">1. Fuel Meter Log Readings</h4>
-          <div className="overflow-x-auto">
+          
+          {/* Mobile Card View (sm:hidden, print:hidden) */}
+          <div className="space-y-3 sm:hidden print:hidden">
+            {duty.meterReadings.map((mr, idx) => {
+              const pName = mr.gun?.pump?.name || 'Pump 1';
+              const fType = mr.gun?.fuelType || 'MS';
+              const assignedStaff = duty.assignments.find((a: any) => 
+                (a.pump?.name === pName || a.pumpId === pName) && a.fuelType === fType
+              )?.staff?.name || 'Unassigned';
+
+              return (
+                <div key={idx} className="bg-slate-950 border border-slate-800 p-3.5 rounded-xl space-y-2">
+                  <div className="flex justify-between items-center">
+                    <span className="font-bold text-sm text-white">{mr.gun.name} ({mr.gun.fuelType})</span>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                      {assignedStaff}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-xs text-slate-400 pt-1">
+                    <div>Prev: <span className="font-mono text-slate-200">{mr.previousReading.toFixed(2)}</span></div>
+                    <div>Curr: <span className="font-mono text-slate-200">{mr.currentReading.toFixed(2)}</span></div>
+                    <div>Litres: <span className="font-mono text-white font-bold">{mr.litresSold.toFixed(2)} L</span></div>
+                    <div>Rate: <span className="font-mono text-slate-200">₹{mr.priceUsed.toFixed(2)}</span></div>
+                  </div>
+                  <div className="pt-2 border-t border-slate-900 flex justify-between items-center text-xs font-bold">
+                    <span className="text-slate-400">Total Sales:</span>
+                    <span className="font-mono text-indigo-400">₹{mr.salesAmount.toFixed(2)}</span>
+                  </div>
+                </div>
+              );
+            })}
+            <div className="bg-slate-950 border border-indigo-500/30 p-3.5 rounded-xl flex justify-between items-center text-xs font-bold">
+              <span className="text-white">Total Fuel Sales</span>
+              <span className="font-mono text-indigo-400 text-sm">₹{fuelSalesTotal.toFixed(2)} ({duty.meterReadings.reduce((sum, mr) => sum + mr.litresSold, 0).toFixed(2)} L)</span>
+            </div>
+          </div>
+
+          {/* Desktop & Print Table View */}
+          <div className="hidden sm:block print:block overflow-x-auto">
             <table className="w-full text-left border-collapse text-xs print:text-black">
               <thead>
                 <tr className="bg-slate-950 border-b border-slate-850 text-slate-400 uppercase font-bold print:bg-slate-100 print:border-slate-300">
@@ -146,7 +186,22 @@ export default async function DutyReportPage({ params }: { params: Promise<{ id:
         {duty.oilSales.length > 0 && (
           <div className="space-y-4">
             <h4 className="font-extrabold text-white text-sm uppercase tracking-wider print:text-black">2. Oil & Lubricant Sales</h4>
-            <div className="overflow-x-auto">
+            
+            {/* Mobile Cards */}
+            <div className="space-y-2 sm:hidden print:hidden">
+              {duty.oilSales.map((os, idx) => (
+                <div key={idx} className="bg-slate-950 border border-slate-800 p-3 rounded-xl flex justify-between items-center text-xs">
+                  <div>
+                    <span className="font-bold text-white block">{os.productName}</span>
+                    <span className="text-slate-400 text-[11px] font-mono">Qty: {os.quantity} &times; ₹{os.unitPrice.toFixed(2)}</span>
+                  </div>
+                  <span className="font-mono font-bold text-indigo-400">₹{os.totalAmount.toFixed(2)}</span>
+                </div>
+              ))}
+            </div>
+
+            {/* Desktop Table */}
+            <div className="hidden sm:block print:block overflow-x-auto">
               <table className="w-full text-left border-collapse text-xs print:text-black">
                 <thead>
                   <tr className="bg-slate-950 border-b border-slate-850 text-slate-400 uppercase font-bold print:bg-slate-100 print:border-slate-300">
@@ -179,7 +234,22 @@ export default async function DutyReportPage({ params }: { params: Promise<{ id:
         {duty.expenses.length > 0 && (
           <div className="space-y-4">
             <h4 className="font-extrabold text-white text-sm uppercase tracking-wider print:text-black">3. Shift Operating Expenses</h4>
-            <div className="overflow-x-auto">
+            
+            {/* Mobile Cards */}
+            <div className="space-y-2 sm:hidden print:hidden">
+              {duty.expenses.map((ex, idx) => (
+                <div key={idx} className="bg-slate-950 border border-slate-800 p-3 rounded-xl flex justify-between items-center text-xs">
+                  <div>
+                    <span className="font-bold text-white block">{ex.category.name}</span>
+                    <span className="text-slate-400 text-[11px]">{ex.description} &bull; <span className="capitalize">{ex.paymentMethod}</span></span>
+                  </div>
+                  <span className="font-mono font-bold text-red-400">₹{ex.amount.toFixed(2)}</span>
+                </div>
+              ))}
+            </div>
+
+            {/* Desktop Table */}
+            <div className="hidden sm:block print:block overflow-x-auto">
               <table className="w-full text-left border-collapse text-xs print:text-black">
                 <thead>
                   <tr className="bg-slate-950 border-b border-slate-850 text-slate-400 uppercase font-bold print:bg-slate-100 print:border-slate-300">
@@ -212,7 +282,29 @@ export default async function DutyReportPage({ params }: { params: Promise<{ id:
         {duty.creditTransactions.length > 0 && (
           <div className="space-y-4">
             <h4 className="font-extrabold text-white text-sm uppercase tracking-wider print:text-black">4. Customer Credit Transactions</h4>
-            <div className="overflow-x-auto">
+            
+            {/* Mobile Cards */}
+            <div className="space-y-2 sm:hidden print:hidden">
+              {duty.creditTransactions.map((ct, idx) => (
+                <div key={idx} className="bg-slate-950 border border-slate-800 p-3 rounded-xl flex justify-between items-center text-xs">
+                  <div>
+                    <span className="font-bold text-white block">{ct.customer.name}</span>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                        ct.transactionType === 'CREDIT_SALE' ? 'bg-amber-500/10 text-amber-400' : 'bg-emerald-500/10 text-emerald-400'
+                      }`}>
+                        {ct.transactionType}
+                      </span>
+                      {ct.description && <span className="text-slate-400 text-[11px]">{ct.description}</span>}
+                    </div>
+                  </div>
+                  <span className="font-mono font-bold text-white">₹{ct.amount.toFixed(2)}</span>
+                </div>
+              ))}
+            </div>
+
+            {/* Desktop Table */}
+            <div className="hidden sm:block print:block overflow-x-auto">
               <table className="w-full text-left border-collapse text-xs print:text-black">
                 <thead>
                   <tr className="bg-slate-950 border-b border-slate-850 text-slate-400 uppercase font-bold print:bg-slate-100 print:border-slate-300">
@@ -279,7 +371,7 @@ export default async function DutyReportPage({ params }: { params: Promise<{ id:
         {/* Final Financial Settlement */}
         <div className="border-t border-slate-800 pt-8 print:border-slate-300">
           <h4 className="font-extrabold text-white text-sm uppercase tracking-wider mb-4 print:text-black">6. Shift Cash Settlement & Reconciliation</h4>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center bg-slate-950 p-8 rounded-3xl border border-slate-850 print:bg-slate-50 print:border-slate-200 print:text-black">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 sm:gap-8 items-center bg-slate-950 p-4 sm:p-8 rounded-3xl border border-slate-850 print:bg-slate-50 print:border-slate-200 print:text-black">
             
             <div className="space-y-2 text-xs font-semibold text-slate-350">
               <div className="flex justify-between">
@@ -312,18 +404,18 @@ export default async function DutyReportPage({ params }: { params: Promise<{ id:
               </div>
             </div>
 
-            <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 space-y-3 text-center print:bg-white print:border-slate-300">
+            <div className="bg-slate-900 p-4 sm:p-6 rounded-2xl border border-slate-800 space-y-3 text-center print:bg-white print:border-slate-300">
               <div>
                 <span className="text-[10px] text-slate-450 font-bold uppercase tracking-widest block">Expected Cash Collection</span>
-                <h3 className="text-2xl font-black text-white print:text-black mt-1">₹{duty.expectedCash.toLocaleString(undefined, {minimumFractionDigits: 2})}</h3>
+                <h3 className="text-xl sm:text-2xl font-black text-white print:text-black mt-1">₹{duty.expectedCash.toLocaleString(undefined, {minimumFractionDigits: 2})}</h3>
               </div>
               <div>
                 <span className="text-[10px] text-slate-450 font-bold uppercase tracking-widest block">Actual Cash Counted</span>
-                <h3 className="text-2xl font-black text-white print:text-black mt-1">₹{duty.actualCash.toLocaleString(undefined, {minimumFractionDigits: 2})}</h3>
+                <h3 className="text-xl sm:text-2xl font-black text-white print:text-black mt-1">₹{duty.actualCash.toLocaleString(undefined, {minimumFractionDigits: 2})}</h3>
               </div>
               <div className="border-t border-slate-800 pt-3 mt-3">
                 <span className="text-[10px] text-slate-450 font-bold uppercase tracking-widest block">Settlement Difference</span>
-                <h3 className={`text-xl font-extrabold mt-1 ${
+                <h3 className={`text-lg sm:text-xl font-extrabold mt-1 ${
                   duty.cashDifference < 0 ? 'text-red-400 print:text-black' : duty.cashDifference > 0 ? 'text-emerald-400 print:text-black' : 'text-slate-400 print:text-black'
                 }`}>
                   {duty.cashDifference < 0 ? `-₹${Math.abs(duty.cashDifference).toLocaleString()}` : duty.cashDifference > 0 ? `+₹${duty.cashDifference.toLocaleString()}` : '₹0.00 (BALANCED)'}

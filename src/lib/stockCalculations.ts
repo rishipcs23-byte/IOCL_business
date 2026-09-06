@@ -22,6 +22,7 @@ export interface StockCalculationResult {
   finalVerifiedStock: number | null;
   stockVariation: number | null;
   isCorrected: boolean;
+  isWithinTolerance: boolean | null; // True if variation is within [-50L, +50L]
   
   // Human-readable status strings for UI
   openingStockText: string;
@@ -92,8 +93,10 @@ export function calculateStockMetrics(inputs: StockCalculationInputs): StockCalc
   // 7. STOCK VARIATION = Final Verified Stock - Expected Closing Stock
   // VARIATION IS PENDING UNLESS ALL REQUIRED INPUTS EXIST
   let stockVariation: number | null = null;
+  let isWithinTolerance: boolean | null = null;
   if (finalVerifiedStock !== null && expectedClosingStock !== null) {
     stockVariation = Number((finalVerifiedStock - expectedClosingStock).toFixed(1));
+    isWithinTolerance = Math.abs(stockVariation) <= 50.0;
   }
 
   // 8. TEXT RENDERING HELPERS
@@ -115,12 +118,14 @@ export function calculateStockMetrics(inputs: StockCalculationInputs): StockCalc
 
   let variationText = 'Pending';
   if (stockVariation !== null) {
+    const absVal = Math.abs(stockVariation);
+    const toleranceBadge = absVal <= 50 ? '(Within ±50 L Tolerance)' : '⚠️ (Exceeds ±50 L Limit)';
     if (stockVariation > 0.01) {
-      variationText = `+${stockVariation.toFixed(1)} L SURPLUS`;
+      variationText = `+${stockVariation.toFixed(1)} L SURPLUS ${toleranceBadge}`;
     } else if (stockVariation < -0.01) {
-      variationText = `${stockVariation.toFixed(1)} L SHORTAGE`;
+      variationText = `${stockVariation.toFixed(1)} L SHORTAGE ${toleranceBadge}`;
     } else {
-      variationText = '0.0 L BALANCED';
+      variationText = `0.0 L BALANCED (Within ±50 L Tolerance)`;
     }
   }
 
@@ -138,6 +143,7 @@ export function calculateStockMetrics(inputs: StockCalculationInputs): StockCalc
     finalVerifiedStock,
     stockVariation,
     isCorrected,
+    isWithinTolerance,
     openingStockText,
     chartStockText,
     expectedClosingText,

@@ -1,13 +1,13 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Fuel, LayoutDashboard, History, FileSpreadsheet, DollarSign, Settings,
   Activity, Users, ShieldAlert, LogOut, ArrowRight, UserCheck, CheckCircle2,
   AlertTriangle, Plus, Trash2, Calendar, FileText, ChevronRight, HelpCircle,
   Database, Info, TrendingUp, ArrowUpRight, ArrowDownRight, Wallet, HardDrive, BarChart3, CreditCard,
-  Edit, Eye, Layers, Building2, Check, ChevronDown, Filter, Lock, ShieldCheck, FlaskConical
+  Edit, Eye, Layers, Building2, Check, ChevronDown, Filter, Lock, ShieldCheck, FlaskConical, Menu, X
 } from 'lucide-react';
 import {
   logoutAction, getActiveDutySession, startNewDutySession, saveMeterReadingsAction,
@@ -18,7 +18,7 @@ import {
   addOilProductAction, updateOilPriceAction, toggleOilProductStatusAction, deleteOilProductAction,
   getStaticData, getCreditLedgerReport, updateMeterReadingAction,
   getHistoricalDuties, getExpenseReport, getOilSalesReport, getOilPurchasesReport, recordTankSampleAction,
-  recordOilPurchaseAction, assignShortageAction
+  recordOilPurchaseAction, assignShortageAction, recordSampleBoxSaleAction, deleteSampleBoxSaleAction
 } from '@/lib/actions';
 import * as XLSX from 'xlsx';
 import OwnerPastDutyReport from './OwnerPastDutyReport';
@@ -27,6 +27,14 @@ import OilInventoryManager from './OilInventoryManager';
 import FuelInventoryManagement from './FuelInventoryManagement';
 import { getChartCalculatedStock } from '@/lib/dipChart20KL';
 import { calculateStockMetrics } from '@/lib/stockCalculations';
+import ToastNotification, { ToastMessage } from './ui/ToastNotification';
+import ContextHelpTooltip from './ui/ContextHelpTooltip';
+import FirstTimeWalkthroughModal from './ui/FirstTimeWalkthroughModal';
+import UniversalFilterBar, { FilterState } from './ui/UniversalFilterBar';
+import EmptyStateCard from './ui/EmptyStateCard';
+import CalculationExplanationDrawer from './ui/CalculationExplanationDrawer';
+import StaffPerformanceReport from './StaffPerformanceReport';
+import { ThemeToggle } from './ui/ThemeToggle';
 
 const GUN_SORT_ORDER = ['MS-1', 'MS-2', 'HSD-1', 'HSD-2', 'MS-3', 'MS-4', 'HSD-3', 'HSD-4'];
 
@@ -88,10 +96,27 @@ export default function DashboardContainer({
   const [stockHistory, setStockHistory] = useState<any[]>(initialStockHistory);
   const [auditLogs, setAuditLogs] = useState<any[]>(initialAuditLogs);
 
-  // Loading States
+  // Loading & Message States
   const [actionLoading, setActionLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  // UI & Tour States
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const [tourOpen, setTourOpen] = useState(false);
+
+  const flashToast = (type: 'success' | 'error' | 'info', message: string, title?: string) => {
+    const id = Date.now().toString() + Math.random().toString().slice(2, 6);
+    const newToast: ToastMessage = { id, type, message, title };
+    setToasts((prev) => [...prev, newToast]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 4500);
+  };
+
+  const dismissToast = (id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  };
 
   // --- Change Duty Wizard State ---
   const [wizardOpen, setWizardOpen] = useState(false);
@@ -153,6 +178,10 @@ export default function DashboardContainer({
   const [creditUnitPrice, setCreditUnitPrice] = useState<number>(0);
   const [creditAmount, setCreditAmount] = useState<number>(0);
   const [creditDesc, setCreditDesc] = useState('');
+  const [creditPaymentMethod, setCreditPaymentMethod] = useState<string>('CASH');
+  const [creditPaymentReference, setCreditPaymentReference] = useState('');
+  const [creditBankName, setCreditBankName] = useState('');
+  const [creditPaymentDate, setCreditPaymentDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [selectedLedgerCustomer, setSelectedLedgerCustomer] = useState<string>('ALL');
   const [isSubmittingCredit, setIsSubmittingCredit] = useState(false);
 
@@ -163,6 +192,7 @@ export default function DashboardContainer({
   const [priceFuelType, setPriceFuelType] = useState<'MS' | 'HSD'>('MS');
   const [newFuelPrice, setNewFuelPrice] = useState<number>(0);
   const [priceEffectiveFrom, setPriceEffectiveFrom] = useState('');
+  const [checkpointInputs, setCheckpointInputs] = useState<Record<string, number>>({});
 
   const [newStaffName, setNewStaffName] = useState('');
   const [newCustomerName, setNewCustomerName] = useState('');
@@ -252,6 +282,21 @@ export default function DashboardContainer({
   const [staffReportStaff, setStaffReportStaff] = useState<string>('ALL');
   const [staffReportPump, setStaffReportPump] = useState<string>('ALL');
   const [staffReportStatusFilter, setStaffReportStatusFilter] = useState<'ALL' | 'PRESENT' | 'ABSENT' | 'NOT_SCHEDULED'>('ALL');
+  const mainContentRef = useRef<HTMLDivElement>(null);
+  const [staffSearchQuery, setStaffSearchQuery] = useState<string>('');
+  const [staffReportViewMode, setStaffReportViewMode] = useState<'FLAT' | 'GROUPED'>('FLAT');
+  const [staffReportPage, setStaffReportPage] = useState<number>(1);
+  const [staffReportPageSize, setStaffReportPageSize] = useState<number>(20);
+  const [expandedDuties, setExpandedDuties] = useState<Record<string, boolean>>({});
+  const [selectedAttendanceDetailRow, setSelectedAttendanceDetailRow] = useState<any | null>(null);
+  const [showStaffPerformanceOverview, setShowStaffPerformanceOverview] = useState<boolean>(false);
+
+  // Auto-scroll content area to top whenever active main tab or sub-tab changes
+  useEffect(() => {
+    if (mainContentRef.current) {
+      mainContentRef.current.scrollTop = 0;
+    }
+  }, [activeTab, reportsTab]);
 
   // Manual Attendance Status Overrides & Audit Log (Owner privilege)
   const [attendanceOverrides, setAttendanceOverrides] = useState<Record<string, 'PRESENT' | 'ABSENT' | 'NOT_SCHEDULED'>>({});
@@ -294,6 +339,8 @@ export default function DashboardContainer({
     setStaffReportStaff('ALL');
     setStaffReportPump('ALL');
     setStaffReportStatusFilter('ALL');
+    setStaffSearchQuery('');
+    setStaffReportPage(1);
   };
 
   // Owner Verification Filter & Reading Correction Modal state
@@ -446,6 +493,29 @@ export default function DashboardContainer({
     setCreditUnitPrice(0);
     setCreditAmount(0);
     setCreditDesc('');
+    setCreditCustId('');
+    setCreditType('CREDIT_SALE');
+    setCreditPaymentMethod('CASH');
+    setCreditPaymentReference('');
+    setCreditBankName('');
+    setCreditPaymentDate(new Date().toISOString().slice(0, 10));
+    setSampleBoxFuelType('MS');
+    setSampleBoxQty('');
+    setSampleBoxUnitPrice('');
+    setSampleBoxNotes('');
+    setBankDeposit(0);
+    setShortageStaffId('');
+    setShortageReason('');
+    setMsDensityInput('');
+    setHsdDensityInput('');
+    setMsDipCmInput('');
+    setMsIsEditingStock(false);
+    setMsCorrectedStockInput('');
+    setMsCorrectionReasonInput('');
+    setHsdDipCmInput('');
+    setHsdIsEditingStock(false);
+    setHsdCorrectedStockInput('');
+    setHsdCorrectionReasonInput('');
     setAssignments({
       'MS-1': '',
       'MS-2': '',
@@ -488,6 +558,7 @@ export default function DashboardContainer({
   }, [activeDuty?.id]);
 
   const flashMessage = (msg: string, type: 'success' | 'error') => {
+    flashToast(type, msg, type === 'success' ? 'Success' : 'Error');
     if (type === 'success') {
       setSuccessMessage(msg);
       setTimeout(() => setSuccessMessage(null), 5000);
@@ -800,13 +871,38 @@ export default function DashboardContainer({
         return;
       }
     } else {
-      prodName = 'CASH COLLECTION';
+      const methodUpper = creditPaymentMethod.toUpperCase();
+      prodName = `${methodUpper} COLLECTION`;
       if (creditAmount <= 0) {
-        const msg = 'Please enter a valid Cash Collection Amount (₹).';
+        const msg = 'Please enter a valid Collection Amount (₹).';
         console.warn("[ADD CREDIT VALIDATION FAIL]", msg);
         flashMessage(msg, 'error');
         return;
       }
+
+      const targetCustomer = staticData.customers.find((c: any) => c.id === targetCustId);
+      if (targetCustomer && targetCustomer.balance > 0 && creditAmount > targetCustomer.balance + 0.01) {
+        const msg = `Collection amount (₹${creditAmount.toLocaleString('en-IN')}) cannot exceed customer's outstanding balance (₹${targetCustomer.balance.toLocaleString('en-IN')}).`;
+        flashMessage(msg, 'error');
+        return;
+      }
+
+      if (methodUpper === 'CHEQUE') {
+        if (!creditPaymentReference.trim()) {
+          flashMessage('Please enter the Cheque Number.', 'error');
+          return;
+        }
+        if (!creditPaymentDate) {
+          flashMessage('Please select the Cheque Date.', 'error');
+          return;
+        }
+      } else if (['RTGS', 'NEFT', 'UPI', 'BANK_TRANSFER'].includes(methodUpper)) {
+        if (!creditPaymentReference.trim()) {
+          flashMessage(`Please enter the UTR / Reference Number for ${methodUpper}.`, 'error');
+          return;
+        }
+      }
+
       finalAmount = Number(creditAmount.toFixed(2));
     }
 
@@ -830,7 +926,11 @@ export default function DashboardContainer({
         prodName,
         creditLitres > 0 ? creditLitres : undefined,
         finalUnitPrice > 0 ? finalUnitPrice : undefined,
-        creditDesc ? creditDesc.trim() : undefined
+        creditDesc ? creditDesc.trim() : undefined,
+        creditPaymentMethod,
+        creditPaymentReference ? creditPaymentReference.trim() : undefined,
+        creditBankName ? creditBankName.trim() : undefined,
+        creditPaymentDate ? creditPaymentDate : undefined
       );
 
       console.log("[ADD CREDIT DEBUG] Server Action Response:", res);
@@ -842,11 +942,14 @@ export default function DashboardContainer({
         setCreditUnitPrice(0);
         setCreditAmount(0);
         setCreditDesc('');
+        setCreditPaymentReference('');
+        setCreditBankName('');
+        setCreditPaymentDate(new Date().toISOString().slice(0, 10));
 
         // Refresh active duty and customer ledger state from database
         await refreshActiveDuty();
 
-        flashMessage('Successfully created', 'success');
+        flashMessage(creditType === 'COLLECTION' ? 'Payment collected successfully' : 'Successfully created', 'success');
       } else {
         throw new Error('Database transaction did not complete successfully.');
       }
@@ -859,13 +962,29 @@ export default function DashboardContainer({
     }
   };
 
-  const handleDeleteCredit = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this credit transaction?')) return;
+  const handleDeleteCredit = async (creditParam: any) => {
+    // creditParam can be either a string ID or the full credit transaction object
+    const ctObj = typeof creditParam === 'object' && creditParam !== null ? creditParam : activeDuty?.creditTransactions?.find((c: any) => c.id === creditParam);
+    const creditId = typeof creditParam === 'string' ? creditParam : creditParam?.id;
+
+    if (!creditId) return;
+
+    const isCollection = ctObj?.transactionType === 'COLLECTION';
+    const amountVal = Number(ctObj?.amount || 0);
+    const amountStr = amountVal > 0 ? ` ₹${amountVal.toLocaleString('en-IN')}` : '';
+    const methodStr = ctObj?.paymentMethod || 'Collection';
+
+    const confirmMsg = isCollection
+      ? `Delete this${amountStr} ${methodStr} collection?\nThe customer's outstanding balance will increase by${amountStr}.`
+      : `Delete this${amountStr} credit transaction?`;
+
+    if (!confirm(confirmMsg)) return;
+
     setActionLoading(true);
     try {
-      const res = await deleteCreditTransactionAction(id);
+      const res = await deleteCreditTransactionAction(creditId);
       if (res && res.success) {
-        flashMessage('Successfully deleted', 'success');
+        flashMessage(isCollection ? 'Collection deleted. Balance updated.' : 'Successfully deleted', 'success');
         await refreshActiveDuty();
       }
     } catch (err: any) {
@@ -935,10 +1054,14 @@ export default function DashboardContainer({
   const hsdTestingValue = hsdTestingLitres * hsdPrice;
   const totalTestingValue = msTestingValue + hsdTestingValue;
 
+  // 2b. Paid Sample Box / Load Sales (Revenue Generating Fuel Sales)
+  const sampleBoxSalesTotal = activeDuty?.sampleBoxSales?.reduce((sum: number, s: any) => sum + Number(s.totalAmount || 0), 0) || 0;
+  const sampleBoxLitresTotal = activeDuty?.sampleBoxSales?.reduce((sum: number, s: any) => sum + Number(s.quantity || 0), 0) || 0;
+
   // 3. Combined Fuel Sales & Revenue
-  const grossFuelSalesTotal = (msLitresRaw * msPrice) + (hsdLitresRaw * hsdPrice);
-  const dynamicFuelLitresTotal = msLitresRaw + hsdLitresRaw;
-  const dynamicFuelSalesTotal = totalMsSalesAmount + totalHsdSalesAmount;
+  const grossFuelSalesTotal = (msLitresRaw * msPrice) + (hsdLitresRaw * hsdPrice) + sampleBoxSalesTotal;
+  const dynamicFuelLitresTotal = msLitresRaw + hsdLitresRaw + sampleBoxLitresTotal;
+  const dynamicFuelSalesTotal = totalMsSalesAmount + totalHsdSalesAmount + sampleBoxSalesTotal;
   const oilSalesTotal = activeDuty?.oilSales?.reduce((sum: number, os: any) => sum + os.totalAmount, 0) || 0;
   const totalRevenue = dynamicFuelSalesTotal + oilSalesTotal;
 
@@ -954,58 +1077,118 @@ export default function DashboardContainer({
     .filter((ct: any) => ct.transactionType === 'COLLECTION')
     .reduce((sum: number, ct: any) => sum + ct.amount, 0) || 0;
 
-  // Expected Cash calculation based on accounting flow
+  // Expected Cash calculation based on 4-step accounting flow
   const digitalPaymentsSum = Object.values(digitalPayments).reduce((sum, val) => sum + Number(val), 0);
   const grossRevenueInflow = dynamicFuelSalesTotal + oilSalesTotal + creditCollectionsCash;
   const totalDeductions = creditSalesAmount + digitalPaymentsSum + expensesPaidInCash;
   const expectedCash = grossRevenueInflow - totalDeductions;
   const cashDiff = actualCash - expectedCash;
 
+  // Helper to scroll into view, focus, and visually pulse highlight invalid form elements
+  const highlightAndScrollTo = (elementId: string, message: string) => {
+    setErrorMessage(message);
+    flashToast('error', message, 'Validation Required');
+
+    setTimeout(() => {
+      const el = document.getElementById(elementId);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.focus();
+        el.classList.add('ring-4', 'ring-red-500', 'ring-offset-2', 'ring-offset-slate-950', 'animate-pulse');
+        setTimeout(() => {
+          el.classList.remove('ring-4', 'ring-red-500', 'ring-offset-2', 'ring-offset-slate-950', 'animate-pulse');
+        }, 3500);
+      }
+    }, 100);
+  };
+
   // Step 1 -> Move to Step 4 Final Review Screen
   const handleProceedToReview = () => {
     if (!activeDuty) return;
     setErrorMessage(null);
 
-    // Validate that all closing readings are >= opening readings
+    // 1. Validate Meter Closing Readings
     for (const mr of activeDuty.meterReadings) {
       const prevVal = openingReadings[mr.gunId] !== undefined ? openingReadings[mr.gunId] : mr.previousReading;
       const currentVal = closingReadings[mr.gunId] !== undefined ? closingReadings[mr.gunId] : mr.currentReading;
+
+      if (closingReadings[mr.gunId] === undefined && mr.currentReading <= 0) {
+        highlightAndScrollTo(`closing-reading-${mr.gunId}`, `Closing meter reading for ${mr.gun.name} (${mr.gun.fuelType}) is missing. Please enter current reading.`);
+        return;
+      }
+
       if (currentVal < prevVal) {
-        setErrorMessage(`Closing reading (${currentVal}) cannot be lower than opening reading (${prevVal}) for ${mr.gun.name}.`);
+        highlightAndScrollTo(`closing-reading-${mr.gunId}`, `Closing reading (${currentVal}) for ${mr.gun.name} cannot be lower than opening reading (${prevVal}).`);
         return;
       }
     }
 
-    // Density validation
-    const msDens = msDensityInput !== '' ? Number(msDensityInput) : NaN;
-    const hsdDens = hsdDensityInput !== '' ? Number(hsdDensityInput) : NaN;
-
+    // 2. Validate MS Density
+    const msDensStr = msDensityInput.trim();
+    if (msDensStr === '') {
+      highlightAndScrollTo('ms-density-input-top', 'MS / Petrol Density is required! Please enter density @ 15°C (710.0 - 780.0 kg/m³).');
+      return;
+    }
+    const msDens = Number(msDensStr);
     if (isNaN(msDens) || msDens < 710 || msDens > 780) {
-      setErrorMessage('MS density must be between 710 and 780 kg/m³ at 15°C.');
-      return;
-    }
-    if (isNaN(hsdDens) || hsdDens < 810 || hsdDens > 870) {
-      setErrorMessage('HSD density must be between 810 and 870 kg/m³ at 15°C.');
+      highlightAndScrollTo('ms-density-input-top', `MS Density (${msDensStr} kg/m³) is out of standard range (710.0 - 780.0 kg/m³ at 15°C).`);
       return;
     }
 
-    // Dip validation
+    // 3. Validate HSD Density
+    const hsdDensStr = hsdDensityInput.trim();
+    if (hsdDensStr === '') {
+      highlightAndScrollTo('hsd-density-input-top', 'HSD / Diesel Density is required! Please enter density @ 15°C (810.0 - 870.0 kg/m³).');
+      return;
+    }
+    const hsdDens = Number(hsdDensStr);
+    if (isNaN(hsdDens) || hsdDens < 810 || hsdDens > 870) {
+      highlightAndScrollTo('hsd-density-input-top', `HSD Density (${hsdDensStr} kg/m³) is out of standard range (810.0 - 870.0 kg/m³ at 15°C).`);
+      return;
+    }
+
+    // 4. Validate MS Tank Physical Dip
+    const msDipStr = msDipCmInput.trim();
+    if (msDipStr === '') {
+      highlightAndScrollTo('ms-dip-cm-input', 'MS Tank Physical Dip measurement is required! Please enter dip reading in cm (0.0 to 211.0 cm).');
+      return;
+    }
     if (msMetrics.dipCm === null || isNaN(msMetrics.dipCm) || msMetrics.dipCm < 0 || msMetrics.dipCm > 211) {
-      setErrorMessage('Please enter a valid MS tank physical dip reading (0.0 to 211.0 cm).');
+      highlightAndScrollTo('ms-dip-cm-input', `MS Tank Dip reading (${msDipStr} cm) is invalid. Must be between 0.0 and 211.0 cm.`);
+      return;
+    }
+
+    // 5. Validate HSD Tank Physical Dip
+    const hsdDipStr = hsdDipCmInput.trim();
+    if (hsdDipStr === '') {
+      highlightAndScrollTo('hsd-dip-cm-input', 'HSD Tank Physical Dip measurement is required! Please enter dip reading in cm (0.0 to 211.0 cm).');
       return;
     }
     if (hsdMetrics.dipCm === null || isNaN(hsdMetrics.dipCm) || hsdMetrics.dipCm < 0 || hsdMetrics.dipCm > 211) {
-      setErrorMessage('Please enter a valid HSD tank physical dip reading (0.0 to 211.0 cm).');
+      highlightAndScrollTo('hsd-dip-cm-input', `HSD Tank Dip reading (${hsdDipStr} cm) is invalid. Must be between 0.0 and 211.0 cm.`);
       return;
     }
 
+    // 6. Validate Manual Stock Override Reason (if enabled)
     if (msIsEditingStock && (msMetrics.correctedStock === null || isNaN(msMetrics.correctedStock) || !msCorrectionReasonInput.trim())) {
-      setErrorMessage('Please enter both the corrected stock volume and reason for MS stock correction.');
+      highlightAndScrollTo('ms-dip-cm-input', 'Please enter both corrected stock volume and reason for MS stock correction.');
+      return;
+    }
+    if (hsdIsEditingStock && (hsdMetrics.correctedStock === null || isNaN(hsdMetrics.correctedStock) || !hsdCorrectionReasonInput.trim())) {
+      highlightAndScrollTo('hsd-dip-cm-input', 'Please enter both corrected stock volume and reason for HSD stock correction.');
       return;
     }
 
-    if (hsdIsEditingStock && (hsdMetrics.correctedStock === null || isNaN(hsdMetrics.correctedStock) || !hsdCorrectionReasonInput.trim())) {
-      setErrorMessage('Please enter both the corrected stock volume and reason for HSD stock correction.');
+    // 7. Validate Bank Deposited Cash
+    if (bankDeposit === undefined || bankDeposit === null || isNaN(Number(bankDeposit))) {
+      highlightAndScrollTo('bank-deposit-input', 'Bank Deposited Cash is required. Please enter the cash deposited to bank.');
+      return;
+    }
+
+    // 8. Shortage Attribution (if > ₹10)
+    const shortageAmount = expectedCash - (bankDeposit || 0);
+    if (shortageAmount > 10 && !shortageStaffId) {
+      highlightAndScrollTo('shortage-staff-select', `Cash shortage of ₹${shortageAmount.toFixed(2)} detected. Please select the staff member responsible.`);
       return;
     }
 
@@ -1016,6 +1199,7 @@ export default function DashboardContainer({
   const [shortageReason, setShortageReason] = useState<string>('Duty Cash Shortage');
   const [msDensityInput, setMsDensityInput] = useState<string>('');
   const [hsdDensityInput, setHsdDensityInput] = useState<string>('');
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState<boolean>(false);
 
   // Tank Dip state variables
   const [msDipCmInput, setMsDipCmInput] = useState<string>('');
@@ -1027,6 +1211,52 @@ export default function DashboardContainer({
   const [hsdIsEditingStock, setHsdIsEditingStock] = useState<boolean>(false);
   const [hsdCorrectedStockInput, setHsdCorrectedStockInput] = useState<string>('');
   const [hsdCorrectionReasonInput, setHsdCorrectionReasonInput] = useState<string>('');
+
+  // Sample Box / Load Sale state variables
+  const [sampleBoxFuelType, setSampleBoxFuelType] = useState<'MS' | 'HSD'>('MS');
+  const [sampleBoxQty, setSampleBoxQty] = useState<string>('');
+  const [sampleBoxUnitPrice, setSampleBoxUnitPrice] = useState<string>('');
+  const [sampleBoxNotes, setSampleBoxNotes] = useState<string>('');
+  const [sampleBoxLoading, setSampleBoxLoading] = useState<boolean>(false);
+
+  const handleRecordSampleBoxSale = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeDuty?.id) return;
+    const qty = Number(sampleBoxQty);
+    if (isNaN(qty) || qty <= 0) {
+      flashToast('error', 'Please enter a valid quantity greater than 0 litres.', 'Invalid Quantity');
+      return;
+    }
+    const price = sampleBoxUnitPrice !== '' ? Number(sampleBoxUnitPrice) : undefined;
+    setSampleBoxLoading(true);
+    try {
+      const res = await recordSampleBoxSaleAction(activeDuty.id, sampleBoxFuelType, qty, price, sampleBoxNotes);
+      if (res.success) {
+        flashToast('success', `Recorded ${sampleBoxFuelType} Sample Box Sale: ${qty} L (₹${res.sale.totalAmount})`, 'Sale Recorded');
+        setSampleBoxQty('');
+        setSampleBoxNotes('');
+        setSampleBoxUnitPrice('');
+        router.refresh();
+      }
+    } catch (err: any) {
+      flashToast('error', err.message || 'Failed to record sample box sale', 'Error');
+    } finally {
+      setSampleBoxLoading(false);
+    }
+  };
+
+  const handleDeleteSampleBoxSale = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this sample box sale?')) return;
+    try {
+      const res = await deleteSampleBoxSaleAction(id);
+      if (res.success) {
+        flashToast('success', 'Sample box sale deleted successfully.', 'Deleted');
+        router.refresh();
+      }
+    } catch (err: any) {
+      flashToast('error', err.message || 'Failed to delete sample box sale', 'Error');
+    }
+  };
 
   // Find Opening Tank Stock from central inventory state (previous finalized stock)
   const getOpeningStockFromHistory = (fType: 'MS' | 'HSD') => {
@@ -1320,7 +1550,7 @@ export default function DashboardContainer({
       const res = await startNewDutySession(newDutyStartTime || new Date().toISOString(), pumpAssignments);
       if (res.success) {
         flashMessage(`New Duty session started successfully.`, 'success');
-        
+
         // Reset working inputs for the new duty session
         resetDutyFormState();
         setJustClosedDutyNumber(null);
@@ -1344,9 +1574,17 @@ export default function DashboardContainer({
     if (newFuelPrice <= 0 || !priceEffectiveFrom) return;
     setActionLoading(true);
     try {
-      await updateFuelPriceAction(priceFuelType, newFuelPrice, priceEffectiveFrom);
-      flashMessage(`Updated ${priceFuelType} price to ₹${newFuelPrice}`, 'success');
+      await updateFuelPriceAction(priceFuelType, newFuelPrice, priceEffectiveFrom, checkpointInputs);
+      flashMessage(`Updated ${priceFuelType} price to ₹${newFuelPrice} with checkpoint log`, 'success');
       setNewFuelPrice(0);
+      setCheckpointInputs({});
+
+      // Instantly sync active duty and static data state with updated database values
+      const freshDuty = await getActiveDutySession();
+      if (freshDuty) setActiveDuty(freshDuty);
+      const freshStatic = await getStaticData();
+      if (freshStatic) setStaticData(freshStatic);
+
       router.refresh();
     } catch (err: any) {
       flashMessage(err.message, 'error');
@@ -1520,244 +1758,216 @@ export default function DashboardContainer({
     }
   };
 
-  return (
-    <div className="flex h-screen bg-slate-950 text-slate-100 overflow-hidden font-sans">
+  const getNavItemClass = (isSelected: boolean) =>
+    `w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium transition-all ${
+      isSelected
+        ? 'bg-blue-50 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 font-semibold border border-blue-100 dark:border-blue-900 shadow-sm'
+        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
+    }`;
 
-      {/* SIDEBAR NAVIGATION */}
-      <aside className="w-64 bg-slate-900 border-r border-slate-800 flex flex-col justify-between shrink-0">
-        <div>
+  return (
+    <div className="flex h-screen bg-[var(--bg-page)] text-[var(--text-primary)] overflow-hidden font-sans transition-colors duration-200">
+
+      {/* DESKTOP SIDEBAR NAVIGATION */}
+      <aside className="hidden lg:flex w-64 bg-[var(--bg-surface)] border-r border-[var(--border-color)] flex-col h-screen max-h-screen shrink-0 sticky top-0 z-30 overflow-hidden transition-colors duration-200">
+        {/* Fixed Top Header */}
+        <div className="shrink-0">
           {/* Logo Brand */}
-          <div className="h-16 border-b border-slate-800 flex items-center px-6 gap-3 bg-slate-900/50">
-            <div className="h-10 w-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-md shadow-indigo-600/20">
+          <div className="h-16 border-b border-[var(--border-color)] flex items-center px-6 gap-3 bg-[var(--bg-surface)]">
+            <div className="h-10 w-10 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-sm">
               <Fuel className="h-6 w-6" />
             </div>
             <div>
-              <span className="font-extrabold text-sm tracking-wider text-slate-100">BUNK ACCOUNTING</span>
-              <p className="text-[10px] text-slate-400 font-medium uppercase tracking-widest">Control Panel</p>
+              <span className="font-bold text-sm tracking-tight text-[var(--text-primary)]">BUNK ACCOUNTING</span>
+              <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium uppercase tracking-wider">Control Panel</p>
             </div>
           </div>
 
           {/* User profile */}
-          <div className="p-4 border-b border-slate-800/50 bg-slate-900/30 flex items-center gap-3">
-            <div className="h-10 w-10 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-indigo-400 text-sm">
+          <div className="p-4 border-b border-[var(--border-color)] bg-[var(--bg-surface-secondary)] flex items-center gap-3">
+            <div className="h-10 w-10 rounded-full bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 flex items-center justify-center font-bold text-sm">
               {session.username.substring(0, 2).toUpperCase()}
             </div>
             <div>
-              <span className="text-xs font-semibold text-slate-200 block">{session.username}</span>
-              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-800 text-indigo-400 border border-indigo-500/20 uppercase tracking-widest mt-0.5">
+              <span className="text-xs font-bold text-[var(--text-primary)] block">{session.username}</span>
+              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 uppercase tracking-wider mt-0.5">
                 {session.role}
               </span>
             </div>
           </div>
-
-          <nav className="p-4 space-y-3">
-            {/* OVERVIEW */}
-            <div>
-              <span className="px-3 text-[10px] text-slate-500 font-extrabold uppercase tracking-widest block mb-1">Overview</span>
-              {session.role === 'OWNER' && (
-                <button
-                  onClick={() => setActiveTab('dashboard')}
-                  className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${activeTab === 'dashboard'
-                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-                    }`}
-                >
-                  <LayoutDashboard className="h-4 w-4" />
-                  Dashboard
-                </button>
-              )}
-            </div>
-
-            {/* DAILY OPERATIONS */}
-            <div>
-              <span className="px-3 text-[10px] text-slate-500 font-extrabold uppercase tracking-widest block mb-1">Daily Operations</span>
-              <button
-                onClick={() => setActiveTab('current-duty')}
-                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${activeTab === 'current-duty'
-                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-                  }`}
-              >
-                <div className="flex items-center gap-3">
-                  <Activity className="h-4 w-4" />
-                  Current Duty
-                </div>
-                {activeDuty ? (
-                  <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-                ) : (
-                  <span className="h-2 w-2 rounded-full bg-red-500" />
-                )}
-              </button>
-
-              <button
-                onClick={() => setActiveTab('past-duty')}
-                className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${activeTab === 'past-duty' || activeTab === 'history'
-                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-                  }`}
-              >
-                <History className="h-4 w-4" />
-                Past Duty Reports
-              </button>
-            </div>
-
-            {/* LEDGERS */}
-            <div>
-              <span className="px-3 text-[10px] text-slate-500 font-extrabold uppercase tracking-widest block mb-1">Ledgers</span>
-              <button
-                onClick={() => setActiveTab('credit-ledger')}
-                className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${activeTab === 'credit-ledger'
-                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-                  }`}
-              >
-                <FileSpreadsheet className="h-4 w-4" />
-                Credit Ledger
-              </button>
-            </div>
-
-            {/* INVENTORY */}
-            <div>
-              <span className="px-3 text-[10px] text-slate-500 font-extrabold uppercase tracking-widest block mb-1">Oil Inventory</span>
-              <button
-                onClick={() => setActiveTab('oil-purchases')}
-                className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${activeTab === 'oil-purchases'
-                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-                  }`}
-              >
-                <Building2 className="h-4 w-4" />
-                Oil Purchases / Invoices
-              </button>
-              <button
-                onClick={() => setActiveTab('oil-sales')}
-                className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${activeTab === 'oil-sales'
-                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-                  }`}
-              >
-                <DollarSign className="h-4 w-4" />
-                Oil Sales
-              </button>
-              <button
-                onClick={() => setActiveTab('oil-inventory')}
-                className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${activeTab === 'oil-inventory'
-                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-                  }`}
-              >
-                <HardDrive className="h-4 w-4" />
-                Oil Inventory & Valuation
-              </button>
-            </div>
-
-            {/* REPORTS */}
-            <div>
-              <span className="px-3 text-[10px] text-slate-500 font-extrabold uppercase tracking-widest block mb-1">Reports</span>
-              <button
-                onClick={() => { setActiveTab('reports'); setReportsTab('sales'); }}
-                className={`w-full flex items-center gap-3 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all ${activeTab === 'reports' && reportsTab === 'sales'
-                    ? 'bg-slate-800 text-indigo-400 font-bold'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'
-                  }`}
-              >
-                <BarChart3 className="h-3.5 w-3.5" />
-                Fuel Sales
-              </button>
-              <button
-                onClick={() => { setActiveTab('reports'); setReportsTab('staff'); }}
-                className={`w-full flex items-center gap-3 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all ${activeTab === 'reports' && reportsTab === 'staff'
-                    ? 'bg-slate-800 text-indigo-400 font-bold'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'
-                  }`}
-              >
-                <Users className="h-3.5 w-3.5" />
-                Staff Attendance
-              </button>
-              <button
-                onClick={() => { setActiveTab('reports'); setReportsTab('expenses'); }}
-                className={`w-full flex items-center gap-3 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all ${activeTab === 'reports' && reportsTab === 'expenses'
-                    ? 'bg-slate-800 text-indigo-400 font-bold'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'
-                  }`}
-              >
-                <Wallet className="h-3.5 w-3.5" />
-                Expenses
-              </button>
-              <button
-                onClick={() => { setActiveTab('reports'); setReportsTab('stock'); }}
-                className={`w-full flex items-center gap-3 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all ${activeTab === 'reports' && reportsTab === 'stock'
-                    ? 'bg-slate-800 text-indigo-400 font-bold'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'
-                  }`}
-              >
-                <FlaskConical className="h-3.5 w-3.5" />
-                Stock & Variance
-              </button>
-              <button
-                onClick={() => { setActiveTab('reports'); setReportsTab('cash'); }}
-                className={`w-full flex items-center gap-3 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all ${activeTab === 'reports' && reportsTab === 'cash'
-                    ? 'bg-slate-800 text-indigo-400 font-bold'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'
-                  }`}
-              >
-                <CheckCircle2 className="h-3.5 w-3.5" />
-                Cash Reconciliation
-              </button>
-            </div>
-
-            {/* MASTER CONFIG */}
-            {session.role === 'OWNER' && (
-              <div>
-                <span className="px-3 text-[10px] text-slate-500 font-extrabold uppercase tracking-widest block mb-1">Master Config</span>
-                <button
-                  onClick={() => setActiveTab('pricing')}
-                  className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${activeTab === 'pricing'
-                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-                    }`}
-                >
-                  <DollarSign className="h-4 w-4" />
-                  Fuel Pricing
-                </button>
-
-                <button
-                  onClick={() => setActiveTab('settings')}
-                  className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${activeTab === 'settings'
-                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-                    }`}
-                >
-                  <Settings className="h-4 w-4" />
-                  System Config
-                </button>
-              </div>
-            )}
-
-            {/* SECURITY */}
-            {session.role === 'OWNER' && (
-              <div>
-                <span className="px-3 text-[10px] text-slate-500 font-extrabold uppercase tracking-widest block mb-1">Security</span>
-                <button
-                  onClick={() => setActiveTab('audit')}
-                  className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${activeTab === 'audit'
-                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-                    }`}
-                >
-                  <ShieldAlert className="h-4 w-4" />
-                  Audit Security Logs
-                </button>
-              </div>
-            )}
-          </nav>
         </div>
 
-        {/* Footer actions */}
-        <div className="p-4 border-t border-slate-800">
+        {/* Scrollable Navigation Menu */}
+        <nav
+          tabIndex={0}
+          aria-label="Sidebar Navigation"
+          className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-4 space-y-3 custom-scrollbar focus:outline-none"
+        >
+          {/* OVERVIEW */}
+          <div>
+            <span className="px-3 text-[10px] text-slate-400 font-bold uppercase tracking-wider block mb-1">Overview</span>
+            {session.role === 'OWNER' && (
+              <button
+                onClick={() => setActiveTab('dashboard')}
+                className={getNavItemClass(activeTab === 'dashboard')}
+              >
+                <LayoutDashboard className="h-4 w-4" />
+                Dashboard
+              </button>
+            )}
+          </div>
+
+          {/* DAILY OPERATIONS */}
+          <div>
+            <span className="px-3 text-[10px] text-slate-400 font-bold uppercase tracking-wider block mb-1">Daily Operations</span>
+            <button
+              onClick={() => setActiveTab('current-duty')}
+              className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-medium transition-all ${
+                activeTab === 'current-duty'
+                  ? 'bg-blue-50 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 font-semibold border border-blue-100 dark:border-blue-900 shadow-sm'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <Activity className="h-4 w-4" />
+                Current Duty
+              </div>
+              {activeDuty ? (
+                <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+              ) : (
+                <span className="h-2 w-2 rounded-full bg-red-500" />
+              )}
+            </button>
+
+            <button
+              onClick={() => setActiveTab('past-duty')}
+              className={getNavItemClass(activeTab === 'past-duty' || activeTab === 'history')}
+            >
+              <History className="h-4 w-4" />
+              Past Duty Reports
+            </button>
+          </div>
+
+          {/* LEDGERS */}
+          <div>
+            <span className="px-3 text-[10px] text-slate-400 font-bold uppercase tracking-wider block mb-1">Ledgers</span>
+            <button
+              onClick={() => setActiveTab('credit-ledger')}
+              className={getNavItemClass(activeTab === 'credit-ledger')}
+            >
+              <FileSpreadsheet className="h-4 w-4" />
+              Credit Ledger
+            </button>
+          </div>
+
+          {/* INVENTORY */}
+          <div>
+            <span className="px-3 text-[10px] text-slate-400 font-bold uppercase tracking-wider block mb-1">Oil Inventory</span>
+            <button
+              onClick={() => setActiveTab('oil-purchases')}
+              className={getNavItemClass(activeTab === 'oil-purchases')}
+            >
+              <Building2 className="h-4 w-4" />
+              Oil Purchases / Invoices
+            </button>
+            <button
+              onClick={() => setActiveTab('oil-sales')}
+              className={getNavItemClass(activeTab === 'oil-sales')}
+            >
+              <DollarSign className="h-4 w-4" />
+              Oil Sales
+            </button>
+            <button
+              onClick={() => setActiveTab('oil-inventory')}
+              className={getNavItemClass(activeTab === 'oil-inventory')}
+            >
+              <HardDrive className="h-4 w-4" />
+              Oil Inventory &amp; Valuation
+            </button>
+          </div>
+
+          {/* REPORTS */}
+          <div>
+            <span className="px-3 text-[10px] text-slate-400 font-bold uppercase tracking-wider block mb-1">Reports</span>
+            <button
+              onClick={() => { setActiveTab('reports'); setReportsTab('sales'); }}
+              className={getNavItemClass(activeTab === 'reports' && reportsTab === 'sales')}
+            >
+              <BarChart3 className="h-3.5 w-3.5" />
+              Fuel Sales
+            </button>
+            <button
+              onClick={() => { setActiveTab('reports'); setReportsTab('staff'); }}
+              className={getNavItemClass(activeTab === 'reports' && reportsTab === 'staff')}
+            >
+              <Users className="h-3.5 w-3.5" />
+              Staff Attendance
+            </button>
+            <button
+              onClick={() => { setActiveTab('reports'); setReportsTab('expenses'); }}
+              className={getNavItemClass(activeTab === 'reports' && reportsTab === 'expenses')}
+            >
+              <Wallet className="h-3.5 w-3.5" />
+              Expenses
+            </button>
+            <button
+              onClick={() => { setActiveTab('reports'); setReportsTab('stock'); }}
+              className={getNavItemClass(activeTab === 'reports' && reportsTab === 'stock')}
+            >
+              <FlaskConical className="h-3.5 w-3.5" />
+              Stock &amp; Variance
+            </button>
+            <button
+              onClick={() => { setActiveTab('reports'); setReportsTab('cash'); }}
+              className={getNavItemClass(activeTab === 'reports' && reportsTab === 'cash')}
+            >
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Cash Reconciliation
+            </button>
+          </div>
+
+          {/* MASTER CONFIG */}
+          {session.role === 'OWNER' && (
+            <div>
+              <span className="px-3 text-[10px] text-slate-400 font-bold uppercase tracking-wider block mb-1">Master Config</span>
+              <button
+                onClick={() => setActiveTab('pricing')}
+                className={getNavItemClass(activeTab === 'pricing')}
+              >
+                <DollarSign className="h-4 w-4" />
+                Fuel Pricing
+              </button>
+
+              <button
+                onClick={() => setActiveTab('settings')}
+                className={getNavItemClass(activeTab === 'settings')}
+              >
+                <Settings className="h-4 w-4" />
+                System Config
+              </button>
+            </div>
+          )}
+
+          {/* SECURITY */}
+          {session.role === 'OWNER' && (
+            <div>
+              <span className="px-3 text-[10px] text-slate-400 font-bold uppercase tracking-wider block mb-1">Security</span>
+              <button
+                onClick={() => setActiveTab('audit')}
+                className={getNavItemClass(activeTab === 'audit')}
+              >
+                <ShieldAlert className="h-4 w-4" />
+                Audit Security Logs
+              </button>
+            </div>
+          )}
+        </nav>
+
+        {/* Fixed Footer Actions */}
+        <div className="shrink-0 p-4 border-t border-[var(--border-color)] bg-[var(--bg-surface)]">
           <button
             onClick={handleLogout}
-            className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-slate-850 hover:bg-slate-800 text-red-400 hover:text-red-300 text-sm font-semibold border border-slate-800 transition-all"
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 hover:bg-red-50 dark:hover:bg-red-950/40 text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 text-xs font-semibold border border-slate-200 dark:border-slate-700 transition-all"
           >
             <LogOut className="h-4 w-4" />
             Logout Account
@@ -1765,36 +1975,273 @@ export default function DashboardContainer({
         </div>
       </aside>
 
+      {/* MOBILE SIDEBAR DRAWER OVERLAY */}
+      {mobileSidebarOpen && (
+        <div className="fixed inset-0 z-50 flex lg:hidden">
+          <div
+            className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm transition-opacity"
+            onClick={() => setMobileSidebarOpen(false)}
+          />
+
+          <aside className="relative w-80 max-w-[88vw] bg-[var(--bg-surface)] border-r border-[var(--border-color)] flex flex-col h-full max-h-screen z-10 shadow-2xl overflow-hidden text-[var(--text-primary)]">
+            {/* Drawer Header */}
+            <div className="h-16 border-b border-[var(--border-color)] flex items-center justify-between px-5 bg-[var(--bg-surface)] shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-sm shrink-0">
+                  <Fuel className="h-6 w-6" />
+                </div>
+                <div>
+                  <span className="font-bold text-sm tracking-tight text-[var(--text-primary)]">BUNK ACCOUNTING</span>
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium uppercase tracking-wider">Control Panel</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setMobileSidebarOpen(false)}
+                className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white touch-target-44 flex items-center justify-center"
+                aria-label="Close Mobile Sidebar"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* User profile */}
+            <div className="p-4 border-b border-[var(--border-color)] bg-[var(--bg-surface-secondary)] flex items-center gap-3 shrink-0">
+              <div className="h-10 w-10 rounded-full bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 flex items-center justify-center font-bold text-sm shrink-0">
+                {session.username.substring(0, 2).toUpperCase()}
+              </div>
+              <div className="min-w-0 flex-1">
+                <span className="text-xs font-bold text-[var(--text-primary)] truncate block">{session.username}</span>
+                <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 uppercase tracking-wider mt-0.5">
+                  {session.role}
+                </span>
+              </div>
+            </div>
+
+            {/* Scrollable Mobile Navigation Menu */}
+            <nav
+              tabIndex={0}
+              aria-label="Mobile Sidebar Navigation"
+              className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-4 space-y-4 custom-scrollbar focus:outline-none"
+            >
+              {/* OVERVIEW */}
+              <div>
+                <span className="px-3 text-[10px] text-slate-400 font-bold uppercase tracking-wider block mb-1">Overview</span>
+                {session.role === 'OWNER' && (
+                  <button
+                    onClick={() => { setActiveTab('dashboard'); setMobileSidebarOpen(false); }}
+                    className={getNavItemClass(activeTab === 'dashboard')}
+                  >
+                    <LayoutDashboard className="h-4 w-4 shrink-0" />
+                    Dashboard
+                  </button>
+                )}
+              </div>
+
+              {/* DAILY OPERATIONS */}
+              <div className="space-y-1">
+                <span className="px-3 text-[10px] text-slate-400 font-bold uppercase tracking-wider block mb-1">Daily Operations</span>
+                <button
+                  onClick={() => { setActiveTab('current-duty'); setMobileSidebarOpen(false); }}
+                  className={`w-full flex items-center justify-between px-3.5 py-3 rounded-xl text-xs font-medium transition-all touch-target-44 ${
+                    activeTab === 'current-duty'
+                      ? 'bg-blue-50 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 font-semibold border border-blue-100 dark:border-blue-900 shadow-sm'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <Activity className="h-4 w-4 shrink-0" />
+                    Current Duty
+                  </div>
+                  {activeDuty ? (
+                    <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                  ) : (
+                    <span className="h-2.5 w-2.5 rounded-full bg-red-500" />
+                  )}
+                </button>
+
+                <button
+                  onClick={() => { setActiveTab('past-duty'); setMobileSidebarOpen(false); }}
+                  className={getNavItemClass(activeTab === 'past-duty' || activeTab === 'history')}
+                >
+                  <History className="h-4 w-4 shrink-0" />
+                  Past Duty Reports
+                </button>
+              </div>
+
+              {/* LEDGERS */}
+              <div className="space-y-1">
+                <span className="px-3 text-[10px] text-slate-400 font-bold uppercase tracking-wider block mb-1">Ledgers</span>
+                <button
+                  onClick={() => { setActiveTab('credit-ledger'); setMobileSidebarOpen(false); }}
+                  className={getNavItemClass(activeTab === 'credit-ledger')}
+                >
+                  <FileSpreadsheet className="h-4 w-4 shrink-0" />
+                  Credit Ledger
+                </button>
+              </div>
+
+              {/* INVENTORY */}
+              <div className="space-y-1">
+                <span className="px-3 text-[10px] text-slate-400 font-bold uppercase tracking-wider block mb-1">Oil Inventory</span>
+                <button
+                  onClick={() => { setActiveTab('oil-purchases'); setMobileSidebarOpen(false); }}
+                  className={getNavItemClass(activeTab === 'oil-purchases')}
+                >
+                  <Building2 className="h-4 w-4 shrink-0" />
+                  Oil Purchases / Invoices
+                </button>
+                <button
+                  onClick={() => { setActiveTab('oil-sales'); setMobileSidebarOpen(false); }}
+                  className={getNavItemClass(activeTab === 'oil-sales')}
+                >
+                  <DollarSign className="h-4 w-4 shrink-0" />
+                  Oil Sales
+                </button>
+                <button
+                  onClick={() => { setActiveTab('oil-inventory'); setMobileSidebarOpen(false); }}
+                  className={getNavItemClass(activeTab === 'oil-inventory')}
+                >
+                  <HardDrive className="h-4 w-4 shrink-0" />
+                  Oil Inventory &amp; Valuation
+                </button>
+              </div>
+
+              {/* REPORTS */}
+              <div className="space-y-1">
+                <span className="px-3 text-[10px] text-slate-400 font-bold uppercase tracking-wider block mb-1">Reports</span>
+                <button
+                  onClick={() => { setActiveTab('reports'); setReportsTab('sales'); setMobileSidebarOpen(false); }}
+                  className={getNavItemClass(activeTab === 'reports' && reportsTab === 'sales')}
+                >
+                  <BarChart3 className="h-3.5 w-3.5 shrink-0" />
+                  Fuel Sales
+                </button>
+                <button
+                  onClick={() => { setActiveTab('reports'); setReportsTab('staff'); setMobileSidebarOpen(false); }}
+                  className={getNavItemClass(activeTab === 'reports' && reportsTab === 'staff')}
+                >
+                  <Users className="h-3.5 w-3.5 shrink-0" />
+                  Staff Attendance &amp; Shortage
+                </button>
+                <button
+                  onClick={() => { setActiveTab('reports'); setReportsTab('expenses'); setMobileSidebarOpen(false); }}
+                  className={getNavItemClass(activeTab === 'reports' && reportsTab === 'expenses')}
+                >
+                  <Wallet className="h-3.5 w-3.5 shrink-0" />
+                  Expenses
+                </button>
+                <button
+                  onClick={() => { setActiveTab('reports'); setReportsTab('stock'); setMobileSidebarOpen(false); }}
+                  className={getNavItemClass(activeTab === 'reports' && reportsTab === 'stock')}
+                >
+                  <FlaskConical className="h-3.5 w-3.5 shrink-0" />
+                  Stock &amp; Variance
+                </button>
+                <button
+                  onClick={() => { setActiveTab('reports'); setReportsTab('cash'); setMobileSidebarOpen(false); }}
+                  className={getNavItemClass(activeTab === 'reports' && reportsTab === 'cash')}
+                >
+                  <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                  Cash Reconciliation
+                </button>
+              </div>
+
+              {/* MASTER CONFIG */}
+              {session.role === 'OWNER' && (
+                <div className="space-y-1">
+                  <span className="px-3 text-[10px] text-slate-400 font-bold uppercase tracking-wider block mb-1">Master Config</span>
+                  <button
+                    onClick={() => { setActiveTab('pricing'); setMobileSidebarOpen(false); }}
+                    className={getNavItemClass(activeTab === 'pricing')}
+                  >
+                    <DollarSign className="h-4 w-4 shrink-0" />
+                    Fuel Pricing
+                  </button>
+
+                  <button
+                    onClick={() => { setActiveTab('settings'); setMobileSidebarOpen(false); }}
+                    className={getNavItemClass(activeTab === 'settings')}
+                  >
+                    <Settings className="h-4 w-4 shrink-0" />
+                    System Config
+                  </button>
+                </div>
+              )}
+
+              {/* SECURITY */}
+              {session.role === 'OWNER' && (
+                <div className="space-y-1">
+                  <span className="px-3 text-[10px] text-slate-400 font-bold uppercase tracking-wider block mb-1">Security</span>
+                  <button
+                    onClick={() => { setActiveTab('audit'); setMobileSidebarOpen(false); }}
+                    className={getNavItemClass(activeTab === 'audit')}
+                  >
+                    <ShieldAlert className="h-4 w-4 shrink-0" />
+                    Audit Security Logs
+                  </button>
+                </div>
+              )}
+            </nav>
+
+            {/* Footer actions */}
+            <div className="shrink-0 p-4 border-t border-[var(--border-color)] bg-[var(--bg-surface)]">
+              <button
+                onClick={handleLogout}
+                className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-800 hover:bg-red-50 dark:hover:bg-red-950/40 text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 text-xs font-semibold border border-slate-200 dark:border-slate-700 transition-all touch-target-44"
+              >
+                <LogOut className="h-4 w-4 shrink-0" />
+                Logout Account
+              </button>
+            </div>
+          </aside>
+        </div>
+      )}
+
       {/* MAIN VIEW AREA */}
-      <main className="flex-1 flex flex-col overflow-hidden bg-slate-950">
+      <main className="flex-1 flex flex-col overflow-hidden bg-[var(--bg-page)] text-[var(--text-primary)]">
 
         {/* Top Header */}
-        <header className="h-16 border-b border-slate-800 bg-slate-900/30 flex items-center justify-between px-8 shrink-0">
-          <div className="flex items-center gap-4">
-            <h1 className="text-xl font-bold tracking-tight text-white capitalize">{activeTab.replace('-', ' ')}</h1>
+        <header className="h-16 border-b border-[var(--border-color)] bg-[var(--bg-surface)] flex items-center justify-between px-3 sm:px-6 lg:px-8 shrink-0 transition-colors duration-200">
+          <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+            {/* Mobile Sidebar Toggle Button */}
+            <button
+              onClick={() => setMobileSidebarOpen(true)}
+              className="lg:hidden p-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-700 focus:outline-none touch-target-44 flex items-center justify-center shrink-0"
+              aria-label="Open Navigation Menu"
+            >
+              <Menu className="h-5 w-5" />
+            </button>
+
+            <h1 className="text-base sm:text-lg lg:text-xl font-bold tracking-tight text-[var(--text-primary)] capitalize truncate">{activeTab.replace('-', ' ')}</h1>
 
             {activeDuty ? (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/25">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 shrink-0">
+                <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
                 Active Session: #{activeDuty.dutyNumber}
               </span>
             ) : (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-500/10 text-red-400 border border-red-500/25">
-                No active duty session
+              <span className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-red-50 dark:bg-red-950/60 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800 shrink-0">
+                No active duty
               </span>
             )}
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+            {/* Theme Toggle Component */}
+            <ThemeToggle />
+
             {isMounted ? (
-              <div className="text-xs text-slate-400 font-medium">
-                System Time: <span className="font-mono text-slate-200 font-semibold">{currentClock}</span>
+              <div className="text-xs text-slate-500 dark:text-slate-400 font-medium hidden md:flex items-center gap-3">
+                <span>System Time: <span className="font-mono text-[var(--text-primary)] font-bold">{currentClock}</span></span>
+                <button
+                  type="button"
+                  onClick={() => setTourOpen(true)}
+                  className="px-3 py-1.5 bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 dark:hover:bg-blue-900 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-sm"
+                >
+                  <HelpCircle className="w-4 h-4" /> System Guide
+                </button>
               </div>
-            ) : (
-              <div className="text-xs text-slate-400 font-medium">
-                System Time: <span className="font-mono text-slate-200 font-semibold">&nbsp;</span>
-              </div>
-            )}
+            ) : null}
 
             {/* Change Duty Action */}
             {activeDuty ? (
@@ -1803,10 +2250,11 @@ export default function DashboardContainer({
                   setWizardOpen(true);
                   setWizardStep(1);
                 }}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all shadow-md shadow-emerald-600/10"
+                className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-all shadow-sm touch-target-44"
               >
-                Change Duty Session
-                <ArrowRight className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Change Duty Session</span>
+                <span className="sm:hidden">Close Duty</span>
+                <ArrowRight className="h-3.5 w-3.5 shrink-0" />
               </button>
             ) : (
               <button
@@ -1818,10 +2266,10 @@ export default function DashboardContainer({
                     setWizardStep('firstDuty');
                   }
                 }}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all shadow-md shadow-indigo-600/10"
+                className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-all shadow-md shadow-blue-600/10 touch-target-44"
               >
-                Start First Duty
-                <Plus className="h-3.5 w-3.5" />
+                <span>Start Duty</span>
+                <Plus className="h-3.5 w-3.5 shrink-0" />
               </button>
             )}
           </div>
@@ -1842,7 +2290,7 @@ export default function DashboardContainer({
         )}
 
         {/* Content Body */}
-        <div className="flex-1 overflow-y-auto p-8 space-y-8">
+        <div ref={mainContentRef} className="flex-1 overflow-y-auto p-3.5 sm:p-6 lg:p-8 pb-28 lg:pb-8 space-y-6 sm:space-y-8 custom-scrollbar">
 
           {/* TAB 1: OWNER DASHBOARD & VERIFICATION REPORT */}
           {activeTab === 'dashboard' && session.role === 'OWNER' && (
@@ -2788,735 +3236,849 @@ export default function DashboardContainer({
                             <TrendingUp className="h-5 w-5 text-indigo-400" />
                             Daily Fuel Sales Summary (Live Duty #{activeDuty.dutyNumber})
                           </h3>
-                        <span className="text-xs text-indigo-400 font-bold bg-indigo-500/10 px-2.5 py-1 rounded border border-indigo-500/20">
-                          Manager: {activeDuty.manager.username}
-                        </span>
-                      </div>
-
-                      {(() => {
-                        const msReadings = activeDuty.meterReadings.filter((mr: any) => mr.gun.fuelType === 'MS');
-                        const hsdReadings = activeDuty.meterReadings.filter((mr: any) => mr.gun.fuelType === 'HSD');
-
-                        const msLitres = msReadings.reduce((sum: number, mr: any) => {
-                          const val = ongoingReadings[mr.gunId] !== undefined ? ongoingReadings[mr.gunId] : mr.currentReading;
-                          return sum + Math.max(0, val - mr.previousReading);
-                        }, 0);
-
-                        const hsdLitres = hsdReadings.reduce((sum: number, mr: any) => {
-                          const val = ongoingReadings[mr.gunId] !== undefined ? ongoingReadings[mr.gunId] : mr.currentReading;
-                          return sum + Math.max(0, val - mr.previousReading);
-                        }, 0);
-
-                        const msSales = msReadings.reduce((sum: number, mr: any) => {
-                          const val = ongoingReadings[mr.gunId] !== undefined ? ongoingReadings[mr.gunId] : mr.currentReading;
-                          return sum + (Math.max(0, val - mr.previousReading) * mr.priceUsed);
-                        }, 0);
-
-                        const hsdSales = hsdReadings.reduce((sum: number, mr: any) => {
-                          const val = ongoingReadings[mr.gunId] !== undefined ? ongoingReadings[mr.gunId] : mr.currentReading;
-                          return sum + (Math.max(0, val - mr.previousReading) * mr.priceUsed);
-                        }, 0);
-
-                        const totalLitres = msLitres + hsdLitres;
-                        const totalFuelSales = msSales + hsdSales;
-
-                        return (
-                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                            <div className="bg-slate-950 p-3 rounded-xl border border-slate-850">
-                              <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider block">MS Sales Volume</span>
-                              <span className="text-lg font-black text-indigo-400 font-mono mt-1 block">{msLitres.toFixed(2)} L</span>
-                              <span className="text-xs text-slate-400 font-semibold font-mono">₹{msSales.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                            </div>
-                            <div className="bg-slate-950 p-3 rounded-xl border border-slate-850">
-                              <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider block">HSD Sales Volume</span>
-                              <span className="text-lg font-black text-emerald-400 font-mono mt-1 block">{hsdLitres.toFixed(2)} L</span>
-                              <span className="text-xs text-slate-400 font-semibold font-mono">₹{hsdSales.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                            </div>
-                            <div className="bg-slate-950 p-3 rounded-xl border border-slate-850">
-                              <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider block">Total Fuel Litres</span>
-                              <span className="text-lg font-black text-white font-mono mt-1 block">{totalLitres.toFixed(2)} L</span>
-                              <span className="text-[10px] text-slate-500">Across all 8 Nozzles</span>
-                            </div>
-                            <div className="bg-slate-950 p-3 rounded-xl border border-slate-850">
-                              <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider block">Total Fuel Sales</span>
-                              <span className="text-lg font-black text-amber-400 font-mono mt-1 block">₹{totalFuelSales.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                              <span className="text-[10px] text-slate-500">Gross revenue</span>
-                            </div>
-                          </div>
-                        );
-                      })()}
-                    </div>
-
-                    {/* Active Readings Form - Grouped by Pump 1 and Pump 2 */}
-                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
-                      <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-                        <div>
-                          <h3 className="font-extrabold text-white text-lg">Gun Meter Readings (Grouped by Pump)</h3>
-                          <p className="text-xs text-slate-400 mt-1">Enter current meter reading for each gun. Litres sold and sales are calculated automatically.</p>
-                        </div>
-                        <button
-                          onClick={handleSaveOngoingReadings}
-                          disabled={actionLoading}
-                          className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition-all shadow-md"
-                        >
-                          {actionLoading ? 'Saving...' : 'Save Meter Readings'}
-                        </button>
-                      </div>
-
-                      {/* PUMP 1 SECTION */}
-                      <div className="space-y-4">
-                        <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
-                          <span className="h-3 w-3 rounded-full bg-indigo-500" />
-                          <h4 className="font-extrabold text-indigo-400 text-sm tracking-wider uppercase">PUMP 1 (MS-1, HSD-1, MS-2, HSD-2)</h4>
+                          <span className="text-xs text-indigo-400 font-bold bg-indigo-500/10 px-2.5 py-1 rounded border border-indigo-500/20">
+                            Manager: {activeDuty.manager.username}
+                          </span>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          {getSortedReadings(activeDuty.meterReadings)
-                            .filter((mr: any) => ['MS-1', 'HSD-1', 'MS-2', 'HSD-2'].includes(mr.gun.name))
-                            .map((mr: any, idx: number) => {
-                              const currentVal = ongoingReadings[mr.gunId] !== undefined ? ongoingReadings[mr.gunId] : mr.currentReading;
-                              const litres = Math.max(0, currentVal - mr.previousReading);
-                              const sales = litres * mr.priceUsed;
+                        {(() => {
+                          const msReadings = activeDuty.meterReadings.filter((mr: any) => mr.gun.fuelType === 'MS');
+                          const hsdReadings = activeDuty.meterReadings.filter((mr: any) => mr.gun.fuelType === 'HSD');
 
-                              return (
-                                <div key={idx} className="bg-slate-950 border border-slate-850 p-4 rounded-xl space-y-3">
-                                  <div className="flex justify-between items-center">
-                                    <div className="flex items-center gap-2">
-                                      <span className="text-sm font-bold text-slate-200">{mr.gun.name}</span>
-                                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">
-                                        Staff: {getAssignedStaffForGun(activeDuty, mr.gun)}
-                                      </span>
-                                    </div>
-                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-slate-900 text-indigo-400 border border-indigo-500/10">
-                                      {mr.gun.fuelType} (₹{mr.priceUsed.toFixed(2)})
-                                    </span>
-                                  </div>
-                                  <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Previous Reading</label>
-                                      <span className="block text-sm font-mono font-bold text-slate-450 mt-1.5 bg-slate-900 px-3 py-2 rounded-lg border border-slate-800 select-none">
-                                        {mr.previousReading.toFixed(2)}
-                                      </span>
-                                    </div>
-                                    <div>
-                                      <label htmlFor={`reading-${mr.gunId}`} className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Current Reading</label>
-                                      <input
-                                        id={`reading-${mr.gunId}`}
-                                        type="number"
-                                        step="0.01"
-                                        value={ongoingReadings[mr.gunId] !== undefined ? ongoingReadings[mr.gunId] : ''}
-                                        onChange={(e) => {
-                                          setOngoingReadings({
-                                            ...ongoingReadings,
-                                            [mr.gunId]: Number(e.target.value),
-                                          });
-                                        }}
-                                        className="block w-full rounded-lg border border-slate-700 bg-slate-900 py-1.5 px-3 mt-1 text-sm text-slate-100 font-mono font-semibold placeholder-slate-600 focus:border-indigo-500 focus:outline-none"
-                                        placeholder="Enter reading"
-                                      />
-                                    </div>
-                                  </div>
-                                  <div className="flex justify-between items-center text-xs font-semibold text-slate-400 pt-2 border-t border-slate-900">
-                                    <span>Litres Sold: <strong className="font-mono text-white">{litres.toFixed(2)} L</strong></span>
-                                    <span>Sales: <strong className="font-mono text-indigo-400">₹{sales.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                        </div>
-                      </div>
+                          const msLitres = msReadings.reduce((sum: number, mr: any) => {
+                            const val = ongoingReadings[mr.gunId] !== undefined ? ongoingReadings[mr.gunId] : mr.currentReading;
+                            return sum + Math.max(0, val - mr.previousReading);
+                          }, 0);
 
-                      {/* PUMP 2 SECTION */}
-                      <div className="space-y-4 pt-4 border-t border-slate-800">
-                        <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
-                          <span className="h-3 w-3 rounded-full bg-emerald-500" />
-                          <h4 className="font-extrabold text-emerald-400 text-sm tracking-wider uppercase">PUMP 2 (MS-3, HSD-3, MS-4, HSD-4)</h4>
-                        </div>
+                          const hsdLitres = hsdReadings.reduce((sum: number, mr: any) => {
+                            const val = ongoingReadings[mr.gunId] !== undefined ? ongoingReadings[mr.gunId] : mr.currentReading;
+                            return sum + Math.max(0, val - mr.previousReading);
+                          }, 0);
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          {getSortedReadings(activeDuty.meterReadings)
-                            .filter((mr: any) => ['MS-3', 'HSD-3', 'MS-4', 'HSD-4'].includes(mr.gun.name))
-                            .map((mr: any, idx: number) => {
-                              const currentVal = ongoingReadings[mr.gunId] !== undefined ? ongoingReadings[mr.gunId] : mr.currentReading;
-                              const litres = Math.max(0, currentVal - mr.previousReading);
-                              const sales = litres * mr.priceUsed;
+                          const msSales = msReadings.reduce((sum: number, mr: any) => {
+                            const val = ongoingReadings[mr.gunId] !== undefined ? ongoingReadings[mr.gunId] : mr.currentReading;
+                            return sum + (Math.max(0, val - mr.previousReading) * mr.priceUsed);
+                          }, 0);
 
-                              return (
-                                <div key={idx} className="bg-slate-950 border border-slate-850 p-4 rounded-xl space-y-3">
-                                  <div className="flex justify-between items-center">
-                                    <div className="flex items-center gap-2">
-                                      <span className="text-sm font-bold text-slate-200">{mr.gun.name}</span>
-                                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
-                                        Staff: {getAssignedStaffForGun(activeDuty, mr.gun)}
-                                      </span>
-                                    </div>
-                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-slate-900 text-emerald-400 border border-emerald-500/10">
-                                      {mr.gun.fuelType} (₹{mr.priceUsed.toFixed(2)})
-                                    </span>
-                                  </div>
-                                  <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Previous Reading</label>
-                                      <span className="block text-sm font-mono font-bold text-slate-450 mt-1.5 bg-slate-900 px-3 py-2 rounded-lg border border-slate-800 select-none">
-                                        {mr.previousReading.toFixed(2)}
-                                      </span>
-                                    </div>
-                                    <div>
-                                      <label htmlFor={`reading-${mr.gunId}`} className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Current Reading</label>
-                                      <input
-                                        id={`reading-${mr.gunId}`}
-                                        type="number"
-                                        step="0.01"
-                                        value={ongoingReadings[mr.gunId] !== undefined ? ongoingReadings[mr.gunId] : ''}
-                                        onChange={(e) => {
-                                          setOngoingReadings({
-                                            ...ongoingReadings,
-                                            [mr.gunId]: Number(e.target.value),
-                                          });
-                                        }}
-                                        className="block w-full rounded-lg border border-slate-700 bg-slate-900 py-1.5 px-3 mt-1 text-sm text-slate-100 font-mono font-semibold placeholder-slate-600 focus:border-indigo-500 focus:outline-none"
-                                        placeholder="Enter reading"
-                                      />
-                                    </div>
-                                  </div>
-                                  <div className="flex justify-between items-center text-xs font-semibold text-slate-400 pt-2 border-t border-slate-900">
-                                    <span>Litres Sold: <strong className="font-mono text-white">{litres.toFixed(2)} L</strong></span>
-                                    <span>Sales: <strong className="font-mono text-emerald-400">₹{sales.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                        </div>
-                      </div>
+                          const hsdSales = hsdReadings.reduce((sum: number, mr: any) => {
+                            const val = ongoingReadings[mr.gunId] !== undefined ? ongoingReadings[mr.gunId] : mr.currentReading;
+                            return sum + (Math.max(0, val - mr.previousReading) * mr.priceUsed);
+                          }, 0);
 
-                      <div className="flex justify-end pt-4 border-t border-slate-800">
-                        <button
-                          onClick={handleSaveOngoingReadings}
-                          disabled={actionLoading}
-                          className="px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm transition-all"
-                        >
-                          {actionLoading ? 'Saving...' : 'Save Current Readings'}
-                        </button>
-                      </div>
-                    </div>
+                          const totalLitres = msLitres + hsdLitres;
+                          const totalFuelSales = msSales + hsdSales;
 
-                    {/* Operational Tables: Oil, Expenses, Credit */}
-                    <div className="grid grid-cols-1 gap-8">
-                      {/* Oil Sales Log */}
-                      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
-                        <div className="flex justify-between items-center border-b border-slate-800 pb-4">
-                          <h4 className="font-bold text-white text-base">Shift Oil Product Sales (2T/4T)</h4>
-                          <span className="text-xs text-slate-400">Totallogged: {activeDuty.oilSales.length} items</span>
-                        </div>
-
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-left border-collapse text-xs">
-                            <thead>
-                              <tr className="bg-slate-950 border-b border-slate-800 text-slate-400 uppercase font-bold">
-                                <th className="p-3">Product Name</th>
-                                <th className="p-3 text-right">Quantity</th>
-                                <th className="p-3 text-right">Unit Price</th>
-                                <th className="p-3 text-right">Total Price</th>
-                                <th className="p-3 text-center">Action</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-800/40">
-                              {activeDuty.oilSales.length === 0 ? (
-                                <tr>
-                                  <td colSpan={5} className="p-4 text-center text-slate-500">No oil products logged.</td>
-                                </tr>
-                              ) : (
-                                activeDuty.oilSales.map((os: any, idx: number) => (
-                                  <tr key={idx} className="hover:bg-slate-950/20">
-                                    <td className="p-3 font-semibold text-slate-200">{os.productName}</td>
-                                    <td className="p-3 text-right font-mono text-slate-350">{os.quantity}</td>
-                                    <td className="p-3 text-right font-mono text-slate-350">₹{os.unitPrice.toFixed(2)}</td>
-                                    <td className="p-3 text-right font-mono font-bold text-indigo-400">₹{os.totalAmount.toFixed(2)}</td>
-                                    <td className="p-3 text-center">
-                                      <button onClick={() => handleDeleteOilSale(os.id)} className="text-red-500 hover:text-red-400">
-                                        <Trash2 className="h-4 w-4 mx-auto" />
-                                      </button>
-                                    </td>
-                                  </tr>
-                                ))
-                              )}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-
-                      {/* Expenses Log */}
-                      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
-                        <div className="flex justify-between items-center border-b border-slate-800 pb-4">
-                          <h4 className="font-bold text-white text-base">Bunk Operating Expenses</h4>
-                          <span className="text-xs text-slate-400">Total cash expenses: ₹{expensesPaidInCash.toLocaleString()}</span>
-                        </div>
-
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-left border-collapse text-xs">
-                            <thead>
-                              <tr className="bg-slate-950 border-b border-slate-800 text-slate-400 uppercase font-bold">
-                                <th className="p-3">Category</th>
-                                <th className="p-3">Description</th>
-                                <th className="p-3 text-right">Amount</th>
-                                <th className="p-3">Method</th>
-                                <th className="p-3 text-center">Action</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-800/40">
-                              {activeDuty.expenses.length === 0 ? (
-                                <tr>
-                                  <td colSpan={5} className="p-4 text-center text-slate-500">No shift expenses logged.</td>
-                                </tr>
-                              ) : (
-                                activeDuty.expenses.map((ex: any, idx: number) => (
-                                  <tr key={idx} className="hover:bg-slate-950/20">
-                                    <td className="p-3 font-semibold text-slate-200">{ex.category.name}</td>
-                                    <td className="p-3 text-slate-350">{ex.description}</td>
-                                    <td className="p-3 text-right font-mono font-bold text-red-400">₹{ex.amount.toFixed(2)}</td>
-                                    <td className="p-3"><span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-bold uppercase tracking-wider text-[9px]">{ex.paymentMethod}</span></td>
-                                    <td className="p-3 text-center">
-                                      <button onClick={() => handleDeleteExpense(ex.id)} className="text-red-500 hover:text-red-400">
-                                        <Trash2 className="h-4 w-4 mx-auto" />
-                                      </button>
-                                    </td>
-                                  </tr>
-                                ))
-                              )}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-
-                      {/* Credit Ledger Transactions */}
-                      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
-                        <div className="flex justify-between items-center border-b border-slate-800 pb-4">
-                          <h4 className="font-bold text-white text-base">Credit Ledger (Customer Credit Sales & Collections)</h4>
-                          <span className="text-xs text-amber-400 font-mono font-bold">Total credit sales: ₹{creditSalesAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                        </div>
-
-                        <form onSubmit={handleAddCredit} className="space-y-3 bg-slate-950/60 p-4 rounded-xl border border-slate-800">
-                          <div className="grid grid-cols-2 gap-3">
-                            <div>
-                              <label className="block text-[10px] font-bold text-slate-400 uppercase">1. Customer / Company Name</label>
-                              <select required value={creditCustId} onChange={(e) => setCreditCustId(e.target.value)} className="block w-full rounded border border-slate-700 bg-slate-900 py-1.5 px-2 mt-1 text-xs text-white focus:border-indigo-500 focus:outline-none">
-                                <option value="">-- Select Customer / Company --</option>
-                                {staticData.customers.map((c: any) => (<option key={c.id} value={c.id}>{c.name} (Bal: ₹{c.balance.toFixed(2)})</option>))}
-                              </select>
-                            </div>
-                            <div>
-                              <label className="block text-[10px] font-bold text-slate-400 uppercase">2. Transaction Type</label>
-                              <select value={creditType} onChange={(e) => setCreditType(e.target.value as any)} className="block w-full rounded border border-slate-700 bg-slate-900 py-1.5 px-2 mt-1 text-xs text-white font-bold focus:border-indigo-500 focus:outline-none">
-                                <option value="CREDIT_SALE">Credit Given (Fuel / Oil / Product)</option>
-                                <option value="COLLECTION">Ledger Collection (Cash Received)</option>
-                              </select>
-                            </div>
-                          </div>
-
-                          {creditType === 'CREDIT_SALE' ? (
-                            <div className="grid grid-cols-1 md:grid-cols-6 gap-2 items-end bg-slate-900/60 p-2.5 rounded border border-slate-800">
-                              <div>
-                                <label className="block text-[10px] font-bold text-slate-400 uppercase">Indent / Slip No</label>
-                                <input type="text" value={indentNumber} onChange={(e) => setIndentNumber(e.target.value)} className="block w-full rounded border border-slate-700 bg-slate-950 py-1.5 px-2 mt-1 text-xs text-white font-mono focus:border-indigo-500 focus:outline-none" placeholder="IND-104" />
+                          return (
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                              <div className="bg-slate-950 p-3 rounded-xl border border-slate-850">
+                                <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider block">MS Sales Volume</span>
+                                <span className="text-lg font-black text-indigo-400 font-mono mt-1 block">{msLitres.toFixed(2)} L</span>
+                                <span className="text-xs text-slate-400 font-semibold font-mono">₹{msSales.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                               </div>
+                              <div className="bg-slate-950 p-3 rounded-xl border border-slate-850">
+                                <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider block">HSD Sales Volume</span>
+                                <span className="text-lg font-black text-emerald-400 font-mono mt-1 block">{hsdLitres.toFixed(2)} L</span>
+                                <span className="text-xs text-slate-400 font-semibold font-mono">₹{hsdSales.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                              </div>
+                              <div className="bg-slate-950 p-3 rounded-xl border border-slate-850">
+                                <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider block">Total Fuel Litres</span>
+                                <span className="text-lg font-black text-white font-mono mt-1 block">{totalLitres.toFixed(2)} L</span>
+                                <span className="text-[10px] text-slate-500">Across all 8 Nozzles</span>
+                              </div>
+                              <div className="bg-slate-950 p-3 rounded-xl border border-slate-850">
+                                <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider block">Total Fuel Sales</span>
+                                <span className="text-lg font-black text-amber-400 font-mono mt-1 block">₹{totalFuelSales.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                <span className="text-[10px] text-slate-500">Gross revenue</span>
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </div>
+
+                      {/* Active Readings Form - Grouped by Pump 1 and Pump 2 */}
+                      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
+                        <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+                          <div>
+                            <h3 className="font-extrabold text-white text-lg">Gun Meter Readings (Grouped by Pump)</h3>
+                            <p className="text-xs text-slate-400 mt-1">Enter current meter reading for each gun. Litres sold and sales are calculated automatically.</p>
+                          </div>
+                          <button
+                            onClick={handleSaveOngoingReadings}
+                            disabled={actionLoading}
+                            className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition-all shadow-md"
+                          >
+                            {actionLoading ? 'Saving...' : 'Save Meter Readings'}
+                          </button>
+                        </div>
+
+                        {/* PUMP 1 SECTION */}
+                        <div className="space-y-4">
+                          <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
+                            <span className="h-3 w-3 rounded-full bg-indigo-500" />
+                            <h4 className="font-extrabold text-indigo-400 text-sm tracking-wider uppercase">PUMP 1 (MS-1, HSD-1, MS-2, HSD-2)</h4>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {getSortedReadings(activeDuty.meterReadings)
+                              .filter((mr: any) => ['MS-1', 'HSD-1', 'MS-2', 'HSD-2'].includes(mr.gun.name))
+                              .map((mr: any, idx: number) => {
+                                const currentVal = ongoingReadings[mr.gunId] !== undefined ? ongoingReadings[mr.gunId] : mr.currentReading;
+                                const litres = Math.max(0, currentVal - mr.previousReading);
+                                const sales = litres * mr.priceUsed;
+
+                                return (
+                                  <div key={idx} className="bg-slate-950 border border-slate-850 p-4 rounded-xl space-y-3">
+                                    <div className="flex justify-between items-center">
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-sm font-bold text-slate-200">{mr.gun.name}</span>
+                                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">
+                                          Staff: {getAssignedStaffForGun(activeDuty, mr.gun)}
+                                        </span>
+                                      </div>
+                                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-slate-900 text-indigo-400 border border-indigo-500/10">
+                                        {mr.gun.fuelType} (₹{mr.priceUsed.toFixed(2)})
+                                      </span>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                      <div>
+                                        <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Previous Reading</label>
+                                        <span className="block text-sm font-mono font-bold text-slate-450 mt-1.5 bg-slate-900 px-3 py-2 rounded-lg border border-slate-800 select-none">
+                                          {mr.previousReading.toFixed(2)}
+                                        </span>
+                                      </div>
+                                      <div>
+                                        <label htmlFor={`reading-${mr.gunId}`} className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Current Reading</label>
+                                        <input
+                                          id={`reading-${mr.gunId}`}
+                                          type="number"
+                                          step="0.01"
+                                          value={ongoingReadings[mr.gunId] !== undefined ? ongoingReadings[mr.gunId] : ''}
+                                          onChange={(e) => {
+                                            setOngoingReadings({
+                                              ...ongoingReadings,
+                                              [mr.gunId]: Number(e.target.value),
+                                            });
+                                          }}
+                                          className="block w-full rounded-lg border border-slate-700 bg-slate-900 py-1.5 px-3 mt-1 text-sm text-slate-100 font-mono font-semibold placeholder-slate-600 focus:border-indigo-500 focus:outline-none"
+                                          placeholder="Enter reading"
+                                        />
+                                      </div>
+                                    </div>
+                                    <div className="flex justify-between items-center text-xs font-semibold text-slate-400 pt-2 border-t border-slate-900">
+                                      <span>Litres Sold: <strong className="font-mono text-white">{litres.toFixed(2)} L</strong></span>
+                                      <span>Sales: <strong className="font-mono text-indigo-400">₹{sales.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                          </div>
+                        </div>
+
+                        {/* PUMP 2 SECTION */}
+                        <div className="space-y-4 pt-4 border-t border-slate-800">
+                          <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
+                            <span className="h-3 w-3 rounded-full bg-emerald-500" />
+                            <h4 className="font-extrabold text-emerald-400 text-sm tracking-wider uppercase">PUMP 2 (MS-3, HSD-3, MS-4, HSD-4)</h4>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {getSortedReadings(activeDuty.meterReadings)
+                              .filter((mr: any) => ['MS-3', 'HSD-3', 'MS-4', 'HSD-4'].includes(mr.gun.name))
+                              .map((mr: any, idx: number) => {
+                                const currentVal = ongoingReadings[mr.gunId] !== undefined ? ongoingReadings[mr.gunId] : mr.currentReading;
+                                const litres = Math.max(0, currentVal - mr.previousReading);
+                                const sales = litres * mr.priceUsed;
+
+                                return (
+                                  <div key={idx} className="bg-slate-950 border border-slate-850 p-4 rounded-xl space-y-3">
+                                    <div className="flex justify-between items-center">
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-sm font-bold text-slate-200">{mr.gun.name}</span>
+                                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
+                                          Staff: {getAssignedStaffForGun(activeDuty, mr.gun)}
+                                        </span>
+                                      </div>
+                                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-slate-900 text-emerald-400 border border-emerald-500/10">
+                                        {mr.gun.fuelType} (₹{mr.priceUsed.toFixed(2)})
+                                      </span>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                      <div>
+                                        <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Previous Reading</label>
+                                        <span className="block text-sm font-mono font-bold text-slate-450 mt-1.5 bg-slate-900 px-3 py-2 rounded-lg border border-slate-800 select-none">
+                                          {mr.previousReading.toFixed(2)}
+                                        </span>
+                                      </div>
+                                      <div>
+                                        <label htmlFor={`reading-${mr.gunId}`} className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Current Reading</label>
+                                        <input
+                                          id={`reading-${mr.gunId}`}
+                                          type="number"
+                                          step="0.01"
+                                          value={ongoingReadings[mr.gunId] !== undefined ? ongoingReadings[mr.gunId] : ''}
+                                          onChange={(e) => {
+                                            setOngoingReadings({
+                                              ...ongoingReadings,
+                                              [mr.gunId]: Number(e.target.value),
+                                            });
+                                          }}
+                                          className="block w-full rounded-lg border border-slate-700 bg-slate-900 py-1.5 px-3 mt-1 text-sm text-slate-100 font-mono font-semibold placeholder-slate-600 focus:border-indigo-500 focus:outline-none"
+                                          placeholder="Enter reading"
+                                        />
+                                      </div>
+                                    </div>
+                                    <div className="flex justify-between items-center text-xs font-semibold text-slate-400 pt-2 border-t border-slate-900">
+                                      <span>Litres Sold: <strong className="font-mono text-white">{litres.toFixed(2)} L</strong></span>
+                                      <span>Sales: <strong className="font-mono text-emerald-400">₹{sales.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                          </div>
+                        </div>
+
+                        <div className="flex justify-end pt-4 border-t border-slate-800">
+                          <button
+                            onClick={handleSaveOngoingReadings}
+                            disabled={actionLoading}
+                            className="px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm transition-all"
+                          >
+                            {actionLoading ? 'Saving...' : 'Save Current Readings'}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Operational Tables: Oil, Expenses, Credit */}
+                      <div className="grid grid-cols-1 gap-8">
+                        {/* Oil Sales Log */}
+                        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
+                          <div className="flex justify-between items-center border-b border-slate-800 pb-4">
+                            <h4 className="font-bold text-white text-base">Shift Oil Product Sales (2T/4T)</h4>
+                            <span className="text-xs text-slate-400">Totallogged: {activeDuty.oilSales.length} items</span>
+                          </div>
+
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-left border-collapse text-xs">
+                              <thead>
+                                <tr className="bg-slate-950 border-b border-slate-800 text-slate-400 uppercase font-bold">
+                                  <th className="p-3">Product Name</th>
+                                  <th className="p-3 text-right">Quantity</th>
+                                  <th className="p-3 text-right">Unit Price</th>
+                                  <th className="p-3 text-right">Total Price</th>
+                                  <th className="p-3 text-center">Action</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-800/40">
+                                {activeDuty.oilSales.length === 0 ? (
+                                  <tr>
+                                    <td colSpan={5} className="p-4 text-center text-slate-500">No oil products logged.</td>
+                                  </tr>
+                                ) : (
+                                  activeDuty.oilSales.map((os: any, idx: number) => (
+                                    <tr key={idx} className="hover:bg-slate-950/20">
+                                      <td className="p-3 font-semibold text-slate-200">{os.productName}</td>
+                                      <td className="p-3 text-right font-mono text-slate-350">{os.quantity}</td>
+                                      <td className="p-3 text-right font-mono text-slate-350">₹{os.unitPrice.toFixed(2)}</td>
+                                      <td className="p-3 text-right font-mono font-bold text-indigo-400">₹{os.totalAmount.toFixed(2)}</td>
+                                      <td className="p-3 text-center">
+                                        <button onClick={() => handleDeleteOilSale(os.id)} className="text-red-500 hover:text-red-400">
+                                          <Trash2 className="h-4 w-4 mx-auto" />
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  ))
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+
+                        {/* Expenses Log */}
+                        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
+                          <div className="flex justify-between items-center border-b border-slate-800 pb-4">
+                            <h4 className="font-bold text-white text-base">Bunk Operating Expenses</h4>
+                            <span className="text-xs text-slate-400">Total cash expenses: ₹{expensesPaidInCash.toLocaleString()}</span>
+                          </div>
+
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-left border-collapse text-xs">
+                              <thead>
+                                <tr className="bg-slate-950 border-b border-slate-800 text-slate-400 uppercase font-bold">
+                                  <th className="p-3">Category</th>
+                                  <th className="p-3">Description</th>
+                                  <th className="p-3 text-right">Amount</th>
+                                  <th className="p-3">Method</th>
+                                  <th className="p-3 text-center">Action</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-800/40">
+                                {activeDuty.expenses.length === 0 ? (
+                                  <tr>
+                                    <td colSpan={5} className="p-4 text-center text-slate-500">No shift expenses logged.</td>
+                                  </tr>
+                                ) : (
+                                  activeDuty.expenses.map((ex: any, idx: number) => (
+                                    <tr key={idx} className="hover:bg-slate-950/20">
+                                      <td className="p-3 font-semibold text-slate-200">{ex.category.name}</td>
+                                      <td className="p-3 text-slate-350">{ex.description}</td>
+                                      <td className="p-3 text-right font-mono font-bold text-red-400">₹{ex.amount.toFixed(2)}</td>
+                                      <td className="p-3"><span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-bold uppercase tracking-wider text-[9px]">{ex.paymentMethod}</span></td>
+                                      <td className="p-3 text-center">
+                                        <button onClick={() => handleDeleteExpense(ex.id)} className="text-red-500 hover:text-red-400">
+                                          <Trash2 className="h-4 w-4 mx-auto" />
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  ))
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+
+                        {/* Credit Ledger Transactions */}
+                        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
+                          <div className="flex justify-between items-center border-b border-slate-800 pb-4">
+                            <h4 className="font-bold text-white text-base">Credit Ledger (Customer Credit Sales & Collections)</h4>
+                            <span className="text-xs text-amber-400 font-mono font-bold">Total credit sales: ₹{creditSalesAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                          </div>
+
+                          <form onSubmit={handleAddCredit} className="space-y-3 bg-slate-950/60 p-4 rounded-xl border border-slate-800">
+                            <div className="grid grid-cols-2 gap-3">
                               <div>
-                                <label className="block text-[10px] font-bold text-slate-400 uppercase">Product</label>
-                                <select value={creditProduct} onChange={(e) => {
-                                  const p = e.target.value;
-                                  setCreditProduct(p);
-                                  let rate = 0;
-                                  if (p === 'MS') rate = msPrice;
-                                  else if (p === 'HSD') rate = hsdPrice;
-                                  else {
-                                    const oil = staticData.products.find((op: any) => op.name === p);
-                                    if (oil) rate = oil.price;
-                                  }
-                                  setCreditUnitPrice(rate);
-                                  if (creditLitres > 0 && rate > 0) setCreditAmount(creditLitres * rate);
-                                }} className="block w-full rounded border border-slate-700 bg-slate-950 py-1.5 px-2 mt-1 text-xs text-white font-bold focus:border-indigo-500 focus:outline-none">
-                                  <option value="MS">MS (Petrol) - ₹{msPrice.toFixed(2)}</option>
-                                  <option value="HSD">HSD (Diesel) - ₹{hsdPrice.toFixed(2)}</option>
-                                  {staticData.products.map((p: any) => (
-                                    <option key={p.id} value={p.name}>{p.name} - ₹{p.price.toFixed(2)}</option>
-                                  ))}
-                                  <option value="OTHER">Custom Amount ₹</option>
+                                <label className="block text-[10px] font-bold text-slate-400 uppercase">1. Customer / Company Name</label>
+                                <select required value={creditCustId} onChange={(e) => setCreditCustId(e.target.value)} className="block w-full rounded border border-slate-700 bg-slate-900 py-1.5 px-2 mt-1 text-xs text-white focus:border-indigo-500 focus:outline-none">
+                                  <option value="">-- Select Customer / Company --</option>
+                                  {staticData.customers.map((c: any) => (<option key={c.id} value={c.id}>{c.name} (Bal: ₹{c.balance.toFixed(2)})</option>))}
                                 </select>
                               </div>
                               <div>
-                                <label className="block text-[10px] font-bold text-slate-400 uppercase">Litres / Qty</label>
-                                <input type="number" step="0.01" min="0.01" value={creditLitres || ''} onChange={(e) => {
-                                  const l = Number(e.target.value);
-                                  setCreditLitres(l);
-                                  const rate = creditUnitPrice || (creditProduct === 'MS' ? msPrice : (creditProduct === 'HSD' ? hsdPrice : 0));
-                                  if (rate > 0) setCreditAmount(l * rate);
-                                }} className="block w-full rounded border border-slate-700 bg-slate-950 py-1.5 px-2 mt-1 text-xs text-white font-mono font-bold focus:border-indigo-500 focus:outline-none" placeholder="0.00" />
-                              </div>
-                              <div>
-                                <label className="block text-[10px] font-bold text-slate-400 uppercase">Rate (₹/L)</label>
-                                <input type="number" step="0.01" value={creditUnitPrice || (creditProduct === 'MS' ? msPrice : (creditProduct === 'HSD' ? hsdPrice : ''))} onChange={(e) => {
-                                  const r = Number(e.target.value);
-                                  setCreditUnitPrice(r);
-                                  if (creditLitres > 0) setCreditAmount(creditLitres * r);
-                                }} className="block w-full rounded border border-slate-700 bg-slate-950 py-1.5 px-2 mt-1 text-xs text-white font-mono focus:border-indigo-500 focus:outline-none" placeholder="Rate" />
-                              </div>
-                              <div>
-                                <label className="block text-[10px] font-bold text-slate-400 uppercase">Amount (₹)</label>
-                                <input type="number" step="0.01" min="1" value={creditAmount || ''} onChange={(e) => setCreditAmount(Number(e.target.value))} className="block w-full rounded border border-slate-700 bg-slate-950 py-1.5 px-2 mt-1 text-xs text-amber-400 font-mono font-bold focus:border-indigo-500 focus:outline-none" placeholder="0.00" />
-                              </div>
-                              <div>
-                                <button type="submit" disabled={isSubmittingCredit || actionLoading} className="w-full py-2 rounded bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white font-bold text-xs uppercase transition-all flex items-center justify-center gap-1 shadow-md">
-                                  {isSubmittingCredit ? <span>Saving...</span> : <><Plus className="h-3.5 w-3.5 inline mr-1" />+ ADD CREDIT</>}
-                                </button>
+                                <label className="block text-[10px] font-bold text-slate-400 uppercase">2. Transaction Type</label>
+                                <select value={creditType} onChange={(e) => setCreditType(e.target.value as any)} className="block w-full rounded border border-slate-700 bg-slate-900 py-1.5 px-2 mt-1 text-xs text-white font-bold focus:border-indigo-500 focus:outline-none">
+                                  <option value="CREDIT_SALE">Credit Given (Fuel / Oil / Product)</option>
+                                  <option value="COLLECTION">Record Credit Collection (Payment Received)</option>
+                                </select>
                               </div>
                             </div>
-                          ) : (
-                            <div className="grid grid-cols-4 gap-2 items-end bg-slate-900/60 p-2.5 rounded border border-slate-800">
-                              <div>
-                                <label className="block text-[10px] font-bold text-slate-400 uppercase">Receipt / Voucher No</label>
-                                <input type="text" value={indentNumber} onChange={(e) => setIndentNumber(e.target.value)} className="block w-full rounded border border-slate-700 bg-slate-950 py-1.5 px-2 mt-1 text-xs text-white font-mono focus:border-indigo-500 focus:outline-none" placeholder="REC-001" />
-                              </div>
-                              <div>
-                                <label className="block text-[10px] font-bold text-slate-400 uppercase">Cash Collected ₹</label>
-                                <input type="number" required min="1" step="0.01" value={creditAmount || ''} onChange={(e) => setCreditAmount(Number(e.target.value))} className="block w-full rounded border border-slate-700 bg-slate-950 py-1.5 px-2 mt-1 text-xs text-emerald-400 font-mono font-bold focus:border-indigo-500 focus:outline-none" placeholder="0.00" />
-                              </div>
-                              <div>
-                                <label className="block text-[10px] font-bold text-slate-400 uppercase">Remarks / Note</label>
-                                <input type="text" value={creditDesc} onChange={(e) => setCreditDesc(e.target.value)} className="block w-full rounded border border-slate-700 bg-slate-950 py-1.5 px-2 mt-1 text-xs text-white focus:border-indigo-500 focus:outline-none" placeholder="Optional remark" />
-                              </div>
-                              <button type="submit" disabled={isSubmittingCredit || actionLoading} className="py-2 rounded bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs uppercase transition-all flex items-center justify-center gap-1 shadow-md">
-                                {isSubmittingCredit ? <span>Saving...</span> : <><Plus className="h-3.5 w-3.5 inline mr-1" />+ ADD COLLECTION</>}
-                              </button>
-                            </div>
-                          )}
-                        </form>
 
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-left border-collapse text-xs">
-                            <thead>
-                              <tr className="bg-slate-950 border-b border-slate-800 text-slate-400 uppercase font-bold text-[10px]">
-                                <th className="p-2.5">Customer</th>
-                                <th className="p-2.5">Type</th>
-                                <th className="p-2.5">Indent / Slip</th>
-                                <th className="p-2.5">Product</th>
-                                <th className="p-2.5 text-right">Qty (L)</th>
-                                <th className="p-2.5 text-right">Rate</th>
-                                <th className="p-2.5 text-right">Amount</th>
-                                <th className="p-2.5">Remarks</th>
-                                <th className="p-2.5 text-center">Action</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-800/40 font-mono text-xs">
-                              {activeDuty.creditTransactions.length === 0 ? (
-                                <tr>
-                                  <td colSpan={9} className="p-4 text-center text-slate-500 font-sans">No credit logs for this shift.</td>
+                            {creditType === 'CREDIT_SALE' ? (
+                              <div className="grid grid-cols-1 md:grid-cols-6 gap-2 items-end bg-slate-900/60 p-2.5 rounded border border-slate-800">
+                                <div>
+                                  <label className="block text-[10px] font-bold text-slate-400 uppercase">Indent / Slip No</label>
+                                  <input type="text" value={indentNumber} onChange={(e) => setIndentNumber(e.target.value)} className="block w-full rounded border border-slate-700 bg-slate-950 py-1.5 px-2 mt-1 text-xs text-white font-mono focus:border-indigo-500 focus:outline-none" placeholder="IND-104" />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-bold text-slate-400 uppercase">Product</label>
+                                  <select value={creditProduct} onChange={(e) => {
+                                    const p = e.target.value;
+                                    setCreditProduct(p);
+                                    let rate = 0;
+                                    if (p === 'MS') rate = msPrice;
+                                    else if (p === 'HSD') rate = hsdPrice;
+                                    else {
+                                      const oil = staticData.products.find((op: any) => op.name === p);
+                                      if (oil) rate = oil.price;
+                                    }
+                                    setCreditUnitPrice(rate);
+                                    if (creditLitres > 0 && rate > 0) setCreditAmount(creditLitres * rate);
+                                  }} className="block w-full rounded border border-slate-700 bg-slate-950 py-1.5 px-2 mt-1 text-xs text-white font-bold focus:border-indigo-500 focus:outline-none">
+                                    <option value="MS">MS (Petrol) - ₹{msPrice.toFixed(2)}</option>
+                                    <option value="HSD">HSD (Diesel) - ₹{hsdPrice.toFixed(2)}</option>
+                                    {staticData.products.map((p: any) => (
+                                      <option key={p.id} value={p.name}>{p.name} - ₹{p.price.toFixed(2)}</option>
+                                    ))}
+                                    <option value="OTHER">Custom Amount ₹</option>
+                                  </select>
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-bold text-slate-400 uppercase">Litres / Qty</label>
+                                  <input type="number" step="0.01" min="0.01" value={creditLitres || ''} onChange={(e) => {
+                                    const l = Number(e.target.value);
+                                    setCreditLitres(l);
+                                    const rate = creditUnitPrice || (creditProduct === 'MS' ? msPrice : (creditProduct === 'HSD' ? hsdPrice : 0));
+                                    if (rate > 0) setCreditAmount(l * rate);
+                                  }} className="block w-full rounded border border-slate-700 bg-slate-950 py-1.5 px-2 mt-1 text-xs text-white font-mono font-bold focus:border-indigo-500 focus:outline-none" placeholder="0.00" />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-bold text-slate-400 uppercase">Rate (₹/L)</label>
+                                  <input type="number" step="0.01" value={creditUnitPrice || (creditProduct === 'MS' ? msPrice : (creditProduct === 'HSD' ? hsdPrice : ''))} onChange={(e) => {
+                                    const r = Number(e.target.value);
+                                    setCreditUnitPrice(r);
+                                    if (creditLitres > 0) setCreditAmount(creditLitres * r);
+                                  }} className="block w-full rounded border border-slate-700 bg-slate-950 py-1.5 px-2 mt-1 text-xs text-white font-mono focus:border-indigo-500 focus:outline-none" placeholder="Rate" />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-bold text-slate-400 uppercase">Amount (₹)</label>
+                                  <input type="number" step="0.01" min="1" value={creditAmount || ''} onChange={(e) => setCreditAmount(Number(e.target.value))} className="block w-full rounded border border-slate-700 bg-slate-950 py-1.5 px-2 mt-1 text-xs text-amber-400 font-mono font-bold focus:border-indigo-500 focus:outline-none" placeholder="0.00" />
+                                </div>
+                                <div>
+                                  <button type="submit" disabled={isSubmittingCredit || actionLoading} className="w-full py-2 rounded bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white font-bold text-xs uppercase transition-all flex items-center justify-center gap-1 shadow-md">
+                                    {isSubmittingCredit ? <span>Saving...</span> : <><Plus className="h-3.5 w-3.5 inline mr-1" />+ ADD CREDIT</>}
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="space-y-3 bg-slate-900/60 p-3 rounded-xl border border-slate-800">
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                  <div>
+                                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Payment Method</label>
+                                    <select
+                                      value={creditPaymentMethod}
+                                      onChange={(e) => setCreditPaymentMethod(e.target.value)}
+                                      className="block w-full rounded border border-slate-700 bg-slate-950 py-1.5 px-2 text-xs text-emerald-400 font-bold focus:border-indigo-500 focus:outline-none"
+                                    >
+                                      <option value="CASH">Cash</option>
+                                      <option value="CHEQUE">Cheque</option>
+                                      <option value="RTGS">RTGS</option>
+                                      <option value="NEFT">NEFT</option>
+                                      <option value="UPI">UPI / Digital Transfer</option>
+                                      <option value="BANK_TRANSFER">Bank Transfer</option>
+                                      <option value="OTHER">Other</option>
+                                    </select>
+                                  </div>
+                                  <div>
+                                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Collection Amount (₹) *</label>
+                                    <input
+                                      type="number"
+                                      required
+                                      min="1"
+                                      step="0.01"
+                                      value={creditAmount || ''}
+                                      onChange={(e) => setCreditAmount(Number(e.target.value))}
+                                      className="block w-full rounded border border-slate-700 bg-slate-950 py-1.5 px-2 text-xs text-emerald-400 font-mono font-bold focus:border-indigo-500 focus:outline-none"
+                                      placeholder="0.00"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Remarks / Note</label>
+                                    <input
+                                      type="text"
+                                      value={creditDesc}
+                                      onChange={(e) => setCreditDesc(e.target.value)}
+                                      className="block w-full rounded border border-slate-700 bg-slate-950 py-1.5 px-2 text-xs text-white focus:border-indigo-500 focus:outline-none"
+                                      placeholder="Optional remark"
+                                    />
+                                  </div>
+                                </div>
+
+                                {creditPaymentMethod === 'CHEQUE' && (
+                                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2 border-t border-slate-800">
+                                    <div>
+                                      <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Cheque Number *</label>
+                                      <input
+                                        type="text"
+                                        required
+                                        value={creditPaymentReference}
+                                        onChange={(e) => setCreditPaymentReference(e.target.value)}
+                                        className="block w-full rounded border border-slate-700 bg-slate-950 py-1.5 px-2 text-xs text-white font-mono focus:border-indigo-500 focus:outline-none"
+                                        placeholder="CHQ-123456"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Cheque Date *</label>
+                                      <input
+                                        type="date"
+                                        required
+                                        value={creditPaymentDate}
+                                        onChange={(e) => setCreditPaymentDate(e.target.value)}
+                                        className="block w-full rounded border border-slate-700 bg-slate-950 py-1.5 px-2 text-xs text-white focus:border-indigo-500 focus:outline-none"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Bank Name</label>
+                                      <input
+                                        type="text"
+                                        value={creditBankName}
+                                        onChange={(e) => setCreditBankName(e.target.value)}
+                                        className="block w-full rounded border border-slate-700 bg-slate-950 py-1.5 px-2 text-xs text-white focus:border-indigo-500 focus:outline-none"
+                                        placeholder="e.g. SBI"
+                                      />
+                                    </div>
+                                  </div>
+                                )}
+
+                                {['RTGS', 'NEFT', 'UPI', 'BANK_TRANSFER'].includes(creditPaymentMethod) && (
+                                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2 border-t border-slate-800">
+                                    <div>
+                                      <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
+                                        {creditPaymentMethod === 'UPI' ? 'Transaction ID / UTR *' : 'UTR / Reference Number *'}
+                                      </label>
+                                      <input
+                                        type="text"
+                                        required
+                                        value={creditPaymentReference}
+                                        onChange={(e) => setCreditPaymentReference(e.target.value)}
+                                        className="block w-full rounded border border-slate-700 bg-slate-950 py-1.5 px-2 text-xs text-white font-mono focus:border-indigo-500 focus:outline-none"
+                                        placeholder="UTR123456789"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Transaction Date *</label>
+                                      <input
+                                        type="date"
+                                        required
+                                        value={creditPaymentDate}
+                                        onChange={(e) => setCreditPaymentDate(e.target.value)}
+                                        className="block w-full rounded border border-slate-700 bg-slate-950 py-1.5 px-2 text-xs text-white focus:border-indigo-500 focus:outline-none"
+                                      />
+                                    </div>
+                                    {creditPaymentMethod !== 'UPI' && (
+                                      <div>
+                                        <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Bank Name</label>
+                                        <input
+                                          type="text"
+                                          value={creditBankName}
+                                          onChange={(e) => setCreditBankName(e.target.value)}
+                                          className="block w-full rounded border border-slate-700 bg-slate-950 py-1.5 px-2 text-xs text-white focus:border-indigo-500 focus:outline-none"
+                                          placeholder="e.g. HDFC Bank"
+                                        />
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+
+                                <div className="pt-2 border-t border-slate-800 flex justify-end">
+                                  <button
+                                    type="submit"
+                                    disabled={isSubmittingCredit || actionLoading}
+                                    className="px-5 py-2 rounded bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-xs uppercase transition-all flex items-center gap-1 shadow-md"
+                                  >
+                                    {isSubmittingCredit ? <span>Saving...</span> : <><Plus className="h-3.5 w-3.5 inline mr-1" />+ COLLECT CREDIT PAYMENT</>}
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </form>
+
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-left border-collapse text-xs">
+                              <thead>
+                                <tr className="bg-slate-950 border-b border-slate-800 text-slate-400 uppercase font-bold text-[10px]">
+                                  <th className="p-2.5">Customer</th>
+                                  <th className="p-2.5">Type / Method</th>
+                                  <th className="p-2.5">Indent / Ref #</th>
+                                  <th className="p-2.5">Product / Bank</th>
+                                  <th className="p-2.5 text-right">Qty (L)</th>
+                                  <th className="p-2.5 text-right">Rate</th>
+                                  <th className="p-2.5 text-right">Amount</th>
+                                  <th className="p-2.5">Remarks</th>
+                                  <th className="p-2.5 text-center">Action</th>
                                 </tr>
-                              ) : (
-                                activeDuty.creditTransactions.map((ct: any, idx: number) => (
-                                  <tr key={idx} className="hover:bg-slate-950/20">
-                                    <td className="p-2.5 font-sans font-bold text-slate-200">{ct.customer.name}</td>
-                                    <td className="p-2.5 font-sans">
-                                      {ct.transactionType === 'CREDIT_SALE' ? (
-                                        <span className="inline-flex px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">CREDIT SALE</span>
-                                      ) : (
-                                        <span className="inline-flex px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-mono">COLLECTION</span>
-                                      )}
-                                    </td>
-                                    <td className="p-2.5 text-indigo-300 font-bold">{ct.indentNumber || '-'}</td>
-                                    <td className="p-2.5 text-slate-300 font-sans">{ct.productName || '-'}</td>
-                                    <td className="p-2.5 text-right text-slate-200 font-bold">{ct.quantity ? `${ct.quantity.toFixed(2)} L` : '-'}</td>
-                                    <td className="p-2.5 text-right text-slate-400">{ct.unitPrice ? `₹${ct.unitPrice.toFixed(2)}` : '-'}</td>
-                                    <td className="p-2.5 text-right font-bold text-amber-400">₹{ct.amount.toFixed(2)}</td>
-                                    <td className="p-2.5 text-slate-400 font-sans text-[11px]">{ct.description || '-'}</td>
-                                    <td className="p-2.5 text-center">
-                                      <button onClick={() => handleDeleteCredit(ct.id)} className="text-red-500 hover:text-red-400 p-1" title="Delete credit transaction">
-                                        <Trash2 className="h-3.5 w-3.5 mx-auto" />
-                                      </button>
-                                    </td>
+                              </thead>
+                              <tbody className="divide-y divide-slate-800/40 font-mono text-xs">
+                                {activeDuty.creditTransactions.length === 0 ? (
+                                  <tr>
+                                    <td colSpan={9} className="p-4 text-center text-slate-500 font-sans">No credit logs for this shift.</td>
                                   </tr>
-                                ))
-                              )}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Right Column: Adding transactions forms */}
-                  <div className="space-y-8">
-
-                    {/* Live shift board */}
-                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
-                      <h4 className="font-extrabold text-white text-sm uppercase tracking-wider border-b border-slate-800 pb-2">Shift Info</h4>
-                      <div className="grid grid-cols-2 gap-4 text-xs">
-                        <div>
-                          <span className="text-slate-400 block font-semibold">Duty Shift</span>
-                          <span className="text-white font-bold text-sm">Duty #{activeDuty.dutyNumber}</span>
-                        </div>
-                        <div>
-                          <span className="text-slate-400 block font-semibold">Manager Duty</span>
-                          <span className="text-white font-bold text-sm">{activeDuty.manager.username}</span>
-                        </div>
-                        <div className="col-span-2">
-                          <span className="text-slate-400 block font-semibold">Shift Start Date/Time</span>
-                          <span className="text-white font-bold text-sm font-mono" suppressHydrationWarning>{new Date(activeDuty.startTime).toLocaleString()}</span>
-                        </div>
-                      </div>
-
-                      {/* Active Staff list */}
-                      <div className="border-t border-slate-800 pt-4 space-y-2 text-xs">
-                        <span className="text-slate-450 block font-bold uppercase tracking-wider text-[10px]">Staff Assignments</span>
-                        <div className="grid grid-cols-2 gap-2 text-slate-300">
-                          {activeDuty.assignments.map((as: any, idx: number) => (
-                            <div key={idx} className="bg-slate-950 px-3 py-2 rounded border border-slate-850">
-                              <span className="text-[10px] text-slate-500 block font-bold uppercase">{as.pump.name} - {as.fuelType}</span>
-                              <span className="text-slate-100 font-bold">{as.staff.name}</span>
-                            </div>
-                          ))}
+                                ) : (
+                                  activeDuty.creditTransactions.map((ct: any, idx: number) => (
+                                    <tr key={idx} className="hover:bg-slate-950/20">
+                                      <td className="p-2.5 font-sans font-bold text-slate-200">{ct.customer.name}</td>
+                                      <td className="p-2.5 font-sans">
+                                        {ct.transactionType === 'CREDIT_SALE' ? (
+                                          <span className="inline-flex px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">CREDIT SALE</span>
+                                        ) : (
+                                          <span className="inline-flex px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-mono">
+                                            {ct.paymentMethod || 'COLLECTION'}
+                                          </span>
+                                        )}
+                                      </td>
+                                      <td className="p-2.5 text-indigo-300 font-bold">{ct.paymentReference || ct.indentNumber || '-'}</td>
+                                      <td className="p-2.5 text-slate-300 font-sans">{ct.bankName || ct.productName || '-'}</td>
+                                      <td className="p-2.5 text-right text-slate-200 font-bold">{ct.quantity ? `${ct.quantity.toFixed(2)} L` : '-'}</td>
+                                      <td className="p-2.5 text-right text-slate-400">{ct.unitPrice ? `₹${ct.unitPrice.toFixed(2)}` : '-'}</td>
+                                      <td className="p-2.5 text-right font-bold text-amber-400">₹{ct.amount.toFixed(2)}</td>
+                                      <td className="p-2.5 text-slate-400 font-sans text-[11px]">{ct.description || '-'}</td>
+                                      <td className="p-2.5 text-center">
+                                        <button onClick={() => handleDeleteCredit(ct)} className="text-red-500 hover:text-red-400 p-1" title="Delete credit transaction">
+                                          <Trash2 className="h-3.5 w-3.5 mx-auto" />
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  ))
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
                         </div>
                       </div>
                     </div>
 
-                    {/* Oil sales entry */}
-                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
-                      <h4 className="font-extrabold text-white text-sm uppercase tracking-wider border-b border-slate-800 pb-2">Log Oil Sale</h4>
-                      <form onSubmit={handleAddOilSale} className="space-y-4">
-                        <div>
-                          <label htmlFor="oil-prod" className="block text-xs font-semibold text-slate-300">Select Oil Product</label>
-                          <select
-                            id="oil-prod"
-                            required
-                            value={oilProdId}
-                            onChange={(e) => setOilProdId(e.target.value)}
-                            className="block w-full rounded-lg border border-slate-700 bg-slate-950 py-2 px-3 mt-1 text-xs text-slate-100 focus:border-indigo-500 focus:outline-none"
-                          >
-                            <option value="">-- Choose Product --</option>
-                            {staticData.products.map((p: any) => (
-                              <option key={p.id} value={p.id}>{p.name} (₹{p.price.toFixed(2)})</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div>
-                          <label htmlFor="oil-qty" className="block text-xs font-semibold text-slate-300">Quantity (Units)</label>
-                          <input
-                            id="oil-qty"
-                            type="number"
-                            required
-                            min="1"
-                            value={oilQty || ''}
-                            onChange={(e) => setOilQty(Number(e.target.value))}
-                            className="block w-full rounded-lg border border-slate-700 bg-slate-950 py-2 px-3 mt-1 text-xs text-slate-100 placeholder-slate-650 focus:border-indigo-500 focus:outline-none"
-                            placeholder="Enter quantity"
-                          />
-                        </div>
-                        <button
-                          type="submit"
-                          className="w-full py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition-all shadow-md"
-                        >
-                          Add Oil Transaction
-                        </button>
-                      </form>
-                    </div>
+                    {/* Right Column: Adding transactions forms */}
+                    <div className="space-y-8">
 
-                    {/* Expense logging entry */}
-                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
-                      <h4 className="font-extrabold text-white text-sm uppercase tracking-wider border-b border-slate-800 pb-2">Log Operating Expense</h4>
-                      <form onSubmit={handleAddExpense} className="space-y-4">
-                        <div className="grid grid-cols-2 gap-4">
+                      {/* Live shift board */}
+                      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+                        <h4 className="font-extrabold text-white text-sm uppercase tracking-wider border-b border-slate-800 pb-2">Shift Info</h4>
+                        <div className="grid grid-cols-2 gap-4 text-xs">
                           <div>
-                            <label htmlFor="exp-cat" className="block text-xs font-semibold text-slate-300">Category</label>
+                            <span className="text-slate-400 block font-semibold">Duty Shift</span>
+                            <span className="text-white font-bold text-sm">Duty #{activeDuty.dutyNumber}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block font-semibold">Manager Duty</span>
+                            <span className="text-white font-bold text-sm">{activeDuty.manager.username}</span>
+                          </div>
+                          <div className="col-span-2">
+                            <span className="text-slate-400 block font-semibold">Shift Start Date/Time</span>
+                            <span className="text-white font-bold text-sm font-mono" suppressHydrationWarning>{new Date(activeDuty.startTime).toLocaleString()}</span>
+                          </div>
+                        </div>
+
+                        {/* Active Staff list */}
+                        <div className="border-t border-slate-800 pt-4 space-y-2 text-xs">
+                          <span className="text-slate-450 block font-bold uppercase tracking-wider text-[10px]">Staff Assignments</span>
+                          <div className="grid grid-cols-2 gap-2 text-slate-300">
+                            {activeDuty.assignments.map((as: any, idx: number) => (
+                              <div key={idx} className="bg-slate-950 px-3 py-2 rounded border border-slate-850">
+                                <span className="text-[10px] text-slate-500 block font-bold uppercase">{as.pump.name} - {as.fuelType}</span>
+                                <span className="text-slate-100 font-bold">{as.staff.name}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Oil sales entry */}
+                      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+                        <h4 className="font-extrabold text-white text-sm uppercase tracking-wider border-b border-slate-800 pb-2">Log Oil Sale</h4>
+                        <form onSubmit={handleAddOilSale} className="space-y-4">
+                          <div>
+                            <label htmlFor="oil-prod" className="block text-xs font-semibold text-slate-300">Select Oil Product</label>
                             <select
-                              id="exp-cat"
+                              id="oil-prod"
                               required
-                              value={expCategory}
-                              onChange={(e) => setExpCategory(e.target.value)}
+                              value={oilProdId}
+                              onChange={(e) => setOilProdId(e.target.value)}
                               className="block w-full rounded-lg border border-slate-700 bg-slate-950 py-2 px-3 mt-1 text-xs text-slate-100 focus:border-indigo-500 focus:outline-none"
                             >
-                              <option value="">-- Choose --</option>
-                              {staticData.categories.map((c: any) => (
-                                <option key={c.id} value={c.id}>{c.name}</option>
+                              <option value="">-- Choose Product --</option>
+                              {staticData.products.map((p: any) => (
+                                <option key={p.id} value={p.id}>{p.name} (₹{p.price.toFixed(2)})</option>
                               ))}
                             </select>
                           </div>
                           <div>
-                            <label htmlFor="exp-method" className="block text-xs font-semibold text-slate-300">Payment</label>
-                            <select
-                              id="exp-method"
-                              required
-                              value={expMethod}
-                              onChange={(e) => setExpMethod(e.target.value)}
-                              className="block w-full rounded-lg border border-slate-700 bg-slate-950 py-2 px-3 mt-1 text-xs text-slate-100 focus:border-indigo-500 focus:outline-none"
-                            >
-                              <option value="Cash">Cash</option>
-                              <option value="PhonePe">PhonePe</option>
-                              <option value="GPay">GPay</option>
-                              <option value="Paytm">Paytm</option>
-                              <option value="Bank">Bank Transfer</option>
-                            </select>
-                          </div>
-                        </div>
-                        <div>
-                          <label htmlFor="exp-amount" className="block text-xs font-semibold text-slate-300">Amount (₹)</label>
-                          <input
-                            id="exp-amount"
-                            type="number"
-                            required
-                            min="1"
-                            value={expAmount || ''}
-                            onChange={(e) => setExpAmount(Number(e.target.value))}
-                            className="block w-full rounded-lg border border-slate-700 bg-slate-950 py-2 px-3 mt-1 text-xs text-slate-100 focus:border-indigo-500 focus:outline-none"
-                            placeholder="Enter amount"
-                          />
-                        </div>
-                        <div>
-                          <label htmlFor="exp-desc" className="block text-xs font-semibold text-slate-300">Description</label>
-                          <input
-                            id="exp-desc"
-                            type="text"
-                            required
-                            value={expDesc}
-                            onChange={(e) => setExpDesc(e.target.value)}
-                            className="block w-full rounded-lg border border-slate-700 bg-slate-950 py-2 px-3 mt-1 text-xs text-slate-100 focus:border-indigo-500 focus:outline-none"
-                            placeholder="Brief description"
-                          />
-                        </div>
-                        <button
-                          type="submit"
-                          className="w-full py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition-all shadow-md"
-                        >
-                          Log Expense
-                        </button>
-                      </form>
-                    </div>
-
-                    {/* Stock tank dip entry */}
-                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
-                      <h4 className="font-extrabold text-white text-sm uppercase tracking-wider border-b border-slate-800 pb-2">Record Underground Dip</h4>
-                      <form onSubmit={handleAddDip} className="space-y-4">
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <label htmlFor="dip-fuel" className="block text-xs font-semibold text-slate-300">Fuel Type</label>
-                            <select
-                              id="dip-fuel"
-                              required
-                              value={dipFuelType}
-                              onChange={(e) => setDipFuelType(e.target.value as 'MS' | 'HSD')}
-                              className="block w-full rounded-lg border border-slate-700 bg-slate-950 py-2 px-3 mt-1 text-xs text-slate-100 focus:border-indigo-500 focus:outline-none"
-                            >
-                              <option value="MS">MS Petrol</option>
-                              <option value="HSD">HSD Diesel</option>
-                            </select>
-                          </div>
-                          <div>
-                            <label htmlFor="dip-physical" className="block text-xs font-semibold text-slate-300">Physical Dip (Litres)</label>
+                            <label htmlFor="oil-qty" className="block text-xs font-semibold text-slate-300">Quantity (Units)</label>
                             <input
-                              id="dip-physical"
+                              id="oil-qty"
                               type="number"
                               required
                               min="1"
-                              value={dipPhysical || ''}
-                              onChange={(e) => setDipPhysical(Number(e.target.value))}
-                              className="block w-full rounded-lg border border-slate-700 bg-slate-950 py-2 px-3 mt-1 text-xs text-slate-100 focus:border-indigo-500 focus:outline-none"
-                              placeholder="Enter physical L"
+                              value={oilQty || ''}
+                              onChange={(e) => setOilQty(Number(e.target.value))}
+                              className="block w-full rounded-lg border border-slate-700 bg-slate-950 py-2 px-3 mt-1 text-xs text-slate-100 placeholder-slate-650 focus:border-indigo-500 focus:outline-none"
+                              placeholder="Enter quantity"
                             />
                           </div>
-                        </div>
+                          <button
+                            type="submit"
+                            className="w-full py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition-all shadow-md"
+                          >
+                            Add Oil Transaction
+                          </button>
+                        </form>
+                      </div>
 
-                        {/* Show expected stock if active */}
-                        {activeDuty && (
-                          <div className="rounded-lg bg-slate-950 p-3 text-[11px] border border-slate-850 flex justify-between font-semibold">
-                            <span className="text-slate-400">Current Expected Stock:</span>
-                            <span className="font-mono text-white">
-                              {(() => {
-                                const salesVolume = activeDuty.meterReadings
-                                  .filter((mr: any) => mr.gun.fuelType === dipFuelType)
-                                  .reduce((sum: number, mr: any) => sum + mr.litresSold, 0);
-                                const lastStockLevel = stockHistory.find(s => s.fuelType === dipFuelType);
-                                const opening = lastStockLevel ? lastStockLevel.physicalDip : (dipFuelType === 'MS' ? 7504 : 12741);
-                                return (opening - salesVolume).toLocaleString() + ' L';
-                              })()}
-                            </span>
+                      {/* Expense logging entry */}
+                      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+                        <h4 className="font-extrabold text-white text-sm uppercase tracking-wider border-b border-slate-800 pb-2">Log Operating Expense</h4>
+                        <form onSubmit={handleAddExpense} className="space-y-4">
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <label htmlFor="exp-cat" className="block text-xs font-semibold text-slate-300">Category</label>
+                              <select
+                                id="exp-cat"
+                                required
+                                value={expCategory}
+                                onChange={(e) => setExpCategory(e.target.value)}
+                                className="block w-full rounded-lg border border-slate-700 bg-slate-950 py-2 px-3 mt-1 text-xs text-slate-100 focus:border-indigo-500 focus:outline-none"
+                              >
+                                <option value="">-- Choose --</option>
+                                {staticData.categories.map((c: any) => (
+                                  <option key={c.id} value={c.id}>{c.name}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label htmlFor="exp-method" className="block text-xs font-semibold text-slate-300">Payment</label>
+                              <select
+                                id="exp-method"
+                                required
+                                value={expMethod}
+                                onChange={(e) => setExpMethod(e.target.value)}
+                                className="block w-full rounded-lg border border-slate-700 bg-slate-950 py-2 px-3 mt-1 text-xs text-slate-100 focus:border-indigo-500 focus:outline-none"
+                              >
+                                <option value="Cash">Cash</option>
+                                <option value="PhonePe">PhonePe</option>
+                                <option value="GPay">GPay</option>
+                                <option value="Paytm">Paytm</option>
+                                <option value="Bank">Bank Transfer</option>
+                              </select>
+                            </div>
                           </div>
-                        )}
+                          <div>
+                            <label htmlFor="exp-amount" className="block text-xs font-semibold text-slate-300">Amount (₹)</label>
+                            <input
+                              id="exp-amount"
+                              type="number"
+                              required
+                              min="1"
+                              value={expAmount || ''}
+                              onChange={(e) => setExpAmount(Number(e.target.value))}
+                              className="block w-full rounded-lg border border-slate-700 bg-slate-950 py-2 px-3 mt-1 text-xs text-slate-100 focus:border-indigo-500 focus:outline-none"
+                              placeholder="Enter amount"
+                            />
+                          </div>
+                          <div>
+                            <label htmlFor="exp-desc" className="block text-xs font-semibold text-slate-300">Description</label>
+                            <input
+                              id="exp-desc"
+                              type="text"
+                              required
+                              value={expDesc}
+                              onChange={(e) => setExpDesc(e.target.value)}
+                              className="block w-full rounded-lg border border-slate-700 bg-slate-950 py-2 px-3 mt-1 text-xs text-slate-100 focus:border-indigo-500 focus:outline-none"
+                              placeholder="Brief description"
+                            />
+                          </div>
+                          <button
+                            type="submit"
+                            className="w-full py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition-all shadow-md"
+                          >
+                            Log Expense
+                          </button>
+                        </form>
+                      </div>
 
-                        <button
-                          type="submit"
-                          className="w-full py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition-all shadow-md"
-                        >
-                          Log Tank Dip
-                        </button>
-                      </form>
+                      {/* Stock tank dip entry */}
+                      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+                        <h4 className="font-extrabold text-white text-sm uppercase tracking-wider border-b border-slate-800 pb-2">Record Underground Dip</h4>
+                        <form onSubmit={handleAddDip} className="space-y-4">
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <label htmlFor="dip-fuel" className="block text-xs font-semibold text-slate-300">Fuel Type</label>
+                              <select
+                                id="dip-fuel"
+                                required
+                                value={dipFuelType}
+                                onChange={(e) => setDipFuelType(e.target.value as 'MS' | 'HSD')}
+                                className="block w-full rounded-lg border border-slate-700 bg-slate-950 py-2 px-3 mt-1 text-xs text-slate-100 focus:border-indigo-500 focus:outline-none"
+                              >
+                                <option value="MS">MS Petrol</option>
+                                <option value="HSD">HSD Diesel</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label htmlFor="dip-physical" className="block text-xs font-semibold text-slate-300">Physical Dip (Litres)</label>
+                              <input
+                                id="dip-physical"
+                                type="number"
+                                required
+                                min="1"
+                                value={dipPhysical || ''}
+                                onChange={(e) => setDipPhysical(Number(e.target.value))}
+                                className="block w-full rounded-lg border border-slate-700 bg-slate-950 py-2 px-3 mt-1 text-xs text-slate-100 focus:border-indigo-500 focus:outline-none"
+                                placeholder="Enter physical L"
+                              />
+                            </div>
+                          </div>
+
+                          {/* Show expected stock if active */}
+                          {activeDuty && (
+                            <div className="rounded-lg bg-slate-950 p-3 text-[11px] border border-slate-850 flex justify-between font-semibold">
+                              <span className="text-slate-400">Current Expected Stock:</span>
+                              <span className="font-mono text-white">
+                                {(() => {
+                                  const salesVolume = activeDuty.meterReadings
+                                    .filter((mr: any) => mr.gun.fuelType === dipFuelType)
+                                    .reduce((sum: number, mr: any) => sum + mr.litresSold, 0);
+                                  const lastStockLevel = stockHistory.find(s => s.fuelType === dipFuelType);
+                                  const opening = lastStockLevel ? lastStockLevel.physicalDip : (dipFuelType === 'MS' ? 7504 : 12741);
+                                  return (opening - salesVolume).toLocaleString() + ' L';
+                                })()}
+                              </span>
+                            </div>
+                          )}
+
+                          <button
+                            type="submit"
+                            className="w-full py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition-all shadow-md"
+                          >
+                            Log Tank Dip
+                          </button>
+                        </form>
+                      </div>
+
                     </div>
-
                   </div>
                 </div>
-              </div>
-            )}
-          </div>
-        )}
+              )}
+            </div>
+          )}
 
-        {/* TAB: PAST DUTY REPORTS */}
-        {activeTab === 'past-duty' && (
-          <OwnerPastDutyReport
-            activeDuty={activeDuty}
-            historicalDuties={historicalDuties}
-            staticData={staticData}
-            onRefresh={refreshActiveDuty}
-            flashMessage={flashMessage}
-          />
-        )}
+          {/* TAB: PAST DUTY REPORTS */}
+          {activeTab === 'past-duty' && (
+            <OwnerPastDutyReport
+              activeDuty={activeDuty}
+              historicalDuties={historicalDuties}
+              staticData={staticData}
+              onRefresh={refreshActiveDuty}
+              flashMessage={flashMessage}
+            />
+          )}
 
-        {/* TAB: CREDIT LEDGER */}
-        {activeTab === 'credit-ledger' && (
-          <OwnerCreditLedger
-            creditLedger={creditLedger}
-            staticData={staticData}
-            historicalDuties={historicalDuties}
-            onRefresh={refreshActiveDuty}
-            flashMessage={flashMessage}
-          />
-        )}
+          {/* TAB: CREDIT LEDGER */}
+          {activeTab === 'credit-ledger' && (
+            <OwnerCreditLedger
+              creditLedger={creditLedger}
+              staticData={staticData}
+              historicalDuties={historicalDuties}
+              onRefresh={refreshActiveDuty}
+              flashMessage={flashMessage}
+            />
+          )}
 
-        {/* TAB: OIL PURCHASES */}
-        {activeTab === 'oil-purchases' && (
-          <OilInventoryManager
-            initialSubTab="purchases"
-            staticData={staticData}
-            oilSales={oilSales}
-            oilPurchases={oilPurchases}
-            activeDuty={activeDuty}
-            onRefresh={refreshActiveDuty}
-            flashMessage={flashMessage}
-          />
-        )}
+          {/* TAB: OIL PURCHASES */}
+          {activeTab === 'oil-purchases' && (
+            <OilInventoryManager
+              initialSubTab="purchases"
+              staticData={staticData}
+              oilSales={oilSales}
+              oilPurchases={oilPurchases}
+              activeDuty={activeDuty}
+              onRefresh={refreshActiveDuty}
+              flashMessage={flashMessage}
+            />
+          )}
 
-        {/* TAB: OIL SALES */}
-        {activeTab === 'oil-sales' && (
-          <OilInventoryManager
-            initialSubTab="sales"
-            staticData={staticData}
-            oilSales={oilSales}
-            oilPurchases={oilPurchases}
-            activeDuty={activeDuty}
-            onRefresh={refreshActiveDuty}
-            flashMessage={flashMessage}
-          />
-        )}
+          {/* TAB: OIL SALES */}
+          {activeTab === 'oil-sales' && (
+            <OilInventoryManager
+              initialSubTab="sales"
+              staticData={staticData}
+              oilSales={oilSales}
+              oilPurchases={oilPurchases}
+              activeDuty={activeDuty}
+              onRefresh={refreshActiveDuty}
+              flashMessage={flashMessage}
+            />
+          )}
 
-        {/* TAB: OIL INVENTORY */}
-        {activeTab === 'oil-inventory' && (
-          <OilInventoryManager
-            initialSubTab="inventory"
-            staticData={staticData}
-            oilSales={oilSales}
-            oilPurchases={oilPurchases}
-            activeDuty={activeDuty}
-            onRefresh={refreshActiveDuty}
-            flashMessage={flashMessage}
-          />
-        )}
+          {/* TAB: OIL INVENTORY */}
+          {activeTab === 'oil-inventory' && (
+            <OilInventoryManager
+              initialSubTab="inventory"
+              staticData={staticData}
+              oilSales={oilSales}
+              oilPurchases={oilPurchases}
+              activeDuty={activeDuty}
+              onRefresh={refreshActiveDuty}
+              flashMessage={flashMessage}
+            />
+          )}
 
-        {/* TAB 3: ACC HISTORY LOGS */}
+          {/* TAB 3: ACC HISTORY LOGS */}
           {activeTab === 'history' && (
             <div className="space-y-8">
               <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden">
@@ -3588,29 +4150,31 @@ export default function DashboardContainer({
 
           {/* TAB 4: REPORTS LEDGER */}
           {activeTab === 'reports' && (
-            <div className="space-y-6">
+            <div className="space-y-4">
               {/* REPORTS LEDGER STATUS BANNER */}
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-wrap items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 bg-amber-500/20 text-amber-400 rounded-xl border border-amber-500/30 flex items-center justify-center font-bold">
-                    <FileText className="h-5 w-5" />
+              {reportsTab !== 'staff' && (
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-wrap items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <div className="h-10 w-10 bg-amber-500/20 text-amber-400 rounded-xl border border-amber-500/30 flex items-center justify-center font-bold">
+                      <FileText className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <h2 className="text-base font-extrabold text-white uppercase tracking-wider">PERMANENT REPORTS LEDGER</h2>
+                      <p className="text-xs text-slate-400 font-mono mt-0.5">
+                        Immutable historical audit trail across all 24-hour duty sessions
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <h2 className="text-base font-extrabold text-white uppercase tracking-wider">PERMANENT REPORTS LEDGER</h2>
-                    <p className="text-xs text-slate-400 font-mono mt-0.5">
-                      Immutable historical audit trail across all 24-hour duty sessions
-                    </p>
+
+                  <div className="bg-slate-950 px-4 py-2 rounded-xl border border-slate-800 text-right">
+                    <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">HISTORICAL DATA ISOLATION</span>
+                    <span className="text-xs font-bold text-amber-400">Permanent historical records of all completed duties.</span>
                   </div>
                 </div>
+              )}
 
-                <div className="bg-slate-950 px-4 py-2 rounded-xl border border-slate-800 text-right">
-                  <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">HISTORICAL DATA ISOLATION</span>
-                  <span className="text-xs font-bold text-amber-400">Permanent historical records of all completed duties.</span>
-                </div>
-              </div>
-
-              {/* Report Tabs */}
-              <div className="flex border-b border-slate-800 gap-2 shrink-0 overflow-x-auto pb-px">
+              {/* Report Tabs - Sticky at top */}
+              <div className="sticky top-0 z-20 bg-slate-950/95 backdrop-blur-md pt-2 pb-1 border-b border-slate-800 flex gap-2 shrink-0 overflow-x-auto">
                 {[
                   { id: 'sales', label: 'Fuel Sales Breakdown' },
                   { id: 'staff', label: 'Staff Performance' },
@@ -3624,8 +4188,8 @@ export default function DashboardContainer({
                     key={tab.id}
                     onClick={() => setReportsTab(tab.id as any)}
                     className={`py-2 px-4 border-b-2 font-bold text-sm transition-all whitespace-nowrap ${reportsTab === tab.id
-                        ? 'border-indigo-500 text-indigo-400 bg-indigo-500/5'
-                        : 'border-transparent text-slate-400 hover:text-slate-200'
+                      ? 'border-indigo-500 text-indigo-400 bg-indigo-500/5'
+                      : 'border-transparent text-slate-400 hover:text-slate-200'
                       }`}
                   >
                     {tab.label}
@@ -3904,8 +4468,8 @@ export default function DashboardContainer({
                               key={p.id}
                               onClick={() => handleQuickFilter(p.id as any)}
                               className={`px-3 py-1 text-[11px] font-bold rounded-lg transition-all ${fuelReportPreset === p.id
-                                  ? 'bg-indigo-600 text-white shadow-sm'
-                                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-850'
+                                ? 'bg-indigo-600 text-white shadow-sm'
+                                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-850'
                                 }`}
                             >
                               {p.label}
@@ -4108,8 +4672,8 @@ export default function DashboardContainer({
                               <div
                                 key={pump.pumpId}
                                 className={`bg-slate-950 p-5 rounded-2xl border transition-all ${selectedDrillDownKey === pump.pumpId && selectedDrillDownType === 'PUMP'
-                                    ? 'border-indigo-500 ring-2 ring-indigo-500/20'
-                                    : 'border-slate-800 hover:border-slate-700'
+                                  ? 'border-indigo-500 ring-2 ring-indigo-500/20'
+                                  : 'border-slate-800 hover:border-slate-700'
                                   }`}
                               >
                                 <div className="flex justify-between items-center pb-3 border-b border-slate-800/80">
@@ -4243,8 +4807,8 @@ export default function DashboardContainer({
                                   key={g.id}
                                   onClick={() => setFuelReportGroupBy(g.id as any)}
                                   className={`px-3 py-1 font-bold rounded-lg transition-all ${fuelReportGroupBy === g.id
-                                      ? 'bg-indigo-600 text-white shadow-sm'
-                                      : 'text-slate-400 hover:text-slate-200'
+                                    ? 'bg-indigo-600 text-white shadow-sm'
+                                    : 'text-slate-400 hover:text-slate-200'
                                     }`}
                                 >
                                   {g.label}
@@ -4509,6 +5073,10 @@ export default function DashboardContainer({
                 const notScheduledCount = allAttendanceRows.filter(r => r.status === 'NOT_SCHEDULED').length;
 
                 // 6. Monthly / Date-Range Staff Summary Aggregations
+                const activeMonthLabel = staffReportMonth
+                  ? new Date(`${staffReportMonth}-01`).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+                  : 'All Time / Selected Period';
+
                 const staffMonthlySummaries = staffList.map((s: any) => {
                   const sRows = allAttendanceRows.filter(r => r.staffId === s.id);
                   const presentCount = sRows.filter(r => r.status === 'PRESENT').length;
@@ -4516,108 +5084,466 @@ export default function DashboardContainer({
                   const notSched = sRows.filter(r => r.status === 'NOT_SCHEDULED').length;
                   const msDuties = sRows.filter(r => r.status === 'PRESENT' && r.msHandled).length;
                   const hsdDuties = sRows.filter(r => r.status === 'PRESENT' && r.hsdHandled).length;
+                  const totalDutyDays = filteredDuties.length;
+                  const attendanceRate = totalDutyDays > 0 ? ((presentCount / totalDutyDays) * 100).toFixed(1) : '0.0';
 
                   return {
                     staffId: s.id,
                     staffName: s.name,
                     role: s.role || 'PUMP_ATTENDANT',
-                    totalDutyDays: filteredDuties.length,
+                    monthLabel: activeMonthLabel,
+                    totalDutyDays,
                     presentCount,
                     absentCount,
                     notSched,
                     msDuties,
-                    hsdDuties
+                    hsdDuties,
+                    attendanceRate
                   };
                 });
 
+                // 7. Search & Filter Matching
+                const filteredRows = allAttendanceRows.filter((r) => {
+                  if (staffSearchQuery.trim()) {
+                    const q = staffSearchQuery.toLowerCase().trim();
+                    const matchDuty = `#${r.dutyNumber}`.includes(q) || r.dutyNumber.toString().includes(q);
+                    const matchStaff = r.staffName.toLowerCase().includes(q);
+                    const matchPump = r.pump.toLowerCase().includes(q);
+                    const matchStatus = r.status.toLowerCase().includes(q);
+                    if (!matchDuty && !matchStaff && !matchPump && !matchStatus) return false;
+                  }
+                  return true;
+                });
+
+                // 8. Duty Grouping Logic for Grouped View
+                const groupedDutiesMap = new Map<string, {
+                  dutyId: string;
+                  dutyNumber: number;
+                  startTime: string | Date;
+                  endTime?: string | Date | null;
+                  dutyPeriodStr: string;
+                  rows: typeof allAttendanceRows;
+                  presentCount: number;
+                  absentCount: number;
+                  notSchedCount: number;
+                }>();
+
+                filteredRows.forEach((r) => {
+                  let g = groupedDutiesMap.get(r.dutyId);
+                  if (!g) {
+                    g = {
+                      dutyId: r.dutyId,
+                      dutyNumber: r.dutyNumber,
+                      startTime: r.startTime,
+                      endTime: r.endTime,
+                      dutyPeriodStr: r.dutyPeriodStr,
+                      rows: [],
+                      presentCount: 0,
+                      absentCount: 0,
+                      notSchedCount: 0,
+                    };
+                    groupedDutiesMap.set(r.dutyId, g);
+                  }
+                  g.rows.push(r);
+                  if (r.status === 'PRESENT') g.presentCount += 1;
+                  if (r.status === 'ABSENT') g.absentCount += 1;
+                  if (r.status === 'NOT_SCHEDULED') g.notSchedCount += 1;
+                });
+
+                const groupedDutiesList = Array.from(groupedDutiesMap.values()).sort((a, b) => b.dutyNumber - a.dutyNumber);
+
+                // 9. Pagination Calculation
+                const totalRecordsCount = filteredRows.length;
+                const totalPagesCount = Math.max(1, Math.ceil(totalRecordsCount / staffReportPageSize));
+                const currentReportPage = Math.min(staffReportPage, totalPagesCount);
+                const startIndex = (currentReportPage - 1) * staffReportPageSize;
+                const endIndex = Math.min(startIndex + staffReportPageSize, totalRecordsCount);
+                const paginatedFlatRows = filteredRows.slice(startIndex, endIndex);
+
+                // PDF Export Function
+                const handleExportPDF = () => {
+                  const printWindow = window.open('', '_blank');
+                  if (!printWindow) return;
+
+                  const htmlContent = `
+                    <!DOCTYPE html>
+                    <html>
+                      <head>
+                        <title>Staff Attendance Register - Printable Report</title>
+                        <style>
+                          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 20px; color: #0f172a; }
+                          h2 { margin-bottom: 2px; color: #1e293b; font-size: 18px; }
+                          p { font-size: 11px; color: #64748b; margin-top: 0; margin-bottom: 16px; }
+                          .kpis { display: flex; gap: 12px; margin-bottom: 16px; }
+                          .kpi { background: #f8fafc; border: 1px solid #e2e8f0; padding: 8px 12px; border-radius: 6px; font-size: 11px; flex: 1; }
+                          .kpi strong { font-size: 15px; display: block; color: #0f172a; margin-top: 2px; }
+                          table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 11px; }
+                          th, td { border: 1px solid #cbd5e1; padding: 6px 8px; text-align: left; }
+                          th { background-color: #f1f5f9; font-weight: bold; text-transform: uppercase; font-size: 10px; color: #475569; }
+                          .badge-present { background: #dcfce7; color: #166534; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 9px; }
+                          .badge-absent { background: #fee2e2; color: #991b1b; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 9px; }
+                          .badge-not { background: #f1f5f9; color: #475569; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 9px; }
+                          @media print { body { margin: 0; } }
+                        </style>
+                      </head>
+                      <body>
+                        <h2>IOCL Fuel Station - Staff Attendance Register Report</h2>
+                        <p>Generated: ${new Date().toLocaleString('en-IN')} | Total Filtered Records: ${filteredRows.length} | Duty Sessions: ${groupedDutiesList.length}</p>
+                        
+                        <div class="kpis">
+                          <div class="kpi">Total Staff: <strong>${totalStaffCount}</strong></div>
+                          <div class="kpi">Present Duties: <strong>${presentDutiesCount}</strong></div>
+                          <div class="kpi">Absent Duties: <strong>${absentDutiesCount}</strong></div>
+                          <div class="kpi">Not Scheduled: <strong>${notScheduledCount}</strong></div>
+                        </div>
+
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Duty #</th>
+                              <th>Staff Name</th>
+                              <th>Pump</th>
+                              <th>MS</th>
+                              <th>HSD</th>
+                              <th>Duty Period</th>
+                              <th>Status</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            ${filteredRows.map(r => `
+                              <tr>
+                                <td><strong>#${r.dutyNumber}</strong></td>
+                                <td>${r.staffName}</td>
+                                <td>${r.pump}</td>
+                                <td>${r.msHandled ? '✓' : '-'}</td>
+                                <td>${r.hsdHandled ? '✓' : '-'}</td>
+                                <td>${r.dutyPeriodStr}</td>
+                                <td>
+                                  <span class="${r.status === 'PRESENT' ? 'badge-present' : r.status === 'ABSENT' ? 'badge-absent' : 'badge-not'}">
+                                    ${r.status}
+                                  </span>
+                                </td>
+                              </tr>
+                            `).join('')}
+                          </tbody>
+                        </table>
+                      </body>
+                    </html>
+                  `;
+
+                  printWindow.document.write(htmlContent);
+                  printWindow.document.close();
+                  printWindow.focus();
+                  setTimeout(() => {
+                    printWindow.print();
+                  }, 250);
+                };
+
+                // Monthly Roster PDF Export Function
+                const handleExportMonthlyRosterPDF = () => {
+                  const printWindow = window.open('', '_blank');
+                  if (!printWindow) return;
+
+                  const htmlContent = `
+                    <!DOCTYPE html>
+                    <html>
+                      <head>
+                        <title>Monthly Staff Attendance & Payroll Roster - ${activeMonthLabel}</title>
+                        <style>
+                          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 24px; color: #0f172a; }
+                          .header { border-bottom: 2px solid #0f172a; padding-bottom: 12px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: flex-end; }
+                          h2 { margin: 0; font-size: 20px; color: #0f172a; text-transform: uppercase; letter-spacing: 0.5px; }
+                          p { font-size: 12px; color: #64748b; margin: 4px 0 0 0; font-family: monospace; }
+                          table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 11px; }
+                          th, td { border: 1px solid #cbd5e1; padding: 8px 10px; text-align: left; }
+                          th { background-color: #f1f5f9; font-weight: bold; text-transform: uppercase; font-size: 10px; color: #475569; letter-spacing: 0.5px; }
+                          .text-right { text-align: right; }
+                          .text-center { text-align: center; }
+                          .badge-present { background: #dcfce7; color: #166534; padding: 2px 8px; border-radius: 4px; font-weight: bold; }
+                          .badge-absent { background: #fee2e2; color: #991b1b; padding: 2px 8px; border-radius: 4px; font-weight: bold; }
+                          .footer { margin-top: 48px; display: flex; justify-content: space-between; font-size: 11px; color: #475569; }
+                          @media print { body { margin: 0; } }
+                        </style>
+                      </head>
+                      <body>
+                        <div class="header">
+                          <div>
+                            <h2>IOCL Fuel Station - Monthly Staff Attendance Roster</h2>
+                            <p>Monthly Period: ${activeMonthLabel} | Total Duty Sessions: ${filteredDuties.length}</p>
+                          </div>
+                          <div style="text-align: right; font-size: 11px; color: #64748b;">
+                            Printed On: ${new Date().toLocaleDateString('en-IN')}
+                          </div>
+                        </div>
+
+                        <table>
+                          <thead>
+                            <tr>
+                              <th class="text-center">S.No</th>
+                              <th>Staff Member</th>
+                              <th>Designation / Role</th>
+                              <th class="text-right">Total Duties</th>
+                              <th class="text-right">Days Worked (Present)</th>
+                              <th class="text-right">Days Absent</th>
+                              <th class="text-right">Attendance Rate</th>
+                              <th class="text-right">MS Duties</th>
+                              <th class="text-right">HSD Duties</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            ${staffMonthlySummaries.map((s: any, idx: number) => `
+                              <tr>
+                                <td class="text-center"><strong>${idx + 1}</strong></td>
+                                <td><strong>${s.staffName}</strong></td>
+                                <td>${s.role}</td>
+                                <td class="text-right">${s.totalDutyDays}</td>
+                                <td class="text-right"><span class="badge-present">${s.presentCount} Shifts</span></td>
+                                <td class="text-right"><span class="badge-absent">${s.absentCount} Days</span></td>
+                                <td class="text-right font-mono"><strong>${s.attendanceRate}%</strong></td>
+                                <td class="text-right">${s.msDuties}</td>
+                                <td class="text-right">${s.hsdDuties}</td>
+                              </tr>
+                            `).join('')}
+                          </tbody>
+                        </table>
+
+                        <div class="footer">
+                          <div>Verified by Account Manager</div>
+                          <div>Station Owner Signature: _______________________</div>
+                        </div>
+                      </body>
+                    </html>
+                  `;
+
+                  printWindow.document.write(htmlContent);
+                  printWindow.document.close();
+                  printWindow.focus();
+                  setTimeout(() => {
+                    printWindow.print();
+                  }, 250);
+                };
+
                 return (
-                  <div className="space-y-8">
-                    {/* REPORT HEADER & EXPORT BAR */}
-                    <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl flex flex-wrap items-center justify-between gap-4">
-                      <div className="flex items-center gap-3">
-                        <div className="h-10 w-10 bg-indigo-600/20 text-indigo-400 rounded-xl border border-indigo-500/30 flex items-center justify-center">
-                          <Users className="h-5 w-5" />
-                        </div>
-                        <div>
-                          <h4 className="font-extrabold text-white text-base uppercase tracking-wider">Staff Attendance Register (24-Hour Duty)</h4>
-                          <p className="text-xs text-slate-400">Official 24-Hour Duty Session Attendance, Assignment Verification & Status Corrections</p>
-                        </div>
-                      </div>
-
-                      <button
-                        onClick={() => handleExportExcel('staff-report-table', 'Staff_24Hour_Attendance_Register')}
-                        className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all shadow-md shadow-indigo-600/20"
-                      >
-                        <FileSpreadsheet className="h-4 w-4" />
-                        Export Excel Register
-                      </button>
-                    </div>
-
-                    {/* TOP EXECUTIVE KPI SUMMARY CARDS */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="space-y-4">
+                    {/* 1. TOP SUMMARY KPI CARDS (Compact Responsive Row / Mobile 2-Col Grid) */}
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                       {/* TOTAL STAFF */}
-                      <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl flex items-center justify-between">
+                      <div className="bg-slate-900 border border-slate-800 px-4 py-3 rounded-xl shadow-md flex items-center justify-between">
                         <div>
-                          <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block">Total Staff</span>
-                          <span className="text-2xl font-black text-white font-mono mt-1 block">{totalStaffCount}</span>
-                          <span className="text-[10px] text-slate-500 mt-1 block">Active Employees</span>
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Staff</span>
+                          <span className="text-xl font-extrabold text-white font-mono mt-0.5 block">{totalStaffCount}</span>
                         </div>
-                        <div className="h-12 w-12 bg-indigo-950/50 border border-indigo-800/50 rounded-2xl flex items-center justify-center text-indigo-400">
-                          <Users className="h-6 w-6" />
+                        <div className="h-9 w-9 bg-indigo-950/60 border border-indigo-800/40 rounded-lg flex items-center justify-center text-indigo-400 shrink-0">
+                          <Users className="h-4 w-4" />
                         </div>
                       </div>
 
                       {/* PRESENT DUTIES */}
-                      <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl flex items-center justify-between">
+                      <div className="bg-slate-900 border border-slate-800 px-4 py-3 rounded-xl shadow-md flex items-center justify-between">
                         <div>
-                          <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block">Present Duties</span>
-                          <span className="text-2xl font-black text-emerald-400 font-mono mt-1 block">{presentDutiesCount}</span>
-                          <span className="text-[10px] text-emerald-500/80 mt-1 block">Attended Sessions</span>
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Present Duties</span>
+                          <span className="text-xl font-extrabold text-emerald-400 font-mono mt-0.5 block">{presentDutiesCount}</span>
                         </div>
-                        <div className="h-12 w-12 bg-emerald-950/50 border border-emerald-800/50 rounded-2xl flex items-center justify-center text-emerald-400">
-                          <UserCheck className="h-6 w-6" />
+                        <div className="h-9 w-9 bg-emerald-950/60 border border-emerald-800/40 rounded-lg flex items-center justify-center text-emerald-400 shrink-0">
+                          <UserCheck className="h-4 w-4" />
                         </div>
                       </div>
 
                       {/* ABSENT DUTIES */}
-                      <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl flex items-center justify-between">
+                      <div className="bg-slate-900 border border-slate-800 px-4 py-3 rounded-xl shadow-md flex items-center justify-between">
                         <div>
-                          <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block">Absent Duties</span>
-                          <span className="text-2xl font-black text-red-400 font-mono mt-1 block">{absentDutiesCount}</span>
-                          <span className="text-[10px] text-red-500/80 mt-1 block">Marked Absent</span>
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Absent Duties</span>
+                          <span className="text-xl font-extrabold text-red-400 font-mono mt-0.5 block">{absentDutiesCount}</span>
                         </div>
-                        <div className="h-12 w-12 bg-red-950/50 border border-red-800/50 rounded-2xl flex items-center justify-center text-red-400">
-                          <AlertTriangle className="h-6 w-6" />
+                        <div className="h-9 w-9 bg-red-950/60 border border-red-800/40 rounded-lg flex items-center justify-center text-red-400 shrink-0">
+                          <AlertTriangle className="h-4 w-4" />
                         </div>
                       </div>
 
                       {/* NOT SCHEDULED */}
-                      <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl flex items-center justify-between">
+                      <div className="bg-slate-900 border border-slate-800 px-4 py-3 rounded-xl shadow-md flex items-center justify-between">
                         <div>
-                          <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block">Not Scheduled</span>
-                          <span className="text-2xl font-black text-slate-400 font-mono mt-1 block">{notScheduledCount}</span>
-                          <span className="text-[10px] text-slate-500 mt-1 block">Unassigned Sessions</span>
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Not Scheduled</span>
+                          <span className="text-xl font-extrabold text-slate-400 font-mono mt-0.5 block">{notScheduledCount}</span>
                         </div>
-                        <div className="h-12 w-12 bg-slate-950 border border-slate-800 rounded-2xl flex items-center justify-center text-slate-400">
-                          <Calendar className="h-6 w-6" />
+                        <div className="h-9 w-9 bg-slate-950 border border-slate-800 rounded-lg flex items-center justify-center text-slate-400 shrink-0">
+                          <Calendar className="h-4 w-4" />
                         </div>
                       </div>
                     </div>
 
-                    {/* FILTER BAR DROPDOWNS */}
-                    <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">
-                      <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                    {/* 2. COMPACT STAFF PERFORMANCE OVERVIEW / MONTHLY ROSTER SUMMARY TABLE */}
+                    <div className="bg-slate-900 border border-slate-800 rounded-xl shadow-md overflow-hidden">
+                      <div className="px-4 py-3 bg-slate-950/80 flex flex-wrap items-center justify-between gap-3 border-b border-slate-800">
+                        <button
+                          type="button"
+                          onClick={() => setShowStaffPerformanceOverview(!showStaffPerformanceOverview)}
+                          className="flex items-center gap-2 text-xs font-bold text-slate-200 hover:text-white transition-colors"
+                        >
+                          <BarChart3 className="h-4 w-4 text-indigo-400" />
+                          <span className="uppercase tracking-wider">Monthly Staff Attendance & Shift Ledger</span>
+                          <span className="bg-indigo-950 text-indigo-300 border border-indigo-800 text-[10px] px-2 py-0.5 rounded-full font-mono">
+                            {activeMonthLabel}
+                          </span>
+                          <ChevronDown className={`h-4 w-4 text-indigo-400 transition-transform ${showStaffPerformanceOverview ? 'rotate-180' : ''}`} />
+                        </button>
+
                         <div className="flex items-center gap-2">
-                          <Filter className="h-4 w-4 text-indigo-400" />
-                          <span className="text-xs font-bold text-white uppercase tracking-wider">Attendance Filters</span>
+                          <button
+                            type="button"
+                            onClick={handleExportMonthlyRosterPDF}
+                            className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shadow"
+                          >
+                            <FileText className="h-3.5 w-3.5" />
+                            <span>Export Monthly Roster PDF</span>
+                          </button>
                         </div>
-                        <span className="text-[11px] text-slate-400 font-mono">Duty Sessions Filtered: <strong className="text-indigo-400">{filteredDuties.length}</strong></span>
                       </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-3 text-xs">
-                        {/* Date Filter */}
-                        <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Single Date</label>
+                      {showStaffPerformanceOverview && (
+                        <div className="overflow-x-auto p-2">
+                          <table className="w-full text-left border-collapse text-xs">
+                            <thead>
+                              <tr className="bg-slate-950/90 text-slate-400 uppercase font-bold text-[10px] border-b border-slate-800 font-mono">
+                                <th className="p-2.5">Staff Member</th>
+                                <th className="p-2.5 text-center">Month</th>
+                                <th className="p-2.5 text-right">Total Duties</th>
+                                <th className="p-2.5 text-right">Days Worked (Present)</th>
+                                <th className="p-2.5 text-right">Days Absent</th>
+                                <th className="p-2.5 text-right">Attendance Rate</th>
+                                <th className="p-2.5 text-right">MS Duties</th>
+                                <th className="p-2.5 text-right">HSD Duties</th>
+                                <th className="p-2.5 text-center">Action</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-800/40 font-mono text-[11px]">
+                              {staffMonthlySummaries.map((summary: any) => {
+                                const rateNum = parseFloat(summary.attendanceRate);
+                                const isHighRate = rateNum >= 80;
+                                return (
+                                  <tr key={summary.staffId} className="hover:bg-slate-950/40 transition-all">
+                                    <td className="p-2.5 font-sans font-bold text-white flex items-center gap-2.5">
+                                      <div className="h-7 w-7 rounded-full bg-indigo-600/20 border border-indigo-500/30 text-indigo-400 font-extrabold flex items-center justify-center text-[10px] shrink-0">
+                                        {summary.staffName.slice(0, 2).toUpperCase()}
+                                      </div>
+                                      <div>
+                                        <div className="text-white">{summary.staffName}</div>
+                                        <div className="text-[10px] text-slate-500 font-normal font-mono">{summary.role}</div>
+                                      </div>
+                                    </td>
+                                    <td className="p-2.5 text-center font-sans text-[11px] text-slate-400 font-medium">
+                                      {summary.monthLabel}
+                                    </td>
+                                    <td className="p-2.5 text-right text-slate-300 font-bold">{summary.totalDutyDays}</td>
+                                    <td className="p-2.5 text-right">
+                                      <span className="px-2 py-0.5 rounded bg-emerald-950/80 border border-emerald-800/60 text-emerald-400 font-bold text-[11px]">
+                                        {summary.presentCount} Shifts
+                                      </span>
+                                    </td>
+                                    <td className="p-2.5 text-right">
+                                      <span className={`px-2 py-0.5 rounded font-bold text-[11px] ${summary.absentCount > 0 ? 'bg-red-950/80 border border-red-800/60 text-red-400' : 'text-slate-500'}`}>
+                                        {summary.absentCount} Days
+                                      </span>
+                                    </td>
+                                    <td className="p-2.5 text-right font-mono">
+                                      <span className={`px-2 py-0.5 rounded font-bold text-[11px] border ${isHighRate ? 'bg-emerald-950/40 border-emerald-800/50 text-emerald-400' : 'bg-amber-950/40 border-amber-800/50 text-amber-400'}`}>
+                                        {summary.attendanceRate}%
+                                      </span>
+                                    </td>
+                                    <td className="p-2.5 text-right text-indigo-300 font-bold">{summary.msDuties}</td>
+                                    <td className="p-2.5 text-right text-emerald-300 font-bold">{summary.hsdDuties}</td>
+                                    <td className="p-2.5 text-center">
+                                      <button
+                                        type="button"
+                                        onClick={() => setStaffHistoryModal({ open: true, staffId: summary.staffId, staffName: summary.staffName })}
+                                        className="px-2.5 py-1 rounded bg-indigo-950 text-indigo-400 border border-indigo-800 text-[10px] font-bold font-sans hover:bg-indigo-900 transition-all shadow-xs"
+                                      >
+                                        History
+                                      </button>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 3. STICKY COMPACT FILTER & SEARCH BAR */}
+                    <div className="sticky top-0 z-20 bg-slate-950/95 backdrop-blur border border-slate-800 p-3.5 rounded-xl shadow-xl space-y-3">
+                      {/* TOP CONTROL ROW: SEARCH + VIEW MODE + EXPORT BUTTONS */}
+                      <div className="flex flex-wrap items-center justify-between gap-2.5">
+                        {/* Instant Search Bar */}
+                        <div className="relative flex-1 min-w-[220px]">
+                          <input
+                            type="text"
+                            placeholder="Search staff, duty number (e.g. #120, Anwar)..."
+                            value={staffSearchQuery}
+                            onChange={(e) => {
+                              setStaffSearchQuery(e.target.value);
+                              setStaffReportPage(1);
+                            }}
+                            className="w-full bg-slate-900 border border-slate-700/80 rounded-lg px-3 py-1.5 text-xs text-white placeholder:text-slate-500 focus:border-indigo-500 focus:outline-none font-sans"
+                          />
+                          {staffSearchQuery && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setStaffSearchQuery('');
+                                setStaffReportPage(1);
+                              }}
+                              className="absolute right-2.5 top-2 text-slate-400 hover:text-white text-xs"
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Flat vs Grouped View Mode Toggle */}
+                        <div className="flex items-center bg-slate-900 border border-slate-800 p-0.5 rounded-lg">
+                          <button
+                            type="button"
+                            onClick={() => setStaffReportViewMode('FLAT')}
+                            className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${staffReportViewMode === 'FLAT' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                          >
+                            Flat List
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setStaffReportViewMode('GROUPED')}
+                            className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${staffReportViewMode === 'GROUPED' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                          >
+                            Group by Duty
+                          </button>
+                        </div>
+
+                        {/* Export Buttons */}
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleExportExcel('staff-report-table', 'Staff_24Hour_Attendance_Register')}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-950 border border-indigo-800 text-indigo-300 hover:text-white text-xs font-bold transition-all"
+                          >
+                            <FileSpreadsheet className="h-3.5 w-3.5 text-indigo-400" />
+                            <span>Export Excel</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleExportPDF}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-950 border border-emerald-800 text-emerald-300 hover:text-white text-xs font-bold transition-all"
+                          >
+                            <FileText className="h-3.5 w-3.5 text-emerald-400" />
+                            <span>Export PDF</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* COMPACT FILTER DROPDOWNS ROW */}
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-7 gap-2 text-xs">
+                        {/* Single Date */}
+                        <div>
+                          <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-0.5">Date</label>
                           <input
                             type="date"
                             value={staffReportDate}
@@ -4625,57 +5551,66 @@ export default function DashboardContainer({
                               setStaffReportDate(e.target.value);
                               setStaffReportStartDate('');
                               setStaffReportEndDate('');
+                              setStaffReportPage(1);
                             }}
-                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono focus:border-indigo-500 focus:outline-none"
+                            className="w-full bg-slate-900 border border-slate-800 rounded-md px-2 py-1 text-white font-mono text-[11px] focus:border-indigo-500 focus:outline-none"
                           />
                         </div>
 
                         {/* Start Date */}
-                        <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Start Date</label>
+                        <div>
+                          <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-0.5">Start Date</label>
                           <input
                             type="date"
                             value={staffReportStartDate}
                             onChange={(e) => {
                               setStaffReportStartDate(e.target.value);
                               setStaffReportDate('');
+                              setStaffReportPage(1);
                             }}
-                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono focus:border-indigo-500 focus:outline-none"
+                            className="w-full bg-slate-900 border border-slate-800 rounded-md px-2 py-1 text-white font-mono text-[11px] focus:border-indigo-500 focus:outline-none"
                           />
                         </div>
 
                         {/* End Date */}
-                        <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">End Date</label>
+                        <div>
+                          <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-0.5">End Date</label>
                           <input
                             type="date"
                             value={staffReportEndDate}
                             onChange={(e) => {
                               setStaffReportEndDate(e.target.value);
                               setStaffReportDate('');
+                              setStaffReportPage(1);
                             }}
-                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono focus:border-indigo-500 focus:outline-none"
+                            className="w-full bg-slate-900 border border-slate-800 rounded-md px-2 py-1 text-white font-mono text-[11px] focus:border-indigo-500 focus:outline-none"
                           />
                         </div>
 
                         {/* Month Filter */}
-                        <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Month</label>
+                        <div>
+                          <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-0.5">Month</label>
                           <input
                             type="month"
                             value={staffReportMonth}
-                            onChange={(e) => setStaffReportMonth(e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono focus:border-indigo-500 focus:outline-none"
+                            onChange={(e) => {
+                              setStaffReportMonth(e.target.value);
+                              setStaffReportPage(1);
+                            }}
+                            className="w-full bg-slate-900 border border-slate-800 rounded-md px-2 py-1 text-white font-mono text-[11px] focus:border-indigo-500 focus:outline-none"
                           />
                         </div>
 
-                        {/* Employee / Staff */}
-                        <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Employee / Staff</label>
+                        {/* Staff */}
+                        <div>
+                          <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-0.5">Staff</label>
                           <select
                             value={staffReportStaff}
-                            onChange={(e) => setStaffReportStaff(e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-semibold focus:border-indigo-500 focus:outline-none"
+                            onChange={(e) => {
+                              setStaffReportStaff(e.target.value);
+                              setStaffReportPage(1);
+                            }}
+                            className="w-full bg-slate-900 border border-slate-800 rounded-md px-2 py-1 text-white font-semibold text-[11px] focus:border-indigo-500 focus:outline-none"
                           >
                             <option value="ALL">All Staff</option>
                             {staffList.map((s: any) => (
@@ -4685,12 +5620,15 @@ export default function DashboardContainer({
                         </div>
 
                         {/* Pump */}
-                        <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Pump</label>
+                        <div>
+                          <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-0.5">Pump</label>
                           <select
                             value={staffReportPump}
-                            onChange={(e) => setStaffReportPump(e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-semibold focus:border-indigo-500 focus:outline-none"
+                            onChange={(e) => {
+                              setStaffReportPump(e.target.value);
+                              setStaffReportPage(1);
+                            }}
+                            className="w-full bg-slate-900 border border-slate-800 rounded-md px-2 py-1 text-white font-semibold text-[11px] focus:border-indigo-500 focus:outline-none"
                           >
                             <option value="ALL">All Pumps</option>
                             {(staticData.pumps || [{ id: 'p1', name: 'Pump 1' }, { id: 'p2', name: 'Pump 2' }]).map((p: any) => (
@@ -4699,13 +5637,16 @@ export default function DashboardContainer({
                           </select>
                         </div>
 
-                        {/* Status Filter */}
-                        <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Status</label>
+                        {/* Status */}
+                        <div>
+                          <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-0.5">Status</label>
                           <select
                             value={staffReportStatusFilter}
-                            onChange={(e) => setStaffReportStatusFilter(e.target.value as any)}
-                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-semibold focus:border-indigo-500 focus:outline-none"
+                            onChange={(e) => {
+                              setStaffReportStatusFilter(e.target.value as any);
+                              setStaffReportPage(1);
+                            }}
+                            className="w-full bg-slate-900 border border-slate-800 rounded-md px-2 py-1 text-white font-semibold text-[11px] focus:border-indigo-500 focus:outline-none"
                           >
                             <option value="ALL">All Statuses</option>
                             <option value="PRESENT">Present</option>
@@ -4715,174 +5656,392 @@ export default function DashboardContainer({
                         </div>
                       </div>
 
-                      <div className="flex justify-between items-center pt-2 border-t border-slate-800/60">
-                        <span className="text-[11px] text-slate-400 font-mono">Showing <strong>{allAttendanceRows.length}</strong> attendance records</span>
+                      {/* COUNTERS & CLEAR FILTERS STATUS LINE */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80 text-[11px]">
+                        <div className="flex items-center gap-3 text-slate-400 font-mono">
+                          <span>Showing <strong className="text-white">{filteredRows.length}</strong> records</span>
+                          <span>•</span>
+                          <span><strong className="text-indigo-400">{groupedDutiesList.length}</strong> duty sessions</span>
+                        </div>
+
                         <button
+                          type="button"
                           onClick={handleResetStaffFilters}
-                          className="text-[11px] font-bold text-slate-400 hover:text-white transition-all underline underline-offset-4"
+                          className="text-[11px] font-bold text-indigo-400 hover:text-white transition-all underline underline-offset-2"
                         >
-                          Clear All Filters
+                          Clear Filters
                         </button>
                       </div>
                     </div>
 
-                    {/* MAIN STAFF ATTENDANCE REGISTER TABLE (Per Duty Session) */}
-                    <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden">
-                      <div className="p-6 border-b border-slate-800 flex justify-between items-center">
-                        <div>
-                          <h4 className="font-extrabold text-white text-sm uppercase tracking-wider">24-Hour Duty Staff Attendance Register</h4>
-                          <p className="text-xs text-slate-400 mt-1">One 24-Hour Duty Session = One Attendance Record. Unassigned workers are NOT SCHEDULED, not Absent.</p>
+                    {/* 4. MAIN TABLE CONTENT (FLAT VIEW vs GROUPED BY DUTY VIEW) */}
+                    {staffReportViewMode === 'FLAT' ? (
+                      /* FLAT LIST VIEW */
+                      <div className="bg-slate-900 border border-slate-800 rounded-xl shadow-md overflow-hidden">
+                        {/* Desktop Table View */}
+                        <div className="hidden md:block overflow-x-auto">
+                          <table id="staff-report-table" className="w-full text-left border-collapse text-xs">
+                            <thead>
+                              <tr className="bg-slate-950 border-b border-slate-800 text-slate-400 uppercase font-bold text-[10px]">
+                                <th className="p-2.5 font-mono">Duty</th>
+                                <th className="p-2.5">Staff Member</th>
+                                <th className="p-2.5">Pump</th>
+                                <th className="p-2.5">Fuel Handled</th>
+                                <th className="p-2.5">Duty Time</th>
+                                <th className="p-2.5 text-center">Status</th>
+                                <th className="p-2.5 text-right">Action</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-800/40 font-mono text-[11px]">
+                              {paginatedFlatRows.length === 0 ? (
+                                <tr>
+                                  <td colSpan={7} className="p-6 text-center text-slate-500 font-sans">No staff attendance records match your search or filter criteria.</td>
+                                </tr>
+                              ) : (
+                                paginatedFlatRows.map((row, idx) => (
+                                  <tr key={`${row.dutyId}-${row.staffId}-${idx}`} className="hover:bg-slate-950/50 transition-all">
+                                    <td className="p-2.5 font-bold text-indigo-400">#{row.dutyNumber}</td>
+                                    <td className="p-2.5 font-sans font-bold text-white">{row.staffName}</td>
+                                    <td className="p-2.5 font-sans text-slate-300">{row.pump}</td>
+                                    <td className="p-2.5 font-sans text-slate-300">
+                                      {row.msHandled && row.hsdHandled ? 'MS + HSD' : row.msHandled ? 'MS' : row.hsdHandled ? 'HSD' : '-'}
+                                    </td>
+                                    <td className="p-2.5 text-slate-300 text-[11px]">{row.dutyPeriodStr}</td>
+                                    <td className="p-2.5 text-center font-sans">
+                                      {row.status === 'PRESENT' && (
+                                        <span className="px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 font-bold text-[10px] uppercase">
+                                          PRESENT ✓
+                                        </span>
+                                      )}
+                                      {row.status === 'ABSENT' && (
+                                        <span className="px-2 py-0.5 rounded bg-red-950 text-red-400 border border-red-800 font-bold text-[10px] uppercase">
+                                          ABSENT ✗
+                                        </span>
+                                      )}
+                                      {row.status === 'NOT_SCHEDULED' && (
+                                        <span className="px-2 py-0.5 rounded bg-slate-950 text-slate-500 border border-slate-800 font-bold text-[10px] uppercase">
+                                          NOT SCHEDULED
+                                        </span>
+                                      )}
+                                    </td>
+                                    <td className="p-2.5 text-right font-sans">
+                                      <button
+                                        type="button"
+                                        onClick={() => setSelectedAttendanceDetailRow(row)}
+                                        className="px-2.5 py-1 rounded bg-indigo-950 hover:bg-indigo-900 border border-indigo-800 text-indigo-300 hover:text-white text-[11px] font-bold transition-all"
+                                      >
+                                        View Details
+                                      </button>
+                                    </td>
+                                  </tr>
+                                ))
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        {/* Mobile Responsive Cards */}
+                        <div className="md:hidden divide-y divide-slate-800/80 p-2 space-y-2">
+                          {paginatedFlatRows.length === 0 ? (
+                            <div className="p-6 text-center text-slate-500 text-xs">No attendance records match filter criteria.</div>
+                          ) : (
+                            paginatedFlatRows.map((row, idx) => (
+                              <div key={`${row.dutyId}-${row.staffId}-mobile-${idx}`} className="bg-slate-950 p-3 rounded-lg border border-slate-850 space-y-2 text-xs">
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-mono font-bold text-indigo-400">Duty #{row.dutyNumber}</span>
+                                    <span className="font-bold text-white">{row.staffName}</span>
+                                  </div>
+                                  <div>
+                                    {row.status === 'PRESENT' && <span className="px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 font-bold text-[10px]">PRESENT</span>}
+                                    {row.status === 'ABSENT' && <span className="px-2 py-0.5 rounded bg-red-950 text-red-400 border border-red-800 font-bold text-[10px]">ABSENT</span>}
+                                    {row.status === 'NOT_SCHEDULED' && <span className="px-2 py-0.5 rounded bg-slate-900 text-slate-500 border border-slate-800 font-bold text-[10px]">NOT SCHED</span>}
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center justify-between text-[11px] text-slate-400">
+                                  <span>Pump: <strong className="text-slate-200">{row.pump}</strong></span>
+                                  <span className="font-mono">{row.dutyPeriodStr}</span>
+                                </div>
+
+                                <div className="pt-1 flex justify-end">
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedAttendanceDetailRow(row)}
+                                    className="px-3 py-1 bg-indigo-950 text-indigo-300 border border-indigo-800 rounded text-xs font-bold"
+                                  >
+                                    View Details →
+                                  </button>
+                                </div>
+                              </div>
+                            ))
+                          )}
                         </div>
                       </div>
+                    ) : (
+                      /* GROUPED BY DUTY VIEW */
+                      <div className="space-y-3">
+                        {groupedDutiesList.length === 0 ? (
+                          <div className="bg-slate-900 border border-slate-800 p-8 rounded-xl text-center text-slate-500 text-xs">
+                            No duty sessions match the selected filter or search.
+                          </div>
+                        ) : (
+                          groupedDutiesList.map((gDuty) => {
+                            const isExpanded = expandedDuties[gDuty.dutyId] !== false; // expanded by default
+                            return (
+                              <div key={gDuty.dutyId} className="bg-slate-900 border border-slate-800 rounded-xl shadow-md overflow-hidden">
+                                {/* Duty Group Header Bar */}
+                                <div
+                                  onClick={() => setExpandedDuties({ ...expandedDuties, [gDuty.dutyId]: !isExpanded })}
+                                  className="px-4 py-3 bg-slate-950/90 hover:bg-slate-950 cursor-pointer flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 transition-colors"
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <span className="font-mono font-black text-indigo-400 text-sm">DUTY #{gDuty.dutyNumber}</span>
+                                    <span className="text-xs text-slate-300 font-mono">{gDuty.dutyPeriodStr}</span>
+                                  </div>
 
-                      <div className="overflow-x-auto">
-                        <table id="staff-report-table" className="w-full text-left border-collapse text-xs">
-                          <thead>
-                            <tr className="bg-slate-950 border-b border-slate-800 text-slate-400 uppercase font-bold">
-                              <th className="p-3 font-mono">Duty</th>
-                              <th className="p-3">Staff Name</th>
-                              <th className="p-3">Pump</th>
-                              <th className="p-3 text-center">MS</th>
-                              <th className="p-3 text-center">HSD</th>
-                              <th className="p-3">Duty Period (24-Hr Window)</th>
-                              <th className="p-3 text-center">Status</th>
-                              <th className="p-3 text-right">Actions</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-800/40 font-mono">
-                            {allAttendanceRows.length === 0 ? (
-                              <tr>
-                                <td colSpan={8} className="p-6 text-center text-slate-500 font-sans">No staff attendance records match the selected filter criteria.</td>
-                              </tr>
-                            ) : (
-                              allAttendanceRows.map((row, idx) => (
-                                <tr key={`${row.dutyId}-${row.staffId}-${idx}`} className="hover:bg-slate-950/40 transition-all">
-                                  <td className="p-3 font-bold text-indigo-400">#{row.dutyNumber}</td>
-                                  <td className="p-3 font-sans font-bold text-white">
+                                  <div className="flex items-center gap-3 text-xs">
+                                    <span className="text-slate-400 font-bold">{gDuty.rows.length} Staff Assigned</span>
+                                    <span className="px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] font-bold">
+                                      {gDuty.presentCount} Present
+                                    </span>
+                                    {gDuty.absentCount > 0 && (
+                                      <span className="px-2 py-0.5 rounded bg-red-950 text-red-400 border border-red-800 text-[10px] font-bold">
+                                        {gDuty.absentCount} Absent
+                                      </span>
+                                    )}
                                     <button
-                                      onClick={() => setStaffHistoryModal({ open: true, staffId: row.staffId, staffName: row.staffName })}
-                                      className="hover:text-indigo-400 transition-colors text-left font-bold"
+                                      type="button"
+                                      className="px-2 py-0.5 rounded border border-slate-700 bg-slate-850 text-slate-300 text-[10px] font-bold"
                                     >
-                                      {row.staffName}
+                                      {isExpanded ? 'Collapse ▲' : 'View Duty ▼'}
                                     </button>
-                                  </td>
-                                  <td className="p-3 font-sans text-slate-300">{row.pump}</td>
-                                  <td className="p-3 text-center">
-                                    {row.msHandled ? (
-                                      <span className="inline-flex items-center px-2 py-0.5 rounded bg-indigo-950 text-indigo-400 border border-indigo-800 font-bold text-[10px]">
-                                        ✓
-                                      </span>
-                                    ) : (
-                                      <span className="text-slate-600">-</span>
-                                    )}
-                                  </td>
-                                  <td className="p-3 text-center">
-                                    {row.hsdHandled ? (
-                                      <span className="inline-flex items-center px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 font-bold text-[10px]">
-                                        ✓
-                                      </span>
-                                    ) : (
-                                      <span className="text-slate-600">-</span>
-                                    )}
-                                  </td>
-                                  <td className="p-3 text-slate-300 font-mono text-[11px]">{row.dutyPeriodStr}</td>
-                                  <td className="p-3 text-center">
-                                    {row.status === 'PRESENT' && (
-                                      <span className="px-2.5 py-1 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 font-bold text-[10px] uppercase font-sans">
-                                        PRESENT
-                                      </span>
-                                    )}
-                                    {row.status === 'ABSENT' && (
-                                      <span className="px-2.5 py-1 rounded bg-red-950 text-red-400 border border-red-800 font-bold text-[10px] uppercase font-sans">
-                                        ABSENT
-                                      </span>
-                                    )}
-                                    {row.status === 'NOT_SCHEDULED' && (
-                                      <span className="px-2.5 py-1 rounded bg-slate-950 text-slate-500 border border-slate-800 font-bold text-[10px] uppercase font-sans">
-                                        NOT SCHEDULED
-                                      </span>
-                                    )}
-                                  </td>
-                                  <td className="p-3 text-right">
-                                    <button
-                                      onClick={() => setStatusCorrectionModal({
-                                        open: true,
-                                        dutyId: row.dutyId,
-                                        dutyNumber: row.dutyNumber,
-                                        staffId: row.staffId,
-                                        staffName: row.staffName,
-                                        currentStatus: row.status,
-                                        newStatus: row.status,
-                                        reason: ''
-                                      })}
-                                      className="px-2.5 py-1 rounded border border-slate-700 bg-slate-850 hover:bg-slate-800 text-slate-300 text-[10px] font-bold font-sans transition-all"
-                                    >
-                                      Change Status
-                                    </button>
-                                  </td>
-                                </tr>
-                              ))
-                            )}
-                          </tbody>
-                        </table>
+                                  </div>
+                                </div>
+
+                                {/* Expanded Staff Rows */}
+                                {isExpanded && (
+                                  <div className="p-2 overflow-x-auto">
+                                    <table className="w-full text-left border-collapse text-xs">
+                                      <thead>
+                                        <tr className="bg-slate-950 text-slate-400 uppercase font-bold text-[10px] border-b border-slate-800">
+                                          <th className="p-2">Staff Member</th>
+                                          <th className="p-2">Pump</th>
+                                          <th className="p-2">Fuel</th>
+                                          <th className="p-2 text-center">Status</th>
+                                          <th className="p-2 text-right">Action</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-slate-800/40 font-mono text-[11px]">
+                                        {gDuty.rows.map((row, idx) => (
+                                          <tr key={`${row.dutyId}-${row.staffId}-grp-${idx}`} className="hover:bg-slate-950/40">
+                                            <td className="p-2 font-sans font-bold text-white">{row.staffName}</td>
+                                            <td className="p-2 font-sans text-slate-300">{row.pump}</td>
+                                            <td className="p-2 font-sans text-slate-300">{row.msHandled && row.hsdHandled ? 'MS + HSD' : row.msHandled ? 'MS' : row.hsdHandled ? 'HSD' : '-'}</td>
+                                            <td className="p-2 text-center font-sans">
+                                              {row.status === 'PRESENT' && <span className="px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 font-bold text-[10px]">PRESENT</span>}
+                                              {row.status === 'ABSENT' && <span className="px-2 py-0.5 rounded bg-red-950 text-red-400 border border-red-800 font-bold text-[10px]">ABSENT</span>}
+                                              {row.status === 'NOT_SCHEDULED' && <span className="px-2 py-0.5 rounded bg-slate-950 text-slate-500 border border-slate-800 font-bold text-[10px]">NOT SCHED</span>}
+                                            </td>
+                                            <td className="p-2 text-right font-sans">
+                                              <button
+                                                type="button"
+                                                onClick={() => setSelectedAttendanceDetailRow(row)}
+                                                className="px-2 py-0.5 rounded bg-indigo-950 text-indigo-300 border border-indigo-800 text-[10px] font-bold"
+                                              >
+                                                View
+                                              </button>
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })
+                        )}
                       </div>
-                    </div>
+                    )}
 
-                    {/* MONTHLY / PERIODIC STAFF SUMMARY TABLE */}
-                    <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden space-y-4 p-6">
-                      <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                        <div className="flex items-center gap-2">
-                          <BarChart3 className="h-5 w-5 text-indigo-400" />
-                          <div>
-                            <h4 className="font-extrabold text-white text-sm uppercase tracking-wider">Staff Monthly / Period Summary</h4>
-                            <p className="text-xs text-slate-400 mt-0.5">Aggregated duty days, present, absent, not scheduled, and MS/HSD duty counts per staff member</p>
+                    {/* 5. PAGINATION BAR */}
+                    {totalRecordsCount > 0 && (
+                      <div className="bg-slate-900 border border-slate-800 px-4 py-3 rounded-xl shadow-md flex flex-wrap items-center justify-between gap-3 text-xs">
+                        <div className="flex items-center gap-3 text-slate-400 font-mono">
+                          <span>Showing <strong>{startIndex + 1}–{endIndex}</strong> of <strong>{totalRecordsCount}</strong> records</span>
+                          <div className="flex items-center gap-1">
+                            <span className="text-[11px] font-sans">Page Size:</span>
+                            <select
+                              value={staffReportPageSize}
+                              onChange={(e) => {
+                                setStaffReportPageSize(Number(e.target.value));
+                                setStaffReportPage(1);
+                              }}
+                              className="bg-slate-950 border border-slate-800 rounded px-2 py-0.5 text-white font-bold font-mono text-[11px] focus:outline-none"
+                            >
+                              <option value={20}>20</option>
+                              <option value={50}>50</option>
+                              <option value={100}>100</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        {/* Page Navigation Buttons */}
+                        <div className="flex items-center gap-1.5 font-mono">
+                          <button
+                            type="button"
+                            disabled={currentReportPage <= 1}
+                            onClick={() => setStaffReportPage(p => Math.max(1, p - 1))}
+                            className="px-3 py-1 rounded bg-slate-950 border border-slate-800 text-slate-300 disabled:opacity-40 text-xs font-bold hover:bg-slate-850 transition-colors"
+                          >
+                            ← Prev
+                          </button>
+                          
+                          {Array.from({ length: totalPagesCount }, (_, i) => i + 1)
+                            .filter(p => p === 1 || p === totalPagesCount || Math.abs(p - currentReportPage) <= 1)
+                            .map((pNum, index, array) => {
+                              const showEllipsis = index > 0 && pNum - array[index - 1] > 1;
+                              return (
+                                <React.Fragment key={pNum}>
+                                  {showEllipsis && <span className="px-1 text-slate-600">...</span>}
+                                  <button
+                                    type="button"
+                                    onClick={() => setStaffReportPage(pNum)}
+                                    className={`px-2.5 py-1 rounded text-xs font-bold transition-all ${currentReportPage === pNum ? 'bg-indigo-600 text-white' : 'bg-slate-950 border border-slate-800 text-slate-300 hover:bg-slate-850'}`}
+                                  >
+                                    {pNum}
+                                  </button>
+                                </React.Fragment>
+                              );
+                            })}
+
+                          <button
+                            type="button"
+                            disabled={currentReportPage >= totalPagesCount}
+                            onClick={() => setStaffReportPage(p => Math.min(totalPagesCount, p + 1))}
+                            className="px-3 py-1 rounded bg-slate-950 border border-slate-800 text-slate-300 disabled:opacity-40 text-xs font-bold hover:bg-slate-850 transition-colors"
+                          >
+                            Next →
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 6. RIGHT-SIDE ATTENDANCE RECORD DETAIL DRAWER / OVERLAY */}
+                    {selectedAttendanceDetailRow && (
+                      <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex justify-end animate-in fade-in duration-200">
+                        <div className="w-full max-w-md bg-slate-900 border-l border-slate-800 h-full p-6 overflow-y-auto space-y-5 shadow-2xl flex flex-col justify-between">
+                          <div className="space-y-4">
+                            {/* Drawer Header */}
+                            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                              <div>
+                                <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest block">Attendance Inspection</span>
+                                <h3 className="text-base font-extrabold text-white">Duty #{selectedAttendanceDetailRow.dutyNumber} Details</h3>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setSelectedAttendanceDetailRow(null)}
+                                className="h-8 w-8 rounded-full bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-400 hover:text-white flex items-center justify-center font-bold text-sm"
+                              >
+                                ✕
+                              </button>
+                            </div>
+
+                            {/* Details Summary Card */}
+                            <div className="bg-slate-950 p-4 rounded-xl border border-slate-850 space-y-3 text-xs">
+                              <div className="flex justify-between items-center pb-2 border-b border-slate-850">
+                                <span className="text-slate-400 uppercase font-bold text-[10px]">Staff Member</span>
+                                <span className="font-bold text-white text-sm">{selectedAttendanceDetailRow.staffName}</span>
+                              </div>
+
+                              <div className="flex justify-between items-center">
+                                <span className="text-slate-400">Assigned Pump:</span>
+                                <span className="font-bold text-slate-200">{selectedAttendanceDetailRow.pump}</span>
+                              </div>
+
+                              <div className="flex justify-between items-center">
+                                <span className="text-slate-400">Duty Period:</span>
+                                <span className="font-mono text-slate-200 text-[11px]">{selectedAttendanceDetailRow.dutyPeriodStr}</span>
+                              </div>
+
+                              <div className="flex justify-between items-center pt-2 border-t border-slate-850">
+                                <span className="text-slate-400 font-bold uppercase text-[10px]">Attendance Status:</span>
+                                <div>
+                                  {selectedAttendanceDetailRow.status === 'PRESENT' && <span className="px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 font-bold text-[10px]">PRESENT</span>}
+                                  {selectedAttendanceDetailRow.status === 'ABSENT' && <span className="px-2 py-0.5 rounded bg-red-950 text-red-400 border border-red-800 font-bold text-[10px]">ABSENT</span>}
+                                  {selectedAttendanceDetailRow.status === 'NOT_SCHEDULED' && <span className="px-2 py-0.5 rounded bg-slate-900 text-slate-500 border border-slate-800 font-bold text-[10px]">NOT SCHED</span>}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Meter Readings for Assigned Guns */}
+                            <div className="bg-slate-950 p-4 rounded-xl border border-slate-850 space-y-3 text-xs">
+                              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block border-b border-slate-850 pb-2">Assigned Meter Readings</span>
+                              
+                              {(() => {
+                                const targetDuty = filteredDuties.find(d => d.id === selectedAttendanceDetailRow.dutyId);
+                                const staffReadings = (targetDuty?.meterReadings || []).filter((mr: any) =>
+                                  mr.assignedStaffId === selectedAttendanceDetailRow.staffId || mr.assignedStaff?.id === selectedAttendanceDetailRow.staffId
+                                );
+
+                                if (staffReadings.length === 0) {
+                                  return <div className="text-slate-500 italic text-[11px]">No specific meter reading records attached to this staff assignment.</div>;
+                                }
+
+                                return staffReadings.map((mr: any) => (
+                                  <div key={mr.id} className="bg-slate-900 p-2.5 rounded-lg border border-slate-800 space-y-1 font-mono text-[11px]">
+                                    <div className="flex justify-between font-bold text-indigo-400">
+                                      <span>{mr.gun?.name} ({mr.gun?.fuelType})</span>
+                                      <span>₹{mr.priceUsed?.toFixed(2)}/L</span>
+                                    </div>
+                                    <div className="flex justify-between text-slate-300">
+                                      <span>Opening: {mr.previousReading}</span>
+                                      <span>Closing: {mr.currentReading}</span>
+                                    </div>
+                                    <div className="flex justify-between text-emerald-400 font-bold border-t border-slate-800 pt-1">
+                                      <span>Sold: {mr.litresSold} L</span>
+                                      <span>Sales: ₹{mr.salesAmount?.toFixed(2)}</span>
+                                    </div>
+                                  </div>
+                                ));
+                              })()}
+                            </div>
+
+                            {/* Quick Action Button to Correct Status */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setStatusCorrectionModal({
+                                  open: true,
+                                  dutyId: selectedAttendanceDetailRow.dutyId,
+                                  dutyNumber: selectedAttendanceDetailRow.dutyNumber,
+                                  staffId: selectedAttendanceDetailRow.staffId,
+                                  staffName: selectedAttendanceDetailRow.staffName,
+                                  currentStatus: selectedAttendanceDetailRow.status,
+                                  newStatus: selectedAttendanceDetailRow.status,
+                                  reason: ''
+                                });
+                                setSelectedAttendanceDetailRow(null);
+                              }}
+                              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs transition-all shadow"
+                            >
+                              Change Attendance Status
+                            </button>
+                          </div>
+
+                          <div className="pt-4 border-t border-slate-800">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedAttendanceDetailRow(null)}
+                              className="w-full py-2 bg-slate-950 hover:bg-slate-850 text-slate-300 rounded-lg border border-slate-800 font-bold text-xs"
+                            >
+                              Close Details Drawer
+                            </button>
                           </div>
                         </div>
                       </div>
-
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-left border-collapse text-xs">
-                          <thead>
-                            <tr className="bg-slate-950 border-b border-slate-800 text-slate-400 uppercase font-bold font-mono">
-                              <th className="p-3">Staff Member</th>
-                              <th className="p-3 text-right">Duty Days</th>
-                              <th className="p-3 text-right">Present</th>
-                              <th className="p-3 text-right">Absent</th>
-                              <th className="p-3 text-right">Not Scheduled</th>
-                              <th className="p-3 text-right">MS Duties</th>
-                              <th className="p-3 text-right">HSD Duties</th>
-                              <th className="p-3 text-center">History</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-800/40 font-mono">
-                            {staffMonthlySummaries.map((summary: any) => (
-                              <tr key={summary.staffId} className="hover:bg-slate-950/40 transition-all">
-                                <td className="p-3 font-sans font-bold text-white flex items-center gap-2">
-                                  <div className="h-7 w-7 rounded-full bg-indigo-600/20 border border-indigo-500/30 text-indigo-400 font-extrabold flex items-center justify-center text-[10px]">
-                                    {summary.staffName.slice(0, 2).toUpperCase()}
-                                  </div>
-                                  <span>{summary.staffName}</span>
-                                </td>
-                                <td className="p-3 text-right text-slate-300 font-bold">{summary.totalDutyDays}</td>
-                                <td className="p-3 text-right text-emerald-400 font-bold">{summary.presentCount}</td>
-                                <td className="p-3 text-right text-red-400 font-bold">{summary.absentCount}</td>
-                                <td className="p-3 text-right text-slate-500 font-bold">{summary.notSched}</td>
-                                <td className="p-3 text-right text-indigo-300 font-bold">{summary.msDuties}</td>
-                                <td className="p-3 text-right text-emerald-300 font-bold">{summary.hsdDuties}</td>
-                                <td className="p-3 text-center">
-                                  <button
-                                    onClick={() => setStaffHistoryModal({ open: true, staffId: summary.staffId, staffName: summary.staffName })}
-                                    className="px-2.5 py-1 rounded bg-indigo-950 text-indigo-400 border border-indigo-800 text-[10px] font-bold font-sans hover:bg-indigo-900 transition-all"
-                                  >
-                                    View History
-                                  </button>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
+                    )}
 
                     {/* ATTENDANCE AUDIT LOGS (Owner Correction Records) */}
                     {attendanceAuditLogs.length > 0 && (
@@ -4931,160 +6090,13 @@ export default function DashboardContainer({
 
               {/* CREDIT REPORT SUB-TAB */}
               {reportsTab === 'credit' && (
-                <div className="space-y-6">
-                  {/* Customer Filter & Summary Bar */}
-                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                    <div>
-                      <h4 className="font-extrabold text-white text-base">Customer & Transport Credit Ledger Statements</h4>
-                      <p className="text-xs text-slate-400 mt-1">Select a customer or transport company to view full ledger history, itemized indents, fuel volume, rate, debit/credit transactions, and running balance.</p>
-                    </div>
-
-                    <div className="flex items-center gap-3 w-full md:w-auto">
-                      <select
-                        value={selectedLedgerCustomer}
-                        onChange={(e) => setSelectedLedgerCustomer(e.target.value)}
-                        className="rounded-lg border border-slate-700 bg-slate-950 py-2 px-3 text-xs font-bold text-white focus:border-indigo-500 focus:outline-none w-full md:w-72"
-                      >
-                        <option value="ALL">-- All Customers / Transport Ledgers --</option>
-                        {creditLedger.map((c: any) => (
-                          <option key={c.id} value={c.id}>
-                            {c.name} (Bal: ₹{c.balance.toFixed(2)})
-                          </option>
-                        ))}
-                      </select>
-
-                      <button
-                        onClick={() => handleExportExcel('credit-ledger-table', `Credit_Ledger_${selectedLedgerCustomer === 'ALL' ? 'All' : 'Company'}`)}
-                        className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-slate-700 bg-slate-850 text-indigo-400 hover:text-indigo-300 text-xs font-bold transition-all shrink-0"
-                      >
-                        Export Ledger to Excel
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Calculated Ledger Summary Cards */}
-                  {(() => {
-                    // Compute chronological running balance per customer
-                    const customerMap: Record<string, any[]> = {};
-                    creditLedger.forEach((c: any) => {
-                      if (selectedLedgerCustomer === 'ALL' || c.id === selectedLedgerCustomer) {
-                        const sorted = [...(c.transactions || [])].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-                        let running = 0;
-                        const computed = sorted.map((t: any) => {
-                          if (t.transactionType === 'CREDIT_SALE') {
-                            running += t.amount;
-                          } else {
-                            running -= t.amount;
-                          }
-                          return {
-                            ...t,
-                            customerName: c.name,
-                            runningBalance: running,
-                          };
-                        });
-                        customerMap[c.id] = computed;
-                      }
-                    });
-
-                    const allTrans = Object.values(customerMap).flat().sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-                    const totalCreditGiven = allTrans.filter(t => t.transactionType === 'CREDIT_SALE').reduce((sum, t) => sum + t.amount, 0);
-                    const totalCollections = allTrans.filter(t => t.transactionType === 'COLLECTION').reduce((sum, t) => sum + t.amount, 0);
-                    const netOutstanding = totalCreditGiven - totalCollections;
-
-                    return (
-                      <>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                          <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl flex items-center justify-between shadow-lg">
-                            <div>
-                              <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Total Credit Given (Debits)</span>
-                              <h5 className="text-2xl font-mono font-black text-amber-400 mt-1">₹{totalCreditGiven.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h5>
-                              <span className="text-[10px] text-slate-500 font-mono mt-0.5 block">{allTrans.filter(t => t.transactionType === 'CREDIT_SALE').length} Credit Sale Slips</span>
-                            </div>
-                            <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-400">
-                              <CreditCard className="h-6 w-6" />
-                            </div>
-                          </div>
-
-                          <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl flex items-center justify-between shadow-lg">
-                            <div>
-                              <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Total Collections (Credits)</span>
-                              <h5 className="text-2xl font-mono font-black text-emerald-400 mt-1">₹{totalCollections.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h5>
-                              <span className="text-[10px] text-slate-500 font-mono mt-0.5 block">{allTrans.filter(t => t.transactionType === 'COLLECTION').length} Cash Payments Received</span>
-                            </div>
-                            <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400">
-                              <Plus className="h-6 w-6" />
-                            </div>
-                          </div>
-
-                          <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl flex items-center justify-between shadow-lg">
-                            <div>
-                              <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Net Outstanding Balance</span>
-                              <h5 className="text-2xl font-mono font-black text-indigo-300 mt-1">₹{netOutstanding.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h5>
-                              <span className="text-[10px] text-slate-500 font-mono mt-0.5 block">Current Total Balance Due</span>
-                            </div>
-                            <div className="p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-xl text-indigo-400">
-                              <CreditCard className="h-6 w-6" />
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Comprehensive Detailed Transaction Table */}
-                        <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden">
-                          <div className="overflow-x-auto">
-                            <table id="credit-ledger-table" className="w-full text-left border-collapse text-xs">
-                              <thead>
-                                <tr className="bg-slate-950 border-b border-slate-800 text-slate-400 uppercase font-bold text-[10px]">
-                                  <th className="p-3">Date & Time</th>
-                                  <th className="p-3">Shift Ref</th>
-                                  <th className="p-3">Company / Customer</th>
-                                  <th className="p-3">Indent / Slip No</th>
-                                  <th className="p-3">Product Name</th>
-                                  <th className="p-3 text-right">Litres / Qty</th>
-                                  <th className="p-3 text-right">Rate (₹/L)</th>
-                                  <th className="p-3 text-right">Debit (Credit Sale)</th>
-                                  <th className="p-3 text-right">Credit (Collection)</th>
-                                  <th className="p-3 text-right">Running Balance</th>
-                                  <th className="p-3">Entered By</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-slate-800/40 font-mono text-xs">
-                                {allTrans.length === 0 ? (
-                                  <tr>
-                                    <td colSpan={11} className="p-6 text-center text-slate-500 font-sans">
-                                      No ledger credit transactions recorded for this selection.
-                                    </td>
-                                  </tr>
-                                ) : (
-                                  allTrans.map((t: any, idx: number) => (
-                                    <tr key={idx} className="hover:bg-slate-950/20">
-                                      <td className="p-3 text-slate-350" suppressHydrationWarning>{new Date(t.timestamp).toLocaleString()}</td>
-                                      <td className="p-3 font-sans text-slate-400 font-bold">Duty #{t.dutySession?.dutyNumber || '-'}</td>
-                                      <td className="p-3 font-sans font-bold text-slate-200">{t.customerName}</td>
-                                      <td className="p-3 font-bold text-indigo-300">{t.indentNumber || '-'}</td>
-                                      <td className="p-3 font-sans text-slate-300">{t.productName || (t.transactionType === 'CREDIT_SALE' ? 'Fuel/Oil' : 'Cash Collection')}</td>
-                                      <td className="p-3 text-right text-slate-200">{t.quantity ? `${t.quantity.toFixed(2)} L` : '-'}</td>
-                                      <td className="p-3 text-right text-slate-400">{t.unitPrice ? `₹${t.unitPrice.toFixed(2)}` : '-'}</td>
-                                      <td className="p-3 text-right font-bold text-amber-400">
-                                        {t.transactionType === 'CREDIT_SALE' ? `+₹${t.amount.toFixed(2)}` : '-'}
-                                      </td>
-                                      <td className="p-3 text-right font-bold text-emerald-400">
-                                        {t.transactionType === 'COLLECTION' ? `-₹${t.amount.toFixed(2)}` : '-'}
-                                      </td>
-                                      <td className="p-3 text-right font-bold text-indigo-300 bg-slate-950/40">
-                                        ₹{t.runningBalance.toFixed(2)}
-                                      </td>
-                                      <td className="p-3 font-sans text-slate-400 text-[11px]">{t.enteredBy?.username || 'Manager'}</td>
-                                    </tr>
-                                  ))
-                                )}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-                      </>
-                    );
-                  })()}
-                </div>
+                <OwnerCreditLedger
+                  creditLedger={creditLedger}
+                  staticData={staticData}
+                  historicalDuties={historicalDuties}
+                  onRefresh={refreshActiveDuty}
+                  flashMessage={flashMessage}
+                />
               )}
 
               {/* EXPENSES REPORT SUB-TAB */}
@@ -5209,46 +6221,46 @@ export default function DashboardContainer({
                         Export to Excel
                       </button>
                     </div>
-                  <div className="overflow-x-auto">
-                    <table id="stock-report-table" className="w-full text-left border-collapse text-xs">
-                      <thead>
-                        <tr className="bg-slate-950 border-b border-slate-800 text-slate-400 uppercase font-bold">
-                          <th className="p-3">Log Timestamp</th>
-                          <th className="p-3">Fuel Type</th>
-                          <th className="p-3 text-right">Opening Stock</th>
-                          <th className="p-3 text-right">Receipts</th>
-                          <th className="p-3 text-right">Sales Sold</th>
-                          <th className="p-3 text-right">Expected Stock</th>
-                          <th className="p-3 text-right">Physical Dip Stock</th>
-                          <th className="p-3 text-right">Variance L</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-800/40">
-                        {stockHistory.length === 0 ? (
-                          <tr>
-                            <td colSpan={8} className="p-4 text-center text-slate-500">No stock reports recorded yet.</td>
+                    <div className="overflow-x-auto">
+                      <table id="stock-report-table" className="w-full text-left border-collapse text-xs">
+                        <thead>
+                          <tr className="bg-slate-950 border-b border-slate-800 text-slate-400 uppercase font-bold">
+                            <th className="p-3">Log Timestamp</th>
+                            <th className="p-3">Fuel Type</th>
+                            <th className="p-3 text-right">Opening Stock</th>
+                            <th className="p-3 text-right">Receipts</th>
+                            <th className="p-3 text-right">Sales Sold</th>
+                            <th className="p-3 text-right">Expected Stock</th>
+                            <th className="p-3 text-right">Physical Dip Stock</th>
+                            <th className="p-3 text-right">Variance L</th>
                           </tr>
-                        ) : (
-                          stockHistory.map((s: any, idx: number) => (
-                            <tr key={idx} className="hover:bg-slate-950/20">
-                              <td className="p-3 text-slate-350" suppressHydrationWarning>{new Date(s.timestamp).toLocaleString()}</td>
-                              <td className="p-3 font-semibold text-slate-200">{s.fuelType}</td>
-                              <td className="p-3 text-right font-mono text-slate-350">{s.openingStock.toFixed(2)} L</td>
-                              <td className="p-3 text-right font-mono text-slate-350">{s.receipts.toFixed(2)} L</td>
-                              <td className="p-3 text-right font-mono text-slate-350">{s.sales.toFixed(2)} L</td>
-                              <td className="p-3 text-right font-mono text-slate-350">{s.expectedClosing.toFixed(2)} L</td>
-                              <td className="p-3 text-right font-mono font-bold text-white">{s.physicalDip.toFixed(2)} L</td>
-                              <td className={`p-3 text-right font-mono font-bold ${s.variance < 0 ? 'text-red-405' : 'text-slate-200'
-                                }`}>{s.variance < 0 ? `Shortage: ${Math.abs(s.variance).toFixed(2)} L` : `${s.variance.toFixed(2)} L`}</td>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/40">
+                          {stockHistory.length === 0 ? (
+                            <tr>
+                              <td colSpan={8} className="p-4 text-center text-slate-500">No stock reports recorded yet.</td>
                             </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
+                          ) : (
+                            stockHistory.map((s: any, idx: number) => (
+                              <tr key={idx} className="hover:bg-slate-950/20">
+                                <td className="p-3 text-slate-350" suppressHydrationWarning>{new Date(s.timestamp).toLocaleString()}</td>
+                                <td className="p-3 font-semibold text-slate-200">{s.fuelType}</td>
+                                <td className="p-3 text-right font-mono text-slate-350">{s.openingStock.toFixed(2)} L</td>
+                                <td className="p-3 text-right font-mono text-slate-350">{s.receipts.toFixed(2)} L</td>
+                                <td className="p-3 text-right font-mono text-slate-350">{s.sales.toFixed(2)} L</td>
+                                <td className="p-3 text-right font-mono text-slate-350">{s.expectedClosing.toFixed(2)} L</td>
+                                <td className="p-3 text-right font-mono font-bold text-white">{s.physicalDip.toFixed(2)} L</td>
+                                <td className={`p-3 text-right font-mono font-bold ${s.variance < 0 ? 'text-red-405' : 'text-slate-200'
+                                  }`}>{s.variance < 0 ? `Shortage: ${Math.abs(s.variance).toFixed(2)} L` : `${s.variance.toFixed(2)} L`}</td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              )}
 
               {/* CASH REPORT SUB-TAB */}
               {reportsTab === 'cash' && (
@@ -5345,6 +6357,35 @@ export default function DashboardContainer({
                       className="block w-full rounded-lg border border-slate-700 bg-slate-950 py-2 px-3 mt-1 text-xs text-slate-100 focus:border-indigo-500 focus:outline-none font-mono"
                     />
                   </div>
+
+                  {activeDuty && activeDuty.status === 'OPEN' && (
+                    <div className="bg-slate-950 p-3 rounded-xl border border-indigo-500/30 space-y-2">
+                      <span className="text-[10px] font-extrabold text-indigo-400 uppercase tracking-wider block">
+                        Active Duty Nozzle Checkpoint Reading (Optional)
+                      </span>
+                      <p className="text-[10px] text-slate-400">
+                        Enter nozzle reading at effective time to lock Period 1 at current rate.
+                      </p>
+                      <div className="space-y-2 pt-1 font-mono">
+                        {activeDuty.meterReadings
+                          .filter((mr: any) => mr.gun?.fuelType === priceFuelType)
+                          .map((mr: any) => (
+                            <div key={mr.gunId} className="flex justify-between items-center text-xs">
+                              <span className="text-slate-300 font-sans font-bold">{mr.gun.name}:</span>
+                              <input
+                                type="number"
+                                step="0.01"
+                                placeholder={`Current: ${mr.currentReading || mr.previousReading}`}
+                                value={checkpointInputs[mr.gunId] !== undefined ? checkpointInputs[mr.gunId] : ''}
+                                onChange={(e) => setCheckpointInputs({ ...checkpointInputs, [mr.gunId]: Number(e.target.value) })}
+                                className="w-32 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-white text-right focus:border-indigo-500 focus:outline-none font-bold text-amber-300"
+                              />
+                            </div>
+                          ))}
+                      </div>
+                    </div>
+                  )}
+
                   <button
                     type="submit"
                     className="w-full py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition-all shadow-md"
@@ -5918,11 +6959,10 @@ export default function DashboardContainer({
                             required
                             value={msDensityInput}
                             onChange={(e) => setMsDensityInput(e.target.value)}
-                            className={`w-full rounded-lg border bg-slate-950 py-2.5 px-3 text-sm text-white font-mono font-bold focus:outline-none ${
-                              msDensityInput !== '' && (Number(msDensityInput) < 710 || Number(msDensityInput) > 780)
+                            className={`w-full rounded-lg border bg-slate-950 py-2.5 px-3 text-sm text-white font-mono font-bold focus:outline-none ${msDensityInput !== '' && (Number(msDensityInput) < 710 || Number(msDensityInput) > 780)
                                 ? 'border-red-500 text-red-400 focus:border-red-400'
                                 : 'border-slate-700 focus:border-amber-400'
-                            }`}
+                              }`}
                             placeholder="e.g. 750.0"
                           />
                           <span className="absolute right-3 top-2.5 text-xs text-slate-400 font-mono">kg/m³ @ 15°C</span>
@@ -5950,11 +6990,10 @@ export default function DashboardContainer({
                             required
                             value={hsdDensityInput}
                             onChange={(e) => setHsdDensityInput(e.target.value)}
-                            className={`w-full rounded-lg border bg-slate-950 py-2.5 px-3 text-sm text-white font-mono font-bold focus:outline-none ${
-                              hsdDensityInput !== '' && (Number(hsdDensityInput) < 810 || Number(hsdDensityInput) > 870)
+                            className={`w-full rounded-lg border bg-slate-950 py-2.5 px-3 text-sm text-white font-mono font-bold focus:outline-none ${hsdDensityInput !== '' && (Number(hsdDensityInput) < 810 || Number(hsdDensityInput) > 870)
                                 ? 'border-red-500 text-red-400 focus:border-red-400'
                                 : 'border-slate-700 focus:border-emerald-400'
-                            }`}
+                              }`}
                             placeholder="e.g. 842.0"
                           />
                           <span className="absolute right-3 top-2.5 text-xs text-slate-400 font-mono">kg/m³ @ 15°C</span>
@@ -5981,65 +7020,198 @@ export default function DashboardContainer({
                         <tr className="border-b border-slate-850 text-slate-400 uppercase font-bold text-[10px]">
                           <th className="p-2.5">Gun</th>
                           <th className="p-2.5">Duty Staff</th>
-                          <th className="p-2.5 text-right">Opening</th>
-                          <th className="p-2.5 text-right">Closing</th>
-                          <th className="p-2.5 text-right">Litres Sold</th>
+                          <th className="p-2.5 text-right">Original Opening</th>
+                          <th className="p-2.5 text-right">Latest Checkpoint</th>
+                          <th className="p-2.5 text-right">Final Closing</th>
+                          <th className="p-2.5 text-right">Total Litres</th>
                           <th className="p-2.5 text-right">Price</th>
-                          <th className="p-2.5 text-right">Sales</th>
+                          <th className="p-2.5 text-right">Total Sales</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-800/40 font-mono">
                         {getSortedReadings(activeDuty.meterReadings).map((mr: any, idx: number) => {
-                          const prevVal = openingReadings[mr.gunId] !== undefined ? openingReadings[mr.gunId] : mr.previousReading;
-                          const currentVal = closingReadings[mr.gunId] !== undefined ? closingReadings[mr.gunId] : mr.currentReading;
+                          const prevVal = (openingReadings[mr.gunId] !== undefined && !isNaN(Number(openingReadings[mr.gunId])))
+                            ? Number(openingReadings[mr.gunId])
+                            : mr.previousReading;
+
+                          const currentVal = (closingReadings[mr.gunId] !== undefined && !isNaN(Number(closingReadings[mr.gunId])))
+                            ? Number(closingReadings[mr.gunId])
+                            : (mr.currentReading > 0 ? mr.currentReading : mr.previousReading);
+
                           const litres = Math.max(0, currentVal - prevVal);
-                          const sales = litres * mr.priceUsed;
+
+                          const hasIntervals = mr.intervals && mr.intervals.length > 0;
+                          let sales = 0;
+                          const intervalDetails: Array<{ periodName: string; start: number; end: number; litres: number; price: number; amount: number }> = [];
+
+                          if (hasIntervals && mr.intervals.length > 1) {
+                            sales = mr.intervals.reduce((sum: number, inv: any, iIdx: number) => {
+                              const isLast = iIdx === mr.intervals.length - 1;
+                              const invEnd = isLast ? currentVal : inv.endReading;
+                              const invLitres = Math.max(0, invEnd - inv.startReading);
+                              const invAmount = invLitres * inv.priceUsed;
+                              intervalDetails.push({
+                                periodName: `Price Period ${iIdx + 1}`,
+                                start: inv.startReading,
+                                end: invEnd,
+                                litres: invLitres,
+                                price: inv.priceUsed,
+                                amount: invAmount,
+                              });
+                              return sum + invAmount;
+                            }, 0);
+                          } else {
+                            // Check if an intermediate checkpoint reading exists before final closing
+                            const checkpointReading = (hasIntervals && mr.intervals.length === 1)
+                              ? mr.intervals[0].endReading
+                              : (mr.currentReading > mr.previousReading && mr.currentReading < currentVal ? mr.currentReading : null);
+
+                            if (checkpointReading !== null && checkpointReading > prevVal && checkpointReading < currentVal) {
+                              const p1Price = (hasIntervals && mr.intervals.length === 1) ? mr.intervals[0].priceUsed : (mr.initialPrice || mr.priceUsed);
+                              const p2Price = mr.priceUsed;
+                              
+                              const litres1 = Math.max(0, checkpointReading - prevVal);
+                              const amount1 = litres1 * p1Price;
+
+                              const litres2 = Math.max(0, currentVal - checkpointReading);
+                              const amount2 = litres2 * p2Price;
+
+                              sales = amount1 + amount2;
+                              intervalDetails.push({
+                                periodName: 'Price Period 1 (Pre-Revision)',
+                                start: prevVal,
+                                end: checkpointReading,
+                                litres: litres1,
+                                price: p1Price,
+                                amount: amount1,
+                              });
+                              intervalDetails.push({
+                                periodName: 'Price Period 2 (Post-Revision)',
+                                start: checkpointReading,
+                                end: currentVal,
+                                litres: litres2,
+                                price: p2Price,
+                                amount: amount2,
+                              });
+                            } else {
+                              const activePrice = (hasIntervals && mr.intervals.length === 1) ? mr.intervals[0].priceUsed : mr.priceUsed;
+                              sales = litres * activePrice;
+                              intervalDetails.push({
+                                periodName: 'Price Period 1',
+                                start: prevVal,
+                                end: currentVal,
+                                litres: litres,
+                                price: activePrice,
+                                amount: sales,
+                              });
+                            }
+                          }
+
+                          const latestCheckpointVal = (hasIntervals && mr.intervals.length > 1)
+                            ? mr.intervals[mr.intervals.length - 1].startReading
+                            : (mr.currentReading > mr.previousReading ? mr.currentReading : null);
+
                           const isOwner = session?.role === 'OWNER';
                           const assignedStaff = getAssignedStaffForGun(activeDuty, mr.gun);
 
                           return (
-                            <tr key={idx} className="hover:bg-slate-900/50">
-                              <td className="p-2.5 font-sans font-bold text-slate-200">{mr.gun.name} <span className="text-[10px] text-slate-500 font-normal">({mr.gun.fuelType})</span></td>
-                              <td className="p-2.5 font-sans font-semibold text-emerald-400 text-xs">{assignedStaff}</td>
-                              <td className="p-2.5 text-right">
-                                {isOwner ? (
+                            <React.Fragment key={idx}>
+                              <tr className="hover:bg-slate-900/50">
+                                <td className="p-2.5 font-sans font-bold text-slate-200">
+                                  {mr.gun.name} <span className="text-[10px] text-slate-500 font-normal">({mr.gun.fuelType})</span>
+                                </td>
+                                <td className="p-2.5 font-sans font-semibold text-emerald-400 text-xs">{assignedStaff}</td>
+                                <td className="p-2.5 text-right">
+                                  {isOwner ? (
+                                    <input
+                                      type="number"
+                                      step="0.01"
+                                      value={openingReadings[mr.gunId] !== undefined ? openingReadings[mr.gunId] : mr.previousReading}
+                                      onChange={(e) => {
+                                        setOpeningReadings({
+                                          ...openingReadings,
+                                          [mr.gunId]: Number(e.target.value),
+                                        });
+                                      }}
+                                      className="w-24 rounded border border-amber-500/60 bg-slate-950 py-1 px-2 text-xs font-mono font-bold text-amber-300 text-right focus:border-amber-400 focus:outline-none"
+                                      title="Owner Privilege: Edit Original Opening Meter Reading"
+                                    />
+                                  ) : (
+                                    <span className="text-slate-400 font-mono font-bold">{mr.previousReading.toFixed(2)}</span>
+                                  )}
+                                </td>
+                                <td className="p-2.5 text-right font-mono">
+                                  {latestCheckpointVal !== null ? (
+                                    <span className="text-amber-300 font-bold bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 text-xs" title="Persisted Checkpoint Reading">
+                                      {latestCheckpointVal.toFixed(2)} 📌
+                                    </span>
+                                  ) : (
+                                    <span className="text-slate-600">-</span>
+                                  )}
+                                </td>
+                                <td className="p-2.5 text-right">
                                   <input
+                                    id={`closing-reading-${mr.gunId}`}
                                     type="number"
                                     step="0.01"
-                                    value={openingReadings[mr.gunId] !== undefined ? openingReadings[mr.gunId] : mr.previousReading}
+                                    placeholder={mr.currentReading > 0 ? mr.currentReading.toString() : mr.previousReading.toString()}
+                                    value={closingReadings[mr.gunId] !== undefined ? closingReadings[mr.gunId] : (mr.currentReading > 0 ? mr.currentReading : '')}
                                     onChange={(e) => {
-                                      setOpeningReadings({
-                                        ...openingReadings,
-                                        [mr.gunId]: Number(e.target.value),
+                                      setClosingReadings({
+                                        ...closingReadings,
+                                        [mr.gunId]: e.target.value === '' ? '' : Number(e.target.value),
                                       });
                                     }}
-                                    className="w-28 rounded border border-amber-500/60 bg-slate-950 py-1 px-2 text-xs font-mono font-bold text-amber-300 text-right focus:border-amber-400 focus:outline-none"
-                                    title="Owner Privilege: Edit Opening Meter Reading"
+                                    className="w-28 rounded border border-indigo-500/50 bg-slate-900 py-1 px-2 text-xs font-mono font-bold text-white text-right focus:border-indigo-400 focus:outline-none"
                                   />
-                                ) : (
-                                  <span className="text-slate-400 font-mono">{mr.previousReading.toFixed(2)}</span>
-                                )}
-                              </td>
-                              <td className="p-2.5 text-right">
-                                <input
-                                  type="number"
-                                  step="0.01"
-                                  value={closingReadings[mr.gunId] !== undefined ? closingReadings[mr.gunId] : ''}
-                                  onChange={(e) => {
-                                    setClosingReadings({
-                                      ...closingReadings,
-                                      [mr.gunId]: Number(e.target.value),
-                                    });
-                                  }}
-                                  className="w-28 rounded border border-slate-700 bg-slate-900 py-1 px-2 text-xs font-mono font-bold text-white text-right focus:border-indigo-500 focus:outline-none"
-                                />
-                              </td>
-                              <td className="p-2.5 text-right text-white font-bold">{litres.toFixed(2)} L</td>
-                              <td className="p-2.5 text-right text-slate-400">₹{mr.priceUsed.toFixed(2)}</td>
-                              <td className="p-2.5 text-right font-bold text-indigo-400">
-                                ₹{sales.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                              </td>
-                            </tr>
+                                </td>
+                                <td className="p-2.5 text-right text-white font-bold">{litres.toFixed(2)} L</td>
+                                <td className="p-2.5 text-right text-slate-400">
+                                  {intervalDetails.length > 1 ? (
+                                    <span
+                                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-300 border border-amber-500/30 cursor-help"
+                                      title={intervalDetails.map((inv: any, i: number) => `${inv.periodName}: ${inv.start.toFixed(2)} -> ${inv.end.toFixed(2)} @ ₹${inv.price.toFixed(2)}`).join('\n')}
+                                    >
+                                      Split (₹{intervalDetails[0].price.toFixed(2)} / ₹{intervalDetails[intervalDetails.length - 1].price.toFixed(2)})
+                                    </span>
+                                  ) : (
+                                    <span>₹{mr.priceUsed.toFixed(2)}</span>
+                                  )}
+                                </td>
+                                <td className="p-2.5 text-right font-bold text-indigo-400">
+                                  ₹{sales.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </td>
+                              </tr>
+
+                              {/* Multi-Interval Period Breakdown Card */}
+                              {intervalDetails.length > 1 && (
+                                <tr className="bg-slate-950/80">
+                                  <td colSpan={8} className="p-3 pl-8 border-b border-slate-800">
+                                    <div className="bg-slate-900/90 rounded-xl p-3 border border-amber-500/20 space-y-2">
+                                      <span className="text-[10px] font-extrabold text-amber-400 uppercase tracking-wider block">
+                                        ⚡ Multi-Interval Price Change Breakdown for {mr.gun.name}:
+                                      </span>
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 text-xs">
+                                        {intervalDetails.map((det, dIdx) => (
+                                          <div key={dIdx} className="bg-slate-950 p-2 rounded-lg border border-slate-800 space-y-1">
+                                            <div className="flex justify-between items-center text-[10px]">
+                                              <span className="font-bold text-indigo-300">{det.periodName}</span>
+                                              <span className="text-amber-400 font-mono font-bold">₹{det.price.toFixed(2)}/L</span>
+                                            </div>
+                                            <div className="text-[11px] font-mono text-slate-300">
+                                              {det.start.toFixed(2)} &rarr; {det.end.toFixed(2)} = <strong className="text-white">{det.litres.toFixed(2)} L</strong>
+                                            </div>
+                                            <div className="text-[10px] text-right font-mono font-extrabold text-emerald-400">
+                                              ₹{det.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </React.Fragment>
                           );
                         })}
                       </tbody>
@@ -6186,11 +7358,10 @@ export default function DashboardContainer({
                           </div>
                           <div className="flex justify-between text-slate-400 border-t border-slate-850 pt-1">
                             <span>VARIATION:</span>
-                            <span className={`font-mono font-bold ${
-                              msMetrics.stockVariation === null ? 'text-slate-400 font-normal italic' :
-                              msMetrics.stockVariation < -0.01 ? 'text-red-400' :
-                              msMetrics.stockVariation > 0.01 ? 'text-emerald-400' : 'text-slate-300'
-                            }`}>
+                            <span className={`font-mono font-bold ${msMetrics.stockVariation === null ? 'text-slate-400 font-normal italic' :
+                                msMetrics.stockVariation < -0.01 ? 'text-red-400' :
+                                  msMetrics.stockVariation > 0.01 ? 'text-emerald-400' : 'text-slate-300'
+                              }`}>
                               {msMetrics.variationText}
                             </span>
                           </div>
@@ -6322,11 +7493,10 @@ export default function DashboardContainer({
                           </div>
                           <div className="flex justify-between text-slate-400 border-t border-slate-850 pt-1">
                             <span>VARIATION:</span>
-                            <span className={`font-mono font-bold ${
-                              hsdMetrics.stockVariation === null ? 'text-slate-400 font-normal italic' :
-                              hsdMetrics.stockVariation < -0.01 ? 'text-red-400' :
-                              hsdMetrics.stockVariation > 0.01 ? 'text-emerald-400' : 'text-slate-300'
-                            }`}>
+                            <span className={`font-mono font-bold ${hsdMetrics.stockVariation === null ? 'text-slate-400 font-normal italic' :
+                                hsdMetrics.stockVariation < -0.01 ? 'text-red-400' :
+                                  hsdMetrics.stockVariation > 0.01 ? 'text-emerald-400' : 'text-slate-300'
+                              }`}>
                               {hsdMetrics.variationText}
                             </span>
                           </div>
@@ -6351,17 +7521,71 @@ export default function DashboardContainer({
                     <div className="text-[10px] text-slate-500 font-mono">Testing Value: MS ₹{msTestingValue.toFixed(2)} + HSD ₹{hsdTestingValue.toFixed(2)} = ₹{totalTestingValue.toFixed(2)}</div>
                   </div>
 
+                  {/* Paid Sample Box / Load Sale Input (Revenue Generating) */}
+                  <div className="bg-slate-950 border border-slate-850 p-4 rounded-xl space-y-3">
+                    <div className="flex justify-between items-center border-b border-slate-900 pb-2">
+                      <span className="text-xs font-extrabold text-emerald-400 uppercase tracking-wider block">PAID SAMPLE BOX / LOAD SALE (REVENUE)</span>
+                      <span className="text-[10px] bg-emerald-950 text-emerald-300 font-mono px-2 py-0.5 rounded border border-emerald-800 font-bold">
+                        Total: ₹{sampleBoxSalesTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    </div>
+
+                    {activeDuty?.sampleBoxSales?.length > 0 && (
+                      <div className="space-y-1">
+                        {activeDuty.sampleBoxSales.map((s: any, i: number) => (
+                          <div key={s.id || i} className="flex justify-between items-center text-[10px] text-slate-300 bg-slate-900/60 rounded px-2.5 py-1.5 border border-slate-800">
+                            <div>
+                              <span className="font-bold text-white mr-2">{s.fuelType} Sample Box:</span>
+                              <span className="font-mono">{s.quantity} L × ₹{s.unitPrice.toFixed(2)} = ₹{s.totalAmount.toFixed(2)}</span>
+                              {s.notes && <span className="text-slate-400 ml-2 italic">({s.notes})</span>}
+                            </div>
+                            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleDeleteSampleBoxSale(s.id); }} className="text-red-400 hover:text-red-300 p-1 rounded hover:bg-red-950/40 transition-colors" title="Delete Sample Box Sale">
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <form onSubmit={handleRecordSampleBoxSale} className="grid grid-cols-4 gap-2 items-end">
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase">Fuel Type</label>
+                        <select value={sampleBoxFuelType} onChange={(e) => setSampleBoxFuelType(e.target.value as 'MS' | 'HSD')} className="block w-full rounded border border-slate-700 bg-slate-900 py-1.5 px-2 mt-1 text-xs text-white font-semibold focus:border-emerald-500 focus:outline-none">
+                          <option value="MS">MS (Petrol)</option>
+                          <option value="HSD">HSD (Diesel)</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase">Litres Sold</label>
+                        <input type="number" step="0.01" min="0.1" required value={sampleBoxQty} onChange={(e) => setSampleBoxQty(e.target.value)} className="block w-full rounded border border-slate-700 bg-slate-900 py-1.5 px-2 mt-1 text-xs text-white font-mono focus:border-emerald-500 focus:outline-none" placeholder="20.0" />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase">Notes / Ref</label>
+                        <input type="text" value={sampleBoxNotes} onChange={(e) => setSampleBoxNotes(e.target.value)} className="block w-full rounded border border-slate-700 bg-slate-900 py-1.5 px-2 mt-1 text-xs text-white focus:border-emerald-500 focus:outline-none" placeholder="Box #1 / Customer" />
+                      </div>
+                      <button type="submit" disabled={sampleBoxLoading} className="py-1.5 px-2 rounded bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] transition-colors flex items-center justify-center gap-1">
+                        <Plus className="h-3 w-3" /> Record Sale
+                      </button>
+                    </form>
+                  </div>
+
                   {/* Revenue Summary (ACC Book) */}
                   <div className="bg-slate-950 border border-slate-850 p-4 rounded-xl space-y-2 text-xs">
                     <span className="text-xs font-extrabold text-white uppercase tracking-wider block border-b border-slate-900 pb-2">DAILY FUEL & OIL SALES BREAKDOWN</span>
                     <div className="flex justify-between text-slate-400 font-sans">
-                      <span>MS SALES ({msLitresRaw.toFixed(2)} L - {msTestingLitres} L Test = {msActualLitres.toFixed(2)} L × ₹{msPrice.toFixed(2)})</span>
+                      <span>MS METER SALES ({msLitresRaw.toFixed(2)} L - {msTestingLitres} L Test = {msActualLitres.toFixed(2)} L × ₹{msPrice.toFixed(2)})</span>
                       <span className="font-mono font-bold text-emerald-400">₹{totalMsSalesAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                     </div>
                     <div className="flex justify-between text-slate-400 font-sans">
-                      <span>HSD SALES ({hsdLitresRaw.toFixed(2)} L - {hsdTestingLitres} L Test = {hsdActualLitres.toFixed(2)} L × ₹{hsdPrice.toFixed(2)})</span>
+                      <span>HSD METER SALES ({hsdLitresRaw.toFixed(2)} L - {hsdTestingLitres} L Test = {hsdActualLitres.toFixed(2)} L × ₹{hsdPrice.toFixed(2)})</span>
                       <span className="font-mono font-bold text-sky-400">₹{totalHsdSalesAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                     </div>
+                    {sampleBoxSalesTotal > 0 && (
+                      <div className="flex justify-between text-slate-400 font-sans">
+                        <span>PAID SAMPLE BOX / LOAD SALES ({sampleBoxLitresTotal.toFixed(2)} L)</span>
+                        <span className="font-mono font-bold text-emerald-400">+₹{sampleBoxSalesTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                      </div>
+                    )}
                     <div className="flex justify-between text-slate-400 font-sans border-t border-slate-900 pt-1.5">
                       <span>TOTAL FUEL SALES ({dynamicFuelLitresTotal.toFixed(2)} L)</span>
                       <span className="font-mono font-bold text-indigo-400">₹{dynamicFuelSalesTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
@@ -6448,7 +7672,7 @@ export default function DashboardContainer({
                             </div>
                             <div className="flex items-center gap-3 shrink-0">
                               <span className="font-mono font-bold text-white">₹{ct.amount.toFixed(2)}</span>
-                              <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleDeleteCredit(ct.id); }} className="text-red-500 hover:text-red-400 p-1 rounded hover:bg-red-950/30 transition-colors" title="Delete Credit Entry">
+                              <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleDeleteCredit(ct); }} className="text-red-500 hover:text-red-400 p-1 rounded hover:bg-red-950/30 transition-colors" title="Delete Credit Entry">
                                 <Trash2 className="h-3.5 w-3.5" />
                               </button>
                             </div>
@@ -6594,14 +7818,14 @@ export default function DashboardContainer({
                           <span className="font-mono font-bold text-emerald-400">+₹{creditCollectionsCash.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                         </div>
                         <div className="flex justify-between border-t border-slate-800 pt-1 text-xs font-bold text-emerald-300 font-sans">
-                          <span>GROSS REVENUE:</span>
+                          <span>TOTAL CASH REVENUE GENERATED:</span>
                           <span className="font-mono">₹{grossRevenueInflow.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                         </div>
                       </div>
 
                       {/* 2. DEDUCTIONS / DEBIT (NON-CASH) */}
                       <div className="space-y-1.5 bg-slate-900/60 p-3 rounded-lg border border-slate-850">
-                        <span className="text-[10px] font-bold text-red-400 uppercase tracking-wider block border-b border-slate-880 pb-1">2. DEDUCTIONS / DEBIT (NON-CASH)</span>
+                        <span className="text-[10px] font-bold text-red-400 uppercase tracking-wider block border-b border-slate-880 pb-1">2. TOTAL DEDUCTIONS</span>
                         <div className="flex justify-between text-slate-300 font-sans">
                           <span className="font-semibold text-amber-300">Credit Given (Debit):</span>
                           <span className="font-mono font-bold text-amber-400">-₹{creditSalesAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
@@ -6615,17 +7839,17 @@ export default function DashboardContainer({
                           <span className="font-mono font-bold text-red-400">-₹{expensesPaidInCash.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                         </div>
                         <div className="flex justify-between border-t border-slate-800 pt-1 text-xs font-bold text-red-300 font-sans">
-                          <span>TOTAL DEBITS / DEDUCTIONS:</span>
+                          <span>TOTAL DEDUCTIONS:</span>
                           <span className="font-mono">₹{totalDeductions.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                         </div>
                       </div>
                     </div>
 
-                    {/* NET EXPECTED CASH */}
+                    {/* EXPECTED PHYSICAL CASH */}
                     <div className="bg-indigo-950/40 border border-indigo-850 p-3 rounded-lg flex justify-between items-center text-xs">
                       <div>
-                        <span className="font-extrabold text-indigo-200 block uppercase">NET EXPECTED CASH</span>
-                        <span className="text-[10px] text-slate-400 font-sans">Gross Revenue (including collections) - Deductions (Credit Sales, Digital & Expenses)</span>
+                        <span className="font-extrabold text-indigo-200 block uppercase">EXPECTED PHYSICAL CASH</span>
+                        <span className="text-[10px] text-slate-400 font-sans">Total Cash Revenue Generated &minus; Total Deductions</span>
                       </div>
                       <span className="font-mono text-base font-extrabold text-indigo-300">
                         ₹{expectedCash.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -6695,6 +7919,7 @@ export default function DashboardContainer({
                           <div>
                             <label className="block text-[10px] font-bold text-slate-300 uppercase mb-1">Staff Member Responsible *</label>
                             <select
+                              id="shortage-staff-select"
                               required
                               value={shortageStaffId}
                               onChange={(e) => setShortageStaffId(e.target.value)}
@@ -6721,80 +7946,6 @@ export default function DashboardContainer({
                         </div>
                       </div>
                     )}
-
-                    {/* DENSITY AT 15°C INPUTS */}
-                    <div className="bg-slate-950 border border-slate-800 p-5 rounded-xl space-y-4 text-xs mt-4">
-                      <span className="text-xs font-extrabold text-blue-400 uppercase tracking-wider block border-b border-slate-850 pb-2 flex justify-between items-center">
-                        <span>FUEL DENSITY RECORDING @ 15°C</span>
-                        <span className="text-[10px] text-slate-400 font-normal">Mandatory Operational Quality Standard</span>
-                      </span>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {/* MS Density */}
-                        <div className="bg-slate-900/80 p-4 rounded-xl border border-amber-500/30 space-y-2">
-                          <div className="flex justify-between items-center">
-                            <label htmlFor="ms-density-input" className="text-xs font-extrabold text-amber-400 uppercase tracking-wider">
-                              MS / PETROL DENSITY *
-                            </label>
-                            <span className="text-[10px] font-mono font-bold text-slate-400">Valid: 710 - 780 kg/m³</span>
-                          </div>
-                          <div className="relative">
-                            <input
-                              id="ms-density-input"
-                              type="number"
-                              step="0.1"
-                              required
-                              value={msDensityInput}
-                              onChange={(e) => setMsDensityInput(e.target.value)}
-                              className={`w-full rounded-lg border bg-slate-950 py-2.5 px-3 text-sm text-white font-mono font-bold focus:outline-none ${
-                                msDensityInput !== '' && (Number(msDensityInput) < 710 || Number(msDensityInput) > 780)
-                                  ? 'border-red-500 text-red-400 focus:border-red-400'
-                                  : 'border-slate-700 focus:border-amber-400'
-                              }`}
-                              placeholder="e.g. 750.0"
-                            />
-                            <span className="absolute right-3 top-2.5 text-xs text-slate-400 font-mono">kg/m³ @ 15°C</span>
-                          </div>
-                          {msDensityInput !== '' && (Number(msDensityInput) < 710 || Number(msDensityInput) > 780) && (
-                            <p className="text-[11px] font-bold text-red-400">
-                              ⚠️ MS density must be between 710 and 780 kg/m³ at 15°C.
-                            </p>
-                          )}
-                        </div>
-
-                        {/* HSD Density */}
-                        <div className="bg-slate-900/80 p-4 rounded-xl border border-emerald-500/30 space-y-2">
-                          <div className="flex justify-between items-center">
-                            <label htmlFor="hsd-density-input" className="text-xs font-extrabold text-emerald-400 uppercase tracking-wider">
-                              HSD / DIESEL DENSITY *
-                            </label>
-                            <span className="text-[10px] font-mono font-bold text-slate-400">Valid: 810 - 870 kg/m³</span>
-                          </div>
-                          <div className="relative">
-                            <input
-                              id="hsd-density-input"
-                              type="number"
-                              step="0.1"
-                              required
-                              value={hsdDensityInput}
-                              onChange={(e) => setHsdDensityInput(e.target.value)}
-                              className={`w-full rounded-lg border bg-slate-950 py-2.5 px-3 text-sm text-white font-mono font-bold focus:outline-none ${
-                                hsdDensityInput !== '' && (Number(hsdDensityInput) < 810 || Number(hsdDensityInput) > 870)
-                                  ? 'border-red-500 text-red-400 focus:border-red-400'
-                                  : 'border-slate-700 focus:border-emerald-400'
-                              }`}
-                              placeholder="e.g. 842.0"
-                            />
-                            <span className="absolute right-3 top-2.5 text-xs text-slate-400 font-mono">kg/m³ @ 15°C</span>
-                          </div>
-                          {hsdDensityInput !== '' && (Number(hsdDensityInput) < 810 || Number(hsdDensityInput) > 870) && (
-                            <p className="text-[11px] font-bold text-red-400">
-                              ⚠️ HSD density must be between 810 and 870 kg/m³ at 15°C.
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    </div>
                   </div>
                 </div>
               )}
@@ -6840,7 +7991,20 @@ export default function DashboardContainer({
                             const prevVal = openingReadings[mr.gunId] !== undefined ? openingReadings[mr.gunId] : mr.previousReading;
                             const currentVal = closingReadings[mr.gunId] !== undefined ? closingReadings[mr.gunId] : mr.currentReading;
                             const litres = Math.max(0, currentVal - prevVal);
-                            const sales = litres * mr.priceUsed;
+
+                            const hasIntervals = mr.intervals && mr.intervals.length > 0;
+                            let sales = 0;
+                            if (hasIntervals) {
+                              sales = mr.intervals.reduce((sum: number, inv: any, iIdx: number) => {
+                                const isLast = iIdx === mr.intervals.length - 1;
+                                const invEnd = isLast ? currentVal : inv.endReading;
+                                const invLitres = Math.max(0, invEnd - inv.startReading);
+                                return sum + (invLitres * inv.priceUsed);
+                              }, 0);
+                            } else {
+                              sales = litres * mr.priceUsed;
+                            }
+
                             const pName = mr.gun?.pump?.name || 'Pump 1';
                             const fType = mr.gun?.fuelType || 'MS';
                             const assignedStaff = getAssignedStaffForGun(activeDuty, mr.gun);
@@ -6925,11 +8089,10 @@ export default function DashboardContainer({
                           <div className="flex justify-between text-amber-400 font-black text-sm border-t border-slate-850 pt-1"><span>Final Verified Stock:</span><span>{msMetrics.finalVerifiedStockText}</span></div>
                           <div className="flex justify-between text-slate-400 border-t border-slate-850 pt-1">
                             <span>Stock Variation:</span>
-                            <span className={`font-mono font-bold ${
-                              msMetrics.stockVariation === null ? 'text-slate-400 font-normal italic' :
-                              msMetrics.stockVariation < -0.01 ? 'text-red-400' :
-                              msMetrics.stockVariation > 0.01 ? 'text-emerald-400' : 'text-slate-300'
-                            }`}>
+                            <span className={`font-mono font-bold ${msMetrics.stockVariation === null ? 'text-slate-400 font-normal italic' :
+                                msMetrics.stockVariation < -0.01 ? 'text-red-400' :
+                                  msMetrics.stockVariation > 0.01 ? 'text-emerald-400' : 'text-slate-300'
+                              }`}>
                               {msMetrics.variationText}
                             </span>
                           </div>
@@ -6950,11 +8113,10 @@ export default function DashboardContainer({
                           <div className="flex justify-between text-emerald-400 font-black text-sm border-t border-slate-850 pt-1"><span>Final Verified Stock:</span><span>{hsdMetrics.finalVerifiedStockText}</span></div>
                           <div className="flex justify-between text-slate-400 border-t border-slate-850 pt-1">
                             <span>Stock Variation:</span>
-                            <span className={`font-mono font-bold ${
-                              hsdMetrics.stockVariation === null ? 'text-slate-400 font-normal italic' :
-                              hsdMetrics.stockVariation < -0.01 ? 'text-red-400' :
-                              hsdMetrics.stockVariation > 0.01 ? 'text-emerald-400' : 'text-slate-300'
-                            }`}>
+                            <span className={`font-mono font-bold ${hsdMetrics.stockVariation === null ? 'text-slate-400 font-normal italic' :
+                                hsdMetrics.stockVariation < -0.01 ? 'text-red-400' :
+                                  hsdMetrics.stockVariation > 0.01 ? 'text-emerald-400' : 'text-slate-300'
+                              }`}>
                               {hsdMetrics.variationText}
                             </span>
                           </div>
@@ -7109,17 +8271,34 @@ export default function DashboardContainer({
             </div>
 
             {/* Modal Footer */}
-            <div className="bg-slate-950 px-8 py-5 border-t border-slate-850 flex justify-between items-center">
-              <div>
-                {wizardStep === 'review' && (
+            <div className="bg-slate-950 px-8 py-4 border-t border-slate-850 space-y-3">
+              {errorMessage && (
+                <div className="bg-red-950/90 border border-red-500/80 p-3 rounded-xl flex items-center justify-between gap-3 text-red-200 text-xs font-bold animate-pulse shadow-lg">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 text-red-400 shrink-0" />
+                    <span>⚠️ Validation Required: {errorMessage}</span>
+                  </div>
                   <button
-                    onClick={() => setWizardStep(1)}
-                    className="px-5 py-2.5 rounded-lg border border-slate-700 text-slate-300 hover:text-white text-xs font-bold transition-all"
+                    type="button"
+                    onClick={() => setErrorMessage(null)}
+                    className="text-[10px] text-red-300 hover:text-white underline font-bold shrink-0"
                   >
-                    ← Back / Edit Inputs
+                    Dismiss
                   </button>
-                )}
-              </div>
+                </div>
+              )}
+
+              <div className="flex justify-between items-center">
+                <div>
+                  {wizardStep === 'review' && (
+                    <button
+                      onClick={() => setWizardStep(1)}
+                      className="px-5 py-2.5 rounded-lg border border-slate-700 text-slate-300 hover:text-white text-xs font-bold transition-all"
+                    >
+                      ← Back / Edit Inputs
+                    </button>
+                  )}
+                </div>
 
               <div className="flex gap-4">
                 <button
@@ -7170,6 +8349,7 @@ export default function DashboardContainer({
                 )}
               </div>
             </div>
+          </div>
 
           </div>
         </div>
@@ -7385,7 +8565,7 @@ export default function DashboardContainer({
             startObj.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
           const endStr = d.endTime
             ? new Date(d.endTime).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) + ' ' +
-              new Date(d.endTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
+            new Date(d.endTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
             : 'OPEN';
 
           return {
@@ -7490,6 +8670,88 @@ export default function DashboardContainer({
       })()}
 
 
+      {/* Toast Notification Container */}
+      <ToastNotification toasts={toasts} onDismiss={dismissToast} />
+
+      {/* Guided Walkthrough Tour Modal */}
+      <FirstTimeWalkthroughModal isOpen={tourOpen} onClose={() => setTourOpen(false)} />
+
+      {/* MOBILE BOTTOM NAVIGATION BAR (lg:hidden) */}
+      <nav
+        aria-label="Mobile Bottom Navigation"
+        className="lg:hidden fixed bottom-0 left-0 right-0 h-16 bg-[var(--bg-surface)] border-t border-[var(--border-color)] flex items-center justify-around z-40 px-2 shadow-xl pb-safe transition-colors duration-200"
+      >
+        <button
+          onClick={() => setActiveTab('dashboard')}
+          className={`flex flex-col items-center justify-center gap-1 min-w-[56px] py-1 text-[11px] font-semibold transition-all touch-target-44 ${
+            activeTab === 'dashboard'
+              ? 'text-blue-600 dark:text-blue-400 font-bold'
+              : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+          }`}
+          aria-label="Home Dashboard"
+        >
+          <LayoutDashboard className="h-5 w-5" />
+          <span>Home</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('current-duty')}
+          className={`flex flex-col items-center justify-center gap-1 min-w-[56px] py-1 text-[11px] font-semibold relative transition-all touch-target-44 ${
+            activeTab === 'current-duty'
+              ? 'text-blue-600 dark:text-blue-400 font-bold'
+              : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+          }`}
+          aria-label="Current Duty"
+        >
+          <Activity className="h-5 w-5" />
+          <span>Duty</span>
+          {activeDuty ? (
+            <span className="absolute top-1 right-2.5 h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+          ) : (
+            <span className="absolute top-1 right-2.5 h-1.5 w-1.5 rounded-full bg-red-400" />
+          )}
+        </button>
+
+        <button
+          onClick={() => {
+            setActiveTab('reports');
+            setReportsTab('sales');
+          }}
+          className={`flex flex-col items-center justify-center gap-1 min-w-[56px] py-1 text-[11px] font-semibold transition-all touch-target-44 ${
+            activeTab === 'reports' && reportsTab === 'sales'
+              ? 'text-blue-600 dark:text-blue-400 font-bold'
+              : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+          }`}
+          aria-label="Fuel Sales"
+        >
+          <DollarSign className="h-5 w-5" />
+          <span>Sales</span>
+        </button>
+
+        <button
+          onClick={() => {
+            setActiveTab('reports');
+          }}
+          className={`flex flex-col items-center justify-center gap-1 min-w-[56px] py-1 text-[11px] font-semibold transition-all touch-target-44 ${
+            activeTab === 'reports' && reportsTab !== 'sales'
+              ? 'text-blue-600 dark:text-blue-400 font-bold'
+              : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+          }`}
+          aria-label="All Reports"
+        >
+          <BarChart3 className="h-5 w-5" />
+          <span>Reports</span>
+        </button>
+
+        <button
+          onClick={() => setMobileSidebarOpen(true)}
+          className="flex flex-col items-center justify-center gap-1 min-w-[56px] py-1 text-[11px] font-semibold text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 transition-all touch-target-44"
+          aria-label="Open Full Menu"
+        >
+          <Menu className="h-5 w-5" />
+          <span>Menu</span>
+        </button>
+      </nav>
     </div>
   );
 }

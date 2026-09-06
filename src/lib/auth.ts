@@ -64,10 +64,11 @@ export async function loginUser(username: string, passwordHash: string): Promise
     role: user.role.name as 'OWNER' | 'MANAGER',
   };
 
+  const isSecure = process.env.NODE_ENV === 'production' && process.env.NEXTAUTH_URL?.startsWith('https');
   const cookieStore = await cookies();
-  cookieStore.set('auth_user_id', sessionUser.id, { httpOnly: true, secure: true, sameSite: 'strict', maxAge: 60 * 60 * 24 });
-  cookieStore.set('auth_role', sessionUser.role, { httpOnly: true, secure: true, sameSite: 'strict', maxAge: 60 * 60 * 24 });
-  cookieStore.set('auth_username', sessionUser.username, { httpOnly: true, secure: true, sameSite: 'strict', maxAge: 60 * 60 * 24 });
+  cookieStore.set('auth_user_id', sessionUser.id, { httpOnly: true, secure: Boolean(isSecure), sameSite: 'lax', path: '/', maxAge: 60 * 60 * 24 });
+  cookieStore.set('auth_role', sessionUser.role, { httpOnly: true, secure: Boolean(isSecure), sameSite: 'lax', path: '/', maxAge: 60 * 60 * 24 });
+  cookieStore.set('auth_username', sessionUser.username, { httpOnly: true, secure: Boolean(isSecure), sameSite: 'lax', path: '/', maxAge: 60 * 60 * 24 });
 
   return sessionUser;
 }

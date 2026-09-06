@@ -24,6 +24,7 @@ model User {
 
   dutySessions        DutySession[]
   oilSales            OilSale[]
+  sampleBoxSales      SampleBoxSale[]
   expenses            Expense[]
   creditTransactions  CreditTransaction[]
   auditLogs           AuditLog[]
@@ -96,6 +97,7 @@ model DutySession {
   assignments         DutyAssignment[]
   meterReadings       MeterReading[]
   oilSales            OilSale[]
+  sampleBoxSales      SampleBoxSale[]
   expenses            Expense[]
   creditTransactions  CreditTransaction[]
   tankDips            TankDip[]
@@ -134,18 +136,33 @@ model DutyAssignment {
 }
 
 model MeterReading {
-  id              String      @id @default(uuid())
+  id              String                 @id @default(uuid())
   dutySessionId   String
-  dutySession     DutySession @relation(fields: [dutySessionId], references: [id], onDelete: Cascade)
+  dutySession     DutySession            @relation(fields: [dutySessionId], references: [id], onDelete: Cascade)
   gunId           String
-  gun             Gun         @relation(fields: [gunId], references: [id])
+  gun             Gun                    @relation(fields: [gunId], references: [id])
   previousReading Float
   currentReading  Float
   litresSold      Float
   priceUsed       Float
   salesAmount     Float
+  intervals       MeterReadingInterval[]
 
   @@unique([dutySessionId, gunId])
+}
+
+model MeterReadingInterval {
+  id               String       @id @default(uuid())
+  meterReadingId   String
+  meterReading     MeterReading @relation(fields: [meterReadingId], references: [id], onDelete: Cascade)
+  startReading     Float
+  endReading       Float
+  litresSold       Float
+  priceUsed        Float
+  salesAmount      Float
+  effectiveFrom    DateTime     @default(now())
+  checkpointReason String?      // e.g. "MID_DUTY_PRICE_CHANGE"
+  createdAt        DateTime     @default(now())
 }
 
 model FuelPrice {
@@ -248,11 +265,11 @@ model Customer {
 }
 
 model CreditTransaction {
-  id              String      @id @default(uuid())
+  id              String       @id @default(uuid())
   customerId      String
-  customer        Customer    @relation(fields: [customerId], references: [id])
-  dutySessionId   String
-  dutySession     DutySession @relation(fields: [dutySessionId], references: [id], onDelete: Cascade)
+  customer        Customer     @relation(fields: [customerId], references: [id])
+  dutySessionId   String?
+  dutySession     DutySession? @relation(fields: [dutySessionId], references: [id], onDelete: Cascade)
   transactionType String      // CREDIT_SALE (increases balance), COLLECTION (decreases balance)
   indentNumber    String?
   productName     String?
@@ -260,6 +277,10 @@ model CreditTransaction {
   unitPrice       Float?
   amount          Float
   description     String?
+  paymentMethod   String?     @default("CASH") // CASH, CHEQUE, RTGS, NEFT, UPI, BANK_TRANSFER, OTHER
+  paymentReference String?    // Cheque No, UTR, Transaction ID
+  bankName        String?     // Bank Name for Cheque/RTGS/NEFT/Transfer
+  paymentDate     DateTime?   // Transaction Date / Cheque Date
   enteredById     String
   enteredBy       User        @relation(fields: [enteredById], references: [id])
   timestamp       DateTime    @default(now())
@@ -385,3 +406,19 @@ model FuelInventory {
   currentStock Float    @default(0.0)
   updatedAt    DateTime @updatedAt
 }
+
+model SampleBoxSale {
+  id            String      @id @default(uuid())
+  dutySessionId String
+  dutySession   DutySession @relation(fields: [dutySessionId], references: [id], onDelete: Cascade)
+  fuelType      String      // "MS" or "HSD"
+  quantity      Float       // Litres
+  unitPrice     Float       // Price per litre
+  totalAmount   Float       // quantity * unitPrice
+  notes         String?     // e.g. "Sample Box #1" or "Paid Load Sale"
+  paymentMethod String      @default("CASH")
+  enteredById   String
+  enteredBy     User        @relation(fields: [enteredById], references: [id])
+  timestamp     DateTime    @default(now())
+}
+
