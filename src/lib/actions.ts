@@ -4,6 +4,13 @@ import { db } from './db';
 import { getSession, hashPassword, requireAuth, loginUser, logoutUser } from './auth';
 import { revalidatePath } from 'next/cache';
 import { calculateStockMetrics } from '@/lib/stockCalculations';
+import { sendLowFuelStockAlert, sendDutyClosingReport, sendTestEmail, diagnoseSmtpConfig, LOW_FUEL_THRESHOLD_LITRES, DutyClosingReportData, ensureDefaultEmailRecipientsMigrated } from '@/lib/email';
+import { calculateDutySettlement } from '@/lib/settlement';
+
+const TX_OPTIONS = { maxWait: 20000, timeout: 60000 };
+
+
+
 
 // Helper to log audit events
 async function logAudit(userId: string, action: string, recordType: string, recordId: string, oldValue?: string, newValue?: string) {
@@ -229,36 +236,67 @@ export async function toggleStaffStatusAction(id: string, active: boolean) {
 
 export async function deleteStaffAction(id: string) {
   const session = await requireAuth(['OWNER']);
-  const assignmentCount = await db.dutyAssignment.count({ where: { staffId: id } });
+  const staff = await db.staff.findUnique({ where: { id } });
+  if (!staff) throw new Error('Staff member not found.');
 
-  if (assignmentCount > 0) {
-    // Soft delete / Deactivate to preserve historical records
-    await db.staff.update({
-      where: { id },
-      data: { active: false },
+  await db.$transaction(async (tx) => {
+    await (tx as any).staffAttendance.updateMany({
+      where: { outgoingStaffId: id },
+      data: { outgoingStaffId: null },
     });
-    await logAudit(session.id, 'DISABLE_STAFF', 'Staff', id, undefined, 'Soft deactivated due to historical duty records');
-    revalidatePath('/staff');
-    revalidatePath('/dashboard');
-    return { success: true, message: 'Staff member deactivated because historical duty records exist.' };
-  } else {
-    await db.staff.delete({ where: { id } });
-    await logAudit(session.id, 'DELETE_STAFF', 'Staff', id);
-    revalidatePath('/staff');
-    revalidatePath('/dashboard');
-    return { success: true, message: 'Staff member deleted successfully.' };
-  }
+    await (tx as any).staffAttendance.updateMany({
+      where: { incomingStaffId: id },
+      data: { incomingStaffId: null },
+    });
+    await (tx as any).staffAttendance.deleteMany({
+      where: { staffId: id },
+    });
+    await tx.dutyAssignment.deleteMany({
+      where: { staffId: id },
+    });
+    await (tx as any).shortageAssignment.deleteMany({
+      where: { staffId: id },
+    });
+    await tx.staff.delete({
+      where: { id },
+    });
+  });
+
+  await logAudit(session.id, 'DELETE_STAFF', 'Staff', id, staff.name, 'Permanently deleted staff member');
+  revalidatePath('/staff');
+  revalidatePath('/dashboard');
+  revalidatePath('/reports');
+  return { success: true, message: `Staff member "${staff.name}" permanently deleted.` };
 }
 
 export async function addCustomerAction(name: string, contactDetails?: string, address?: string) {
   const session = await requireAuth(['OWNER']);
-  const customer = await db.customer.create({
-    data: { name, contactDetails, address, balance: 0 },
+  const trimmedName = name?.trim() || '';
+  if (!trimmedName) {
+    throw new Error('Customer name is required.');
+  }
+
+  const existing = await db.customer.findFirst({
+    where: { name: trimmedName },
   });
-  await logAudit(session.id, 'CREATE_CUSTOMER', 'Customer', customer.id, undefined, name);
-  revalidatePath('/credit');
-  revalidatePath('/dashboard');
-  return { success: true };
+  if (existing) {
+    throw new Error(`A customer with the name "${trimmedName}" already exists.`);
+  }
+
+  try {
+    const customer = await db.customer.create({
+      data: { name: trimmedName, contactDetails, address, balance: 0 },
+    });
+    await logAudit(session.id, 'CREATE_CUSTOMER', 'Customer', customer.id, undefined, trimmedName);
+    revalidatePath('/credit');
+    revalidatePath('/dashboard');
+    return { success: true };
+  } catch (err: any) {
+    if (err?.code === 'P2002' || (err?.message && err.message.includes('Unique constraint'))) {
+      throw new Error(`A customer with the name "${trimmedName}" already exists.`);
+    }
+    throw err;
+  }
 }
 
 export async function toggleCustomerStatusAction(id: string, active: boolean) {
@@ -297,21 +335,40 @@ export async function deleteCustomerAction(id: string) {
 
 export async function addOilProductAction(name: string, price: number) {
   const session = await requireAuth(['OWNER', 'MANAGER']);
-  const product = await db.oilProduct.create({
-    data: { name, price },
-  });
+  const trimmedName = name?.trim() || '';
+  if (!trimmedName || isNaN(price) || price <= 0) {
+    throw new Error('Valid product name and selling price are required.');
+  }
 
-  await db.oilPriceHistory.create({
-    data: {
-      productId: product.id,
-      price,
-    },
+  const existing = await db.oilProduct.findFirst({
+    where: { name: trimmedName },
   });
+  if (existing) {
+    throw new Error(`An oil product with the name "${trimmedName}" already exists.`);
+  }
 
-  await logAudit(session.id, 'CREATE_OIL_PRODUCT', 'OilProduct', product.id, undefined, `${name} -> ₹${price}`);
-  revalidatePath('/oil');
-  revalidatePath('/dashboard');
-  return { success: true };
+  try {
+    const product = await db.oilProduct.create({
+      data: { name: trimmedName, price },
+    });
+
+    await db.oilPriceHistory.create({
+      data: {
+        productId: product.id,
+        price,
+      },
+    });
+
+    await logAudit(session.id, 'CREATE_OIL_PRODUCT', 'OilProduct', product.id, undefined, `${trimmedName} -> ₹${price}`);
+    revalidatePath('/oil');
+    revalidatePath('/dashboard');
+    return { success: true };
+  } catch (err: any) {
+    if (err?.code === 'P2002' || (err?.message && err.message.includes('Unique constraint'))) {
+      throw new Error(`An oil product with the name "${trimmedName}" already exists.`);
+    }
+    throw err;
+  }
 }
 
 export async function updateOilPriceAction(productId: string, price: number) {
@@ -359,7 +416,7 @@ export async function deleteOilProductAction(id: string) {
       await tx.oilSale.deleteMany({ where: { productId: id } });
       await tx.oilPurchaseItem.deleteMany({ where: { productId: id } });
       await tx.oilProduct.delete({ where: { id } });
-    });
+    }, TX_OPTIONS);
 
     // Run global inventory recalculation outside transaction after commit
     await recalculateCentralOilInventory();
@@ -394,6 +451,7 @@ export async function getActiveDutySession() {
       tankDips: true,
       tankSamples: true,
       shortageAssignments: { include: { staff: true, assignedBy: true } },
+      staffAttendances: { include: { staff: true, pump: true, gun: true, outgoingStaff: true, incomingStaff: true } },
       manager: true,
     },
   });
@@ -456,7 +514,7 @@ export async function startNewDutySession(
       },
     });
 
-    // Create staff assignments
+    // Create staff assignments & initial attendance records
     for (const a of assignments) {
       await tx.dutyAssignment.create({
         data: {
@@ -465,6 +523,23 @@ export async function startNewDutySession(
           fuelType: a.fuelType,
           gunId: a.gunId || null,
           staffId: a.staffId,
+        },
+      });
+
+      const openingReading = a.gunId && previousReadings[a.gunId] ? previousReadings[a.gunId] : 0;
+
+      await (tx as any).staffAttendance.create({
+        data: {
+          dutySessionId: s.id,
+          staffId: a.staffId,
+          pumpId: a.pumpId,
+          gunId: a.gunId || null,
+          fuelType: a.fuelType,
+          startTime: startTime,
+          startMeterReading: openingReading || 0,
+          status: 'PRESENT',
+          workingDays: 1.0,
+          recordedById: session.id,
         },
       });
     }
@@ -505,7 +580,7 @@ export async function startNewDutySession(
     }
 
     return s;
-  });
+  }, TX_OPTIONS);
 
   await logAudit(session.id, 'START_DUTY_SESSION', 'DutySession', newDuty.id, undefined, `Duty #${nextDutyNumber} started`);
   revalidatePath('/dashboard');
@@ -538,12 +613,13 @@ export async function saveMeterReadingsAction(dutySessionId: string, readings: {
     const existing = duty.meterReadings.find((mr) => mr.gunId === r.gunId);
     if (!existing) continue;
 
-    const prevReading = (r.previousReading !== undefined && session.role === 'OWNER')
-      ? r.previousReading
+    const existingIntervals = existing.intervals || [];
+    const applicablePrev = existingIntervals.length > 0
+      ? existingIntervals[existingIntervals.length - 1].startReading
       : existing.previousReading;
 
-    if (r.currentReading < prevReading) {
-      throw new Error(`Current reading for ${existing.gun.name} (${r.currentReading}) cannot be lower than the previous reading (${prevReading}).`);
+    if (r.currentReading < applicablePrev) {
+      throw new Error(`Closing reading for ${existing.gun.name} (${r.currentReading}) cannot be lower than the previous reading (${applicablePrev}).`);
     }
   }
 
@@ -553,7 +629,7 @@ export async function saveMeterReadingsAction(dutySessionId: string, readings: {
       const existing = duty.meterReadings.find((mr) => mr.gunId === r.gunId);
       if (!existing) continue;
 
-      const prevReading = (r.previousReading !== undefined && session.role === 'OWNER')
+      const prevReading = (r.previousReading !== undefined && (session.role === 'OWNER' || existing.previousReading === 0))
         ? r.previousReading
         : existing.previousReading;
 
@@ -573,12 +649,10 @@ export async function saveMeterReadingsAction(dutySessionId: string, readings: {
           },
         });
 
-        const updatedIntervals = await tx.meterReadingInterval.findMany({
-          where: { meterReadingId: existing.id },
-        });
-
-        const totalLitres = Number(updatedIntervals.reduce((sum: number, i: any) => sum + i.litresSold, 0).toFixed(2));
-        const totalSales = Number(updatedIntervals.reduce((sum: number, i: any) => sum + i.salesAmount, 0).toFixed(2));
+        const otherIntervalsLitres = existingIntervals.slice(0, existingIntervals.length - 1).reduce((sum: number, i: any) => sum + (i.litresSold || 0), 0);
+        const otherIntervalsSales = existingIntervals.slice(0, existingIntervals.length - 1).reduce((sum: number, i: any) => sum + (i.salesAmount || 0), 0);
+        const totalLitres = Number((otherIntervalsLitres + lastLitres).toFixed(2));
+        const totalSales = Number((otherIntervalsSales + lastSales).toFixed(2));
 
         await tx.meterReading.update({
           where: { id: existing.id },
@@ -617,7 +691,7 @@ export async function saveMeterReadingsAction(dutySessionId: string, readings: {
         });
       }
     }
-  });
+  }, TX_OPTIONS);
 
   await logAudit(session.id, 'SAVE_METER_READINGS', 'DutySession', dutySessionId, undefined, 'Updated meter readings');
   revalidatePath('/dashboard');
@@ -768,7 +842,7 @@ export async function addOilSaleAction(dutySessionId: string, productId: string,
       });
 
       return s;
-    });
+    }, TX_OPTIONS);
 
     // Sync global ledger & weighted prices outside the transaction
     await recalculateCentralOilInventory();
@@ -796,7 +870,7 @@ export async function deleteOilSaleAction(id: string) {
         where: { id: sale.productId },
         data: { stockQuantity: { increment: sale.quantity } },
       });
-    });
+    }, TX_OPTIONS);
 
     // Recalculate central balances outside transaction after commit
     await recalculateCentralOilInventory();
@@ -867,7 +941,7 @@ export async function recordOilPurchaseAction(
       }
 
       return p;
-    });
+    }, TX_OPTIONS);
 
     // Recalculate global balances & weighted costs outside transaction after commit
     await recalculateCentralOilInventory();
@@ -894,7 +968,7 @@ export async function deleteOilPurchaseAction(id: string) {
     await db.$transaction(async (tx) => {
       await tx.oilPurchaseItem.deleteMany({ where: { purchaseId: id } });
       await tx.oilPurchase.delete({ where: { id } });
-    });
+    }, TX_OPTIONS);
 
     await recalculateCentralOilInventory();
 
@@ -912,22 +986,22 @@ export async function updateOilProductOpeningStockAction(productId: string, open
   const session = await requireAuth(['OWNER']);
   const numOpening = Math.max(0, Number(openingStock) || 0);
 
-  try {
-    await db.oilProduct.update({
-      where: { id: productId },
-      data: { openingStock: numOpening } as any,
-    });
+  const product = await db.oilProduct.findUnique({ where: { id: productId } });
+  if (!product) throw new Error('Oil product not found');
 
-    await recalculateCentralOilInventory();
+  const oldStock = product.openingStock;
 
-    await logAudit(session.id, 'UPDATE_OIL_OPENING_STOCK', 'OilProduct', productId, undefined, `Opening Stock set to ${numOpening}`);
-    revalidatePath('/dashboard');
-    revalidatePath('/oil');
-    return { success: true };
-  } catch (err: any) {
-    if (err instanceof Error) throw err;
-    throw new Error(err?.message || 'Failed to update opening stock.');
-  }
+  await db.oilProduct.update({
+    where: { id: productId },
+    data: { openingStock: numOpening },
+  });
+
+  await recalculateCentralOilInventory();
+
+  await logAudit(session.id, 'UPDATE_OIL_OPENING_STOCK', 'OilProduct', productId, `Opening stock: ${oldStock}`, `Opening stock: ${numOpening}`);
+  revalidatePath('/oil');
+  revalidatePath('/dashboard');
+  return { success: true };
 }
 
 
@@ -939,30 +1013,45 @@ export async function createOilProductAction(
   openingStock: number = 0
 ) {
   const session = await requireAuth(['OWNER', 'MANAGER']);
-  if (!name || isNaN(price) || price <= 0) {
+  const trimmedName = name?.trim() || '';
+  if (!trimmedName || isNaN(price) || price <= 0) {
     throw new Error('Valid product name and selling price are required.');
   }
 
-  const product = await db.$transaction(async (tx) => {
-    const prod = await tx.oilProduct.create({
-      data: {
-        name: name.trim(),
-        price: Number(price),
-        purchasePrice: Math.max(0, Number(purchasePrice) || 0),
-        minStockAlert: Math.max(1, Number(minStockAlert) || 5),
-        openingStock: Math.max(0, Number(openingStock) || 0),
-        stockQuantity: Math.max(0, Number(openingStock) || 0),
-        active: true,
-      } as any,
-    });
-    await recalculateCentralOilInventory(tx);
-    return prod;
+  const existing = await db.oilProduct.findFirst({
+    where: { name: trimmedName },
   });
+  if (existing) {
+    throw new Error(`An oil product with the name "${trimmedName}" already exists.`);
+  }
 
-  await logAudit(session.id, 'CREATE_OIL_PRODUCT', 'OilProduct', product.id, undefined, `Created ${product.name}`);
-  revalidatePath('/dashboard');
-  revalidatePath('/oil');
-  return { success: true, product };
+  try {
+    const product = await db.$transaction(async (tx) => {
+      const prod = await tx.oilProduct.create({
+        data: {
+          name: trimmedName,
+          price: Number(price),
+          purchasePrice: Math.max(0, Number(purchasePrice) || 0),
+          minStockAlert: Math.max(1, Number(minStockAlert) || 5),
+          openingStock: Math.max(0, Number(openingStock) || 0),
+          stockQuantity: Math.max(0, Number(openingStock) || 0),
+          active: true,
+        } as any,
+      });
+      await recalculateCentralOilInventory(tx);
+      return prod;
+    }, TX_OPTIONS);
+
+    await logAudit(session.id, 'CREATE_OIL_PRODUCT', 'OilProduct', product.id, undefined, `Created ${product.name}`);
+    revalidatePath('/dashboard');
+    revalidatePath('/oil');
+    return { success: true, product };
+  } catch (err: any) {
+    if (err?.code === 'P2002' || (err?.message && err.message.includes('Unique constraint'))) {
+      throw new Error(`An oil product with the name "${trimmedName}" already exists.`);
+    }
+    throw err;
+  }
 }
 
 export async function updateOilProductAction(
@@ -980,26 +1069,45 @@ export async function updateOilProductAction(
   const product = await db.oilProduct.findUnique({ where: { id } });
   if (!product) throw new Error('Product not found');
 
-  await db.$transaction(async (tx) => {
-    const updateData: any = {};
-    if (data.name !== undefined) updateData.name = data.name.trim();
-    if (data.price !== undefined) updateData.price = Number(data.price);
-    if (data.purchasePrice !== undefined) updateData.purchasePrice = Number(data.purchasePrice);
-    if (data.minStockAlert !== undefined) updateData.minStockAlert = Number(data.minStockAlert);
-    if (data.openingStock !== undefined) updateData.openingStock = Math.max(0, Number(data.openingStock));
-    if (data.active !== undefined) updateData.active = Boolean(data.active);
+  if (data.name !== undefined) {
+    const trimmedName = data.name.trim();
+    if (trimmedName.toLowerCase() !== product.name.toLowerCase()) {
+      const existing = await db.oilProduct.findFirst({
+        where: { name: trimmedName, id: { not: id } },
+      });
+      if (existing) {
+        throw new Error(`An oil product with the name "${trimmedName}" already exists.`);
+      }
+    }
+  }
 
-    await tx.oilProduct.update({
-      where: { id },
-      data: updateData,
-    });
-    await recalculateCentralOilInventory(tx);
-  });
+  try {
+    await db.$transaction(async (tx) => {
+      const updateData: any = {};
+      if (data.name !== undefined) updateData.name = data.name.trim();
+      if (data.price !== undefined) updateData.price = Number(data.price);
+      if (data.purchasePrice !== undefined) updateData.purchasePrice = Number(data.purchasePrice);
+      if (data.minStockAlert !== undefined) updateData.minStockAlert = Number(data.minStockAlert);
+      if (data.openingStock !== undefined) updateData.openingStock = Math.max(0, Number(data.openingStock));
+      if (data.active !== undefined) updateData.active = Boolean(data.active);
 
-  await logAudit(session.id, 'UPDATE_OIL_PRODUCT', 'OilProduct', id, JSON.stringify(product), JSON.stringify(data));
-  revalidatePath('/dashboard');
-  revalidatePath('/oil');
-  return { success: true };
+      await tx.oilProduct.update({
+        where: { id },
+        data: updateData,
+      });
+      await recalculateCentralOilInventory(tx);
+    }, TX_OPTIONS);
+
+    await logAudit(session.id, 'UPDATE_OIL_PRODUCT', 'OilProduct', id, JSON.stringify(product), JSON.stringify(data));
+    revalidatePath('/dashboard');
+    revalidatePath('/oil');
+    return { success: true };
+  } catch (err: any) {
+    if (err?.code === 'P2002' || (err?.message && err.message.includes('Unique constraint'))) {
+      throw new Error(`An oil product with the name "${data.name?.trim()}" already exists.`);
+    }
+    throw err;
+  }
 }
 
 
@@ -1198,7 +1306,7 @@ export async function addCreditTransactionAction(
     });
 
     return t;
-  });
+  }, TX_OPTIONS);
 
   await logAudit(session.id, 'ADD_CREDIT_TRANSACTION', 'CreditTransaction', trans.id, undefined, `${transactionType} [${methodUpper}]: ${trans.customer.name} - ₹${numAmount} (Ref: ${paymentReference || 'N/A'})`);
   revalidatePath('/dashboard');
@@ -1273,7 +1381,7 @@ export async function updateCreditTransactionAction(
       },
       include: { customer: true }
     });
-  });
+  }, TX_OPTIONS);
 
   await logAudit(
     session.id,
@@ -1309,7 +1417,7 @@ export async function deleteCreditTransactionAction(id: string) {
     });
 
     await tx.creditTransaction.delete({ where: { id } });
-  });
+  }, TX_OPTIONS);
 
   await logAudit(session.id, 'DELETE_CREDIT_TRANSACTION', 'CreditTransaction', id, JSON.stringify(trans));
   revalidatePath('/dashboard');
@@ -1430,7 +1538,7 @@ export async function recordTankSampleAction(dutySessionId: string, msLitres: nu
         createdBy: session.id,
       },
     });
-  });
+  }, TX_OPTIONS);
 
   await logAudit(
     session.id,
@@ -1640,16 +1748,18 @@ export async function closeDutySessionAction(
         const existingReading = duty.meterReadings.find(mr => mr.gunId === item.gunId);
         if (!existingReading) continue;
 
-        const prevReading = item.previousReading !== undefined
+        const prevReading = (item.previousReading !== undefined && (session.role === 'OWNER' || existingReading.previousReading === 0))
           ? item.previousReading
           : existingReading.previousReading;
-
-        if (item.currentReading < prevReading) {
-          const gunName = existingReading?.gun?.name || 'Gun';
-          throw new Error(`Closing reading (${item.currentReading}) cannot be lower than opening reading (${prevReading}) for ${gunName}.`);
-        }
-
         const existingIntervals = existingReading.intervals || [];
+        const applicablePrev = existingIntervals.length > 0
+          ? existingIntervals[existingIntervals.length - 1].startReading
+          : prevReading;
+
+        if (item.currentReading < applicablePrev) {
+          const gunName = existingReading?.gun?.name || 'Gun';
+          throw new Error(`Closing reading (${item.currentReading}) cannot be lower than the previous reading (${applicablePrev}) for ${gunName}.`);
+        }
 
         if (existingIntervals.length > 0) {
           const lastInterval = existingIntervals[existingIntervals.length - 1];
@@ -1814,28 +1924,28 @@ export async function closeDutySessionAction(
             .filter(mr => mr.gun.fuelType === fType)
             .reduce((sum, mr) => sum + mr.litresSold, 0);
 
-          // Opening Stock: ALWAYS read from FuelInventory central inventory ledger first
+          // Opening Stock: Prioritize previous closed duty's final verified physical stock first
+          const prevDip = prevDutyRec?.tankDips?.find(d => d.fuelType === fType);
           const invRecord = await tx.fuelInventory.findUnique({ where: { fuelType: fType } });
-          let openingStock = (invRecord && invRecord.currentStock !== undefined && invRecord.currentStock !== null && invRecord.currentStock > 0)
-            ? invRecord.currentStock
-            : null;
 
-          if (openingStock === null) {
-            const prevDip = prevDutyRec?.tankDips?.find(d => d.fuelType === fType);
-            if (prevDip && prevDip.finalLitres !== null && prevDip.finalLitres !== undefined && Number(prevDip.finalLitres) > 0) {
-              openingStock = Number(prevDip.finalLitres);
-            } else if (prevDip && prevDip.physicalDip !== null && prevDip.physicalDip !== undefined && Number(prevDip.physicalDip) > 0) {
-              openingStock = Number(prevDip.physicalDip);
-            } else {
-              openingStock = fType === 'MS' ? 12000 : 15000;
-            }
-
-            await tx.fuelInventory.upsert({
-              where: { fuelType: fType },
-              update: { currentStock: openingStock },
-              create: { fuelType: fType, currentStock: openingStock },
-            });
+          let openingStock: number | null = null;
+          if (prevDip && prevDip.finalLitres !== null && prevDip.finalLitres !== undefined && Number(prevDip.finalLitres) > 0) {
+            openingStock = Number(prevDip.finalLitres);
+          } else if (prevDip && prevDip.physicalDip !== null && prevDip.physicalDip !== undefined && Number(prevDip.physicalDip) > 0) {
+            openingStock = Number(prevDip.physicalDip);
+          } else if (invRecord && invRecord.currentStock !== undefined && invRecord.currentStock !== null && invRecord.currentStock > 0) {
+            openingStock = invRecord.currentStock;
+          } else {
+            openingStock = fType === 'MS' ? 12000 : 15000;
           }
+
+          // Ensure FuelInventory is updated with starting opening stock if missing
+          await tx.fuelInventory.upsert({
+            where: { fuelType: fType },
+            update: { currentStock: openingStock },
+            create: { fuelType: fType, currentStock: openingStock },
+          });
+
 
           // Fetch receipts delivered during this duty session
           const receiptsRecs = await tx.fuelStockMovement.findMany({
@@ -2011,6 +2121,178 @@ export async function closeDutySessionAction(
     }
   });
 
+  // --- POST-DUTY CLOSE EMAIL NOTIFICATIONS (Fire & Forget, non-blocking) ---
+  try {
+    const closedDuty = await db.dutySession.findUnique({
+      where: { id: dutySessionId },
+      include: {
+        manager: true,
+        tankDips: true,
+        meterReadings: { include: { gun: { include: { pump: true } } } },
+        assignments: { include: { staff: true, pump: true } },
+        shortageAssignments: { include: { staff: true } },
+        expenses: true,
+        creditTransactions: { include: { customer: true } },
+        oilSales: true,
+      }
+    });
+
+    if (closedDuty) {
+      const settlement = calculateDutySettlement(closedDuty);
+
+      // 1. Low Fuel Stock Alert Check (VERIFIED PHYSICAL STOCK ONLY)
+      const msDip = settlement.tankDips.ms;
+      const hsdDip = settlement.tankDips.hsd;
+
+      const msPhysical = msDip ? (msDip.finalLitres ?? msDip.physicalDip) : null;
+      const hsdPhysical = hsdDip ? (hsdDip.finalLitres ?? hsdDip.physicalDip) : null;
+
+      const msLow = msPhysical !== null && msPhysical <= LOW_FUEL_THRESHOLD_LITRES;
+      const hsdLow = hsdPhysical !== null && hsdPhysical <= LOW_FUEL_THRESHOLD_LITRES;
+
+      const msStateSetting = (db as any).systemSetting ? await (db as any).systemSetting.findUnique({ where: { key: 'MS_ALERT_STATE' } }) : null;
+      const hsdStateSetting = (db as any).systemSetting ? await (db as any).systemSetting.findUnique({ where: { key: 'HSD_ALERT_STATE' } }) : null;
+
+      const msTriggered = msStateSetting?.value === 'TRIGGERED';
+      const hsdTriggered = hsdStateSetting?.value === 'TRIGGERED';
+
+      if (msLow && hsdLow) {
+        if (!msTriggered || !hsdTriggered) {
+          await sendLowFuelStockAlert({
+            fuelType: 'BOTH',
+            dutyNumber: closedDuty.dutyNumber,
+            msStock: {
+              physicalStock: msPhysical!,
+              bookStock: msDip?.expectedClosing,
+              isCorrected: msDip?.isCorrected,
+              correctionReason: msDip?.correctionReason,
+            },
+            hsdStock: {
+              physicalStock: hsdPhysical!,
+              bookStock: hsdDip?.expectedClosing,
+              isCorrected: hsdDip?.isCorrected,
+              correctionReason: hsdDip?.correctionReason,
+            }
+          });
+
+          if ((db as any).systemSetting) {
+            await (db as any).systemSetting.upsert({ where: { key: 'MS_ALERT_STATE' }, update: { value: 'TRIGGERED' }, create: { key: 'MS_ALERT_STATE', value: 'TRIGGERED' } });
+            await (db as any).systemSetting.upsert({ where: { key: 'HSD_ALERT_STATE' }, update: { value: 'TRIGGERED' }, create: { key: 'HSD_ALERT_STATE', value: 'TRIGGERED' } });
+          }
+        }
+      } else {
+        if (msLow) {
+          if (!msTriggered) {
+            await sendLowFuelStockAlert({
+              fuelType: 'MS',
+              dutyNumber: closedDuty.dutyNumber,
+              msStock: {
+                physicalStock: msPhysical!,
+                bookStock: msDip?.expectedClosing,
+                isCorrected: msDip?.isCorrected,
+                correctionReason: msDip?.correctionReason,
+              }
+            });
+            if ((db as any).systemSetting) {
+              await (db as any).systemSetting.upsert({ where: { key: 'MS_ALERT_STATE' }, update: { value: 'TRIGGERED' }, create: { key: 'MS_ALERT_STATE', value: 'TRIGGERED' } });
+            }
+          }
+        } else if (msPhysical !== null && msPhysical > LOW_FUEL_THRESHOLD_LITRES) {
+          if ((db as any).systemSetting) {
+            await (db as any).systemSetting.upsert({ where: { key: 'MS_ALERT_STATE' }, update: { value: 'RESET' }, create: { key: 'MS_ALERT_STATE', value: 'RESET' } });
+          }
+        }
+
+        if (hsdLow) {
+          if (!hsdTriggered) {
+            await sendLowFuelStockAlert({
+              fuelType: 'HSD',
+              dutyNumber: closedDuty.dutyNumber,
+              hsdStock: {
+                physicalStock: hsdPhysical!,
+                bookStock: hsdDip?.expectedClosing,
+                isCorrected: hsdDip?.isCorrected,
+                correctionReason: hsdDip?.correctionReason,
+              }
+            });
+            if ((db as any).systemSetting) {
+              await (db as any).systemSetting.upsert({ where: { key: 'HSD_ALERT_STATE' }, update: { value: 'TRIGGERED' }, create: { key: 'HSD_ALERT_STATE', value: 'TRIGGERED' } });
+            }
+          }
+        } else if (hsdPhysical !== null && hsdPhysical > LOW_FUEL_THRESHOLD_LITRES) {
+          if ((db as any).systemSetting) {
+            await (db as any).systemSetting.upsert({ where: { key: 'HSD_ALERT_STATE' }, update: { value: 'RESET' }, create: { key: 'HSD_ALERT_STATE', value: 'RESET' } });
+          }
+        }
+      }
+
+      // 2. Prepare & Send Duty Closing Summary Report
+      const reportData: DutyClosingReportData = {
+        dutyNumber: closedDuty.dutyNumber,
+        managerName: closedDuty.manager?.username || 'Manager',
+        startTime: closedDuty.startTime,
+        endTime: closedDuty.endTime || new Date(),
+        ms: settlement.tankDips.ms ? {
+          openingStock: settlement.tankDips.ms.openingStock,
+          receipts: settlement.tankDips.ms.receipts,
+          sales: settlement.tankDips.ms.sales,
+          bookStock: settlement.tankDips.ms.expectedClosing,
+          physicalStock: settlement.tankDips.ms.finalLitres ?? settlement.tankDips.ms.physicalDip,
+          dipCm: settlement.tankDips.ms.dipCm,
+          isCorrected: settlement.tankDips.ms.isCorrected,
+          correctionReason: settlement.tankDips.ms.correctionReason,
+          variance: settlement.tankDips.ms.variance,
+        } : undefined,
+        hsd: settlement.tankDips.hsd ? {
+          openingStock: settlement.tankDips.hsd.openingStock,
+          receipts: settlement.tankDips.hsd.receipts,
+          sales: settlement.tankDips.hsd.sales,
+          bookStock: settlement.tankDips.hsd.expectedClosing,
+          physicalStock: settlement.tankDips.hsd.finalLitres ?? settlement.tankDips.hsd.physicalDip,
+          dipCm: settlement.tankDips.hsd.dipCm,
+          isCorrected: settlement.tankDips.hsd.isCorrected,
+          correctionReason: settlement.tankDips.hsd.correctionReason,
+          variance: settlement.tankDips.hsd.variance,
+        } : undefined,
+        meterReadings: settlement.meterReadingsOrdered.map(mr => ({
+          gunName: mr.gunName,
+          fuelType: mr.fuelType,
+          startReading: mr.previousReading,
+          endReading: mr.currentReading,
+          totalLitres: mr.litresSold,
+          saleAmount: mr.salesAmount,
+        })),
+        staffAssignments: settlement.staffAttendance.map(sa => ({
+          staffName: sa.staffName,
+          pumpName: sa.assignedPump,
+        })),
+        expectedCash: settlement.expectedCash,
+        actualCash: settlement.actualCash,
+        cashDifference: settlement.cashDifference,
+        settlementStatus: settlement.settlementStatus as any,
+        totalFuelSales: settlement.totalFuelSalesAmount,
+        totalOilSales: settlement.totalOilSales,
+        totalExpenses: settlement.totalExpenses,
+        totalCreditGiven: settlement.totalCreditGiven,
+        totalCreditCollections: settlement.totalCreditCollections,
+        digitalPayments: {
+          upi: closedDuty.phonePe || 0,
+          card: closedDuty.cardPayments || 0,
+          phonePe: closedDuty.phonePe || 0,
+          other: (closedDuty.gpay || 0) + (closedDuty.paytm || 0) + (closedDuty.bharatPe || 0) + (closedDuty.bankTransfer || 0),
+          total: closedDuty.totalDigital || 0,
+        },
+        bankDepositedCash: closedDuty.bankDeposit || 0,
+        responsibleEmployee: closedDuty.shortageAssignments?.[0]?.staff?.name,
+      };
+
+      await sendDutyClosingReport(reportData);
+    }
+  } catch (emailErr) {
+    // Crucial requirement: Email delivery failure MUST NOT fail duty closing operation
+    console.error('[EMAIL] Duty closing email notification error (ignored to preserve duty close):', emailErr);
+  }
+
   await logAudit(session.id, 'CLOSE_DUTY_SESSION', 'DutySession', dutySessionId, undefined, `Duty closed, difference: ₹${cashDifference}`);
   revalidatePath('/dashboard');
   revalidatePath('/acc/current');
@@ -2036,6 +2318,23 @@ export async function recalculateCentralInventory(tx?: any) {
     orderBy: { createdAt: 'asc' },
     include: { dutySession: { select: { status: true } } }
   });
+
+  // Auto-seed INITIAL_STOCK of 20000 L for both fuels if no movements exist at all
+  const movementCount = await client.fuelStockMovement.count();
+  if (movementCount === 0) {
+    const systemUser = await client.user.findFirst({ select: { id: true } });
+    if (systemUser) {
+      const INITIAL_STOCK_L = 20000;
+      await client.fuelStockMovement.createMany({
+        data: [
+          { fuelType: 'MS',  movementType: 'INITIAL_STOCK', quantityLitres: INITIAL_STOCK_L, balanceAfter: INITIAL_STOCK_L, createdById: systemUser.id },
+          { fuelType: 'HSD', movementType: 'INITIAL_STOCK', quantityLitres: INITIAL_STOCK_L, balanceAfter: INITIAL_STOCK_L, createdById: systemUser.id },
+        ],
+      });
+      await client.fuelInventory.upsert({ where: { fuelType: 'MS' },  update: { currentStock: INITIAL_STOCK_L }, create: { fuelType: 'MS',  currentStock: INITIAL_STOCK_L } });
+      await client.fuelInventory.upsert({ where: { fuelType: 'HSD' }, update: { currentStock: INITIAL_STOCK_L }, create: { fuelType: 'HSD', currentStock: INITIAL_STOCK_L } });
+    }
+  }
 
   let runningMs = 0;
   let runningHsd = 0;
@@ -2081,9 +2380,11 @@ export async function recalculateCentralInventory(tx?: any) {
     }
   }
 
-  // 3. Active dispensing from nozzle meter readings of current active duty
+  // 3. Active dispensing from nozzle meter readings & fuel testing (tank samples)
   let msActiveDispensed = 0;
   let hsdActiveDispensed = 0;
+  let msActiveTesting = 0;
+  let hsdActiveTesting = 0;
 
   if (activeDutyId) {
     const activeReadings = await client.meterReading.findMany({
@@ -2096,14 +2397,22 @@ export async function recalculateCentralInventory(tx?: any) {
       if (mr.gun?.fuelType === 'MS') msActiveDispensed += sold;
       if (mr.gun?.fuelType === 'HSD') hsdActiveDispensed += sold;
     }
+
+    const activeSamples = await client.tankSample.findMany({
+      where: { dutySessionId: activeDutyId }
+    });
+    for (const sample of activeSamples) {
+      if (sample.fuelType === 'MS') msActiveTesting += (sample.litres || 0);
+      if (sample.fuelType === 'HSD') hsdActiveTesting += (sample.litres || 0);
+    }
   }
 
-  // Ensure positive default baselines if no historical movements exist
-  if (msFinalized <= 0) msFinalized = 12000;
-  if (hsdFinalized <= 0) hsdFinalized = 15000;
+  // Ensure positive default baselines if no historical movements exist (initial stock = 20000 L each)
+  if (msFinalized <= 0) msFinalized = 20000;
+  if (hsdFinalized <= 0) hsdFinalized = 20000;
 
-  const msBookStock = Number((msFinalized + msActiveReceipts - msActiveDispensed).toFixed(2));
-  const hsdBookStock = Number((hsdFinalized + hsdActiveReceipts - hsdActiveDispensed).toFixed(2));
+  const msBookStock = Number((msFinalized + msActiveReceipts - msActiveDispensed - msActiveTesting).toFixed(2));
+  const hsdBookStock = Number((hsdFinalized + hsdActiveReceipts - hsdActiveDispensed - hsdActiveTesting).toFixed(2));
 
   await client.fuelInventory.upsert({
     where: { fuelType: 'MS' },
@@ -2117,6 +2426,37 @@ export async function recalculateCentralInventory(tx?: any) {
     create: { fuelType: 'HSD', currentStock: hsdBookStock },
   });
 
+  // 4. Fetch latest physical dip stock records
+  let msDipRecord: any = null;
+  let hsdDipRecord: any = null;
+
+  if (activeDutyId) {
+    const dips = await client.tankDip.findMany({
+      where: { dutySessionId: activeDutyId }
+    });
+    msDipRecord = dips.find((d: any) => d.fuelType === 'MS') || null;
+    hsdDipRecord = dips.find((d: any) => d.fuelType === 'HSD') || null;
+  }
+
+  if (!msDipRecord || !hsdDipRecord) {
+    const lastClosedDuty = await client.dutySession.findFirst({
+      where: { status: 'CLOSED' },
+      orderBy: { dutyNumber: 'desc' },
+      include: { tankDips: true }
+    });
+
+    if (lastClosedDuty) {
+      if (!msDipRecord) msDipRecord = lastClosedDuty.tankDips.find((d: any) => d.fuelType === 'MS') || null;
+      if (!hsdDipRecord) hsdDipRecord = lastClosedDuty.tankDips.find((d: any) => d.fuelType === 'HSD') || null;
+    }
+  }
+
+  const msPhysicalStock = msDipRecord ? (msDipRecord.finalLitres ?? msDipRecord.chartCalculatedLitres ?? msDipRecord.physicalDip) : null;
+  const hsdPhysicalStock = hsdDipRecord ? (hsdDipRecord.finalLitres ?? hsdDipRecord.chartCalculatedLitres ?? hsdDipRecord.physicalDip) : null;
+
+  const msVariance = msPhysicalStock !== null ? Number((msPhysicalStock - msBookStock).toFixed(2)) : null;
+  const hsdVariance = hsdPhysicalStock !== null ? Number((hsdPhysicalStock - hsdBookStock).toFixed(2)) : null;
+
   return {
     MS: msBookStock,
     HSD: hsdBookStock,
@@ -2125,15 +2465,39 @@ export async function recalculateCentralInventory(tx?: any) {
         openingStock: Number(msFinalized.toFixed(2)),
         activeReceipts: Number(msActiveReceipts.toFixed(2)),
         activeDispensed: Number(msActiveDispensed.toFixed(2)),
+        activeTesting: Number(msActiveTesting.toFixed(2)),
         currentBookStock: msBookStock,
+        physicalDipStock: msPhysicalStock,
+        variance: msVariance,
+        dipCm: msDipRecord?.dipCm ?? null,
+        isCorrected: msDipRecord?.isCorrected ?? false,
       },
       HSD: {
         openingStock: Number(hsdFinalized.toFixed(2)),
         activeReceipts: Number(hsdActiveReceipts.toFixed(2)),
         activeDispensed: Number(hsdActiveDispensed.toFixed(2)),
+        activeTesting: Number(hsdActiveTesting.toFixed(2)),
         currentBookStock: hsdBookStock,
+        physicalDipStock: hsdPhysicalStock,
+        variance: hsdVariance,
+        dipCm: hsdDipRecord?.dipCm ?? null,
+        isCorrected: hsdDipRecord?.isCorrected ?? false,
       }
     }
+  };
+}
+
+export async function getCentralFuelStockStateAction() {
+  await requireAuth(['OWNER', 'MANAGER']);
+
+  const stockMap = await db.$transaction(async (tx) => {
+    return await recalculateCentralInventory(tx);
+  }, TX_OPTIONS);
+
+  return {
+    success: true,
+    currentStock: { MS: stockMap.MS, HSD: stockMap.HSD },
+    inventoryState: stockMap.inventoryState,
   };
 }
 
@@ -2186,11 +2550,14 @@ export async function addFuelReceiptAction(payload: {
 
     const stockMap = await recalculateCentralInventory(tx);
     return { rec, stockMap };
-  });
+  }, TX_OPTIONS);
 
   await logAudit(session.id, 'ADD_FUEL_RECEIPT', 'FuelReceipt', result.rec.id, undefined, `Added ${qty} L of ${fuelType} under invoice ${invoiceNumber}`);
   revalidatePath('/stock');
   revalidatePath('/dashboard');
+  revalidatePath('/reports');
+  revalidatePath('/acc/current');
+  revalidatePath('/acc/history');
   return { success: true, receipt: result.rec, currentStock: { MS: result.stockMap.MS, HSD: result.stockMap.HSD }, inventoryState: result.stockMap.inventoryState };
 }
 
@@ -2252,7 +2619,7 @@ export async function updateFuelReceiptAction(
 
     const stockMap = await recalculateCentralInventory(tx);
     return { rec, oldRec, stockMap };
-  });
+  }, TX_OPTIONS);
 
   await logAudit(
     session.id,
@@ -2264,6 +2631,9 @@ export async function updateFuelReceiptAction(
   );
   revalidatePath('/stock');
   revalidatePath('/dashboard');
+  revalidatePath('/reports');
+  revalidatePath('/acc/current');
+  revalidatePath('/acc/history');
   return { success: true, receipt: result.rec, currentStock: { MS: result.stockMap.MS, HSD: result.stockMap.HSD }, inventoryState: result.stockMap.inventoryState };
 }
 
@@ -2289,11 +2659,14 @@ export async function deleteFuelReceiptAction(receiptId: string) {
     await tx.fuelStockMovement.deleteMany({ where: { fuelReceiptId: receiptId } });
     await tx.fuelReceipt.deleteMany({ where: { id: receiptId } });
     await recalculateCentralInventory(tx);
-  });
+  }, TX_OPTIONS);
 
   await logAudit(session.id, 'DELETE_FUEL_RECEIPT', 'FuelReceipt', receiptId, undefined, `Deleted fuel receipt ID ${receiptId}`);
   revalidatePath('/stock');
   revalidatePath('/dashboard');
+  revalidatePath('/reports');
+  revalidatePath('/acc/current');
+  revalidatePath('/acc/history');
   return { success: true };
 }
 
@@ -2322,11 +2695,14 @@ export async function deleteFuelStockMovementAction(movementId: string) {
     }
 
     await recalculateCentralInventory(tx);
-  });
+  }, TX_OPTIONS);
 
   await logAudit(session.id, 'DELETE_STOCK_MOVEMENT', 'FuelStockMovement', movementId, undefined, `Deleted stock movement ID ${movementId}`);
   revalidatePath('/stock');
   revalidatePath('/dashboard');
+  revalidatePath('/reports');
+  revalidatePath('/acc/current');
+  revalidatePath('/acc/history');
   return { success: true };
 }
 
@@ -2335,7 +2711,7 @@ export async function getFuelInventoryAction() {
 
   const stockMap = await db.$transaction(async (tx) => {
     return await recalculateCentralInventory(tx);
-  });
+  }, TX_OPTIONS);
 
   const receipts = await db.fuelReceipt.findMany({
     orderBy: { createdAt: 'desc' },
@@ -2384,7 +2760,7 @@ export async function setInitialFuelStockAction(fuelType: 'MS' | 'HSD', initialS
         createdById: session.id,
       },
     });
-  });
+  }, TX_OPTIONS);
 
   await logAudit(session.id, 'SET_INITIAL_FUEL_STOCK', 'FuelInventory', fuelType, undefined, `Set ${fuelType} initial stock to ${qty} L`);
   revalidatePath('/stock');
@@ -2526,8 +2902,9 @@ export async function getDashboardStats() {
   };
 }
 
-export async function getStaffPerformanceReport() {
+export async function getStaffPerformanceReport(includeInactive: boolean = false) {
   const assignments = await db.dutyAssignment.findMany({
+    where: includeInactive ? {} : { staff: { active: true } },
     include: {
       staff: true,
       gun: true,
@@ -2644,13 +3021,140 @@ export async function getAuditLogs() {
   });
 }
 
+export async function getBusinessSettingsAction() {
+  let settings: Record<string, string> = {
+    BUSINESS_NAME: 'IOCL Petrol Bunk & Retail Outlet',
+    BUSINESS_ADDRESS: 'Main Highway Station, Retail Outlet',
+    BUSINESS_CONTACT: '+91 9876543210',
+    REPORT_HEADER: 'IOCL Authorized Dealer Accounting Ledger',
+    MS_LOW_THRESHOLD: '6000',
+    HSD_LOW_THRESHOLD: '6000',
+  };
+  try {
+    const records = await db.$queryRaw<Array<{ key: string; value: string }>>`SELECT key, value FROM SystemSetting`;
+    for (const r of records) {
+      settings[r.key] = r.value;
+    }
+  } catch (err) {
+    console.error('getBusinessSettingsAction error:', err);
+  }
+  return settings;
+}
+
+export async function addPumpAction(name: string) {
+  const session = await requireAuth(['OWNER']);
+  if (!name || !name.trim()) throw new Error('Pump name is required.');
+  const trimmedName = name.trim();
+  const existingPump = await db.pump.findFirst({ where: { name: trimmedName } });
+  if (existingPump) {
+    throw new Error(`A pump with the name "${trimmedName}" already exists.`);
+  }
+  const pump = await db.pump.create({
+    data: { name: trimmedName, active: true }
+  });
+  await logAudit(session.id, 'ADD_PUMP', 'Pump', pump.id, undefined, pump.name);
+  revalidatePath('/dashboard');
+  return { success: true, pump };
+}
+
+export async function togglePumpAction(pumpId: string, active: boolean) {
+  const session = await requireAuth(['OWNER']);
+  const pump = await db.pump.update({
+    where: { id: pumpId },
+    data: { active }
+  });
+  await logAudit(session.id, 'TOGGLE_PUMP', 'Pump', pump.id, undefined, `Active: ${active}`);
+  revalidatePath('/dashboard');
+  return { success: true };
+}
+
+export async function addGunAction(pumpId: string, name: string, fuelType: 'MS' | 'HSD') {
+  const session = await requireAuth(['OWNER']);
+  if (!pumpId || !name || !name.trim() || !fuelType) throw new Error('Pump, gun name, and fuel type are required.');
+  const trimmedName = name.trim();
+
+  const gun = await db.gun.create({
+    data: { pumpId, name: trimmedName, fuelType, active: true }
+  });
+  await logAudit(session.id, 'ADD_GUN', 'Gun', gun.id, undefined, `${gun.name} (${fuelType})`);
+  revalidatePath('/dashboard');
+  return { success: true, gun };
+}
+
+export async function toggleGunAction(gunId: string, active: boolean) {
+  const session = await requireAuth(['OWNER']);
+  const gun = await db.gun.update({
+    where: { id: gunId },
+    data: { active }
+  });
+  await logAudit(session.id, 'TOGGLE_GUN', 'Gun', gun.id, undefined, `Active: ${active}`);
+  revalidatePath('/dashboard');
+  return { success: true };
+}
+
+export async function deleteGunAction(gunId: string) {
+  const session = await requireAuth(['OWNER']);
+  const gun = await db.gun.findUnique({
+    where: { id: gunId },
+    include: { pump: true }
+  });
+  if (!gun) throw new Error('Nozzle/Gun not found.');
+
+  await db.$transaction(async (tx) => {
+    await tx.dutyAssignment.deleteMany({ where: { gunId } });
+    await tx.meterReading.deleteMany({ where: { gunId } });
+    await tx.gun.delete({ where: { id: gunId } });
+  }, TX_OPTIONS);
+
+  await logAudit(session.id, 'DELETE_GUN', 'Gun', gunId, undefined, `Permanently deleted nozzle ${gun.name}`);
+  revalidatePath('/dashboard');
+  return { success: true };
+}
+
+export async function deletePumpAction(pumpId: string) {
+  const session = await requireAuth(['OWNER']);
+  let pump = await db.pump.findUnique({
+    where: { id: pumpId },
+    include: { guns: true }
+  });
+  if (!pump) {
+    pump = await db.pump.findFirst({
+      where: { name: pumpId },
+      include: { guns: true }
+    });
+  }
+  if (!pump) throw new Error('Pump unit not found.');
+
+  const targetPumpId = pump.id;
+  const gunIds = pump.guns.map((g) => g.id);
+
+  await db.$transaction(async (tx) => {
+    await tx.dutyAssignment.deleteMany({
+      where: { OR: [{ pumpId: targetPumpId }, { gunId: { in: gunIds } }] }
+    });
+    if (gunIds.length > 0) {
+      await tx.meterReading.deleteMany({ where: { gunId: { in: gunIds } } });
+      await tx.gun.deleteMany({ where: { pumpId: targetPumpId } });
+    }
+    await tx.pump.delete({ where: { id: targetPumpId } });
+  }, TX_OPTIONS);
+
+  await logAudit(session.id, 'DELETE_PUMP', 'Pump', targetPumpId, undefined, `Permanently deleted pump ${pump.name}`);
+  revalidatePath('/dashboard');
+  return { success: true };
+}
+
 export async function getStaticData() {
   // Fetch lists needed for drop-downs
   const pumps = await db.pump.findMany({ where: { active: true }, include: { guns: true } });
+  const allPumps = await db.pump.findMany({ include: { guns: true } });
   const guns = await db.gun.findMany({ where: { active: true }, include: { pump: true }, orderBy: { name: 'asc' } });
-  const staff = await db.staff.findMany({ where: { active: true } });
+  const allGuns = await db.gun.findMany({ include: { pump: true }, orderBy: { name: 'asc' } });
+  const staff = await db.staff.findMany({ where: { active: true }, orderBy: { name: 'asc' } });
+  const allStaff = await db.staff.findMany({ orderBy: { name: 'asc' } });
   const categories = await db.expenseCategory.findMany();
   const customers = await db.customer.findMany({ where: { active: true } });
+  const businessSettings = await getBusinessSettingsAction();
 
   // Recalculate central fuel & oil inventory state directly outside interactive transaction
   const invRes = await recalculateCentralInventory();
@@ -2669,11 +3173,15 @@ export async function getStaticData() {
 
   return {
     pumps,
+    allPumps,
     guns,
+    allGuns,
     staff,
+    allStaff,
     products,
     categories,
     customers,
+    businessSettings,
     fuelStock: { MS: invRes.MS, HSD: invRes.HSD },
     inventoryState: invRes.inventoryState,
     prices: {
@@ -2736,3 +3244,1180 @@ export async function requireUserAction() {
   const session = await getSession();
   return session;
 }
+
+// ----------------- DYNAMIC MULTI-RECIPIENT EMAIL SYSTEM ACTIONS -----------------
+
+export async function getEmailRecipientsAction() {
+  await requireAuth(['OWNER', 'MANAGER']);
+  await ensureDefaultEmailRecipientsMigrated();
+  try {
+    const recipients = await (db as any).emailRecipient.findMany({
+      orderBy: { createdAt: 'asc' }
+    });
+    return recipients || [];
+  } catch (err) {
+    console.error('getEmailRecipientsAction error:', err);
+    return [];
+  }
+}
+
+export async function addEmailRecipientAction(data: {
+  name: string;
+  email: string;
+  dutyReportsEnabled: boolean;
+  lowFuelAlertsEnabled: boolean;
+}) {
+  const session = await requireAuth(['OWNER']);
+  if (!data.name || !data.name.trim()) throw new Error('Recipient Name is required.');
+  if (!data.email || !data.email.trim()) throw new Error('Recipient Email Address is required.');
+
+  const normalizedEmail = data.email.trim().toLowerCase();
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(normalizedEmail)) {
+    throw new Error('Invalid Email Address format.');
+  }
+
+  const existing = await (db as any).emailRecipient.findFirst({
+    where: { email: normalizedEmail }
+  });
+  if (existing) {
+    throw new Error(`An email recipient with the address "${normalizedEmail}" already exists.`);
+  }
+
+  const recipient = await (db as any).emailRecipient.create({
+    data: {
+      name: data.name.trim(),
+      email: normalizedEmail,
+      active: true,
+      dutyReportsEnabled: !!data.dutyReportsEnabled,
+      lowFuelAlertsEnabled: !!data.lowFuelAlertsEnabled,
+    }
+  });
+
+  await logAudit(
+    session.id,
+    'ADD_EMAIL_RECIPIENT',
+    'EmailRecipient',
+    recipient.id,
+    undefined,
+    `${recipient.name} (${recipient.email})`
+  );
+
+  revalidatePath('/dashboard');
+  return { success: true, recipient };
+}
+
+export async function updateEmailRecipientAction(
+  id: string,
+  data: {
+    name: string;
+    email: string;
+    dutyReportsEnabled: boolean;
+    lowFuelAlertsEnabled: boolean;
+    active?: boolean;
+  }
+) {
+  const session = await requireAuth(['OWNER']);
+  if (!data.name || !data.name.trim()) throw new Error('Recipient Name is required.');
+  if (!data.email || !data.email.trim()) throw new Error('Recipient Email Address is required.');
+
+  const normalizedEmail = data.email.trim().toLowerCase();
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(normalizedEmail)) {
+    throw new Error('Invalid Email Address format.');
+  }
+
+  const existing = await (db as any).emailRecipient.findFirst({
+    where: { email: normalizedEmail, NOT: { id } }
+  });
+  if (existing) {
+    throw new Error(`Another recipient with email address "${normalizedEmail}" already exists.`);
+  }
+
+  const recipient = await (db as any).emailRecipient.update({
+    where: { id },
+    data: {
+      name: data.name.trim(),
+      email: normalizedEmail,
+      dutyReportsEnabled: !!data.dutyReportsEnabled,
+      lowFuelAlertsEnabled: !!data.lowFuelAlertsEnabled,
+      ...(data.active !== undefined ? { active: !!data.active } : {}),
+    }
+  });
+
+  await logAudit(
+    session.id,
+    'UPDATE_EMAIL_RECIPIENT',
+    'EmailRecipient',
+    id,
+    undefined,
+    `${recipient.name} (${recipient.email})`
+  );
+
+  revalidatePath('/dashboard');
+  return { success: true, recipient };
+}
+
+export async function toggleEmailRecipientStatusAction(id: string, active: boolean) {
+  const session = await requireAuth(['OWNER']);
+  const recipient = await (db as any).emailRecipient.update({
+    where: { id },
+    data: { active }
+  });
+
+  await logAudit(
+    session.id,
+    'TOGGLE_EMAIL_RECIPIENT',
+    'EmailRecipient',
+    id,
+    undefined,
+    `Recipient: ${recipient.name}, Active: ${active}`
+  );
+
+  revalidatePath('/dashboard');
+  return { success: true };
+}
+
+export async function deleteEmailRecipientAction(id: string) {
+  const session = await requireAuth(['OWNER']);
+  const recipient = await (db as any).emailRecipient.findUnique({ where: { id } });
+  if (!recipient) throw new Error('Recipient not found.');
+
+  await (db as any).emailRecipient.delete({ where: { id } });
+
+  await logAudit(
+    session.id,
+    'DELETE_EMAIL_RECIPIENT',
+    'EmailRecipient',
+    id,
+    undefined,
+    `Deleted recipient ${recipient.name} (${recipient.email})`
+  );
+
+  revalidatePath('/dashboard');
+  return { success: true };
+}
+
+export async function getEmailSettingsAction() {
+  const session = await requireAuth(['OWNER', 'MANAGER']);
+  await ensureDefaultEmailRecipientsMigrated();
+  try {
+    const recipients = await (db as any).emailRecipient.findMany({
+      orderBy: { createdAt: 'asc' }
+    });
+    return {
+      recipients: recipients || [],
+      alertEnabled: true,
+    };
+  } catch (err) {
+    console.error('getEmailSettingsAction error:', err);
+    return {
+      recipients: [],
+      alertEnabled: true,
+    };
+  }
+}
+
+export async function sendTestEmailAction(targetEmail?: string) {
+  const session = await requireAuth(['OWNER', 'MANAGER']);
+  const explicitRecipients = targetEmail && targetEmail.trim() ? [targetEmail.trim()] : undefined;
+  const result = await sendTestEmail(explicitRecipients);
+  return result;
+}
+
+export async function getEmailLogsAction() {
+  const session = await requireAuth(['OWNER', 'MANAGER']);
+  if (!(db as any).emailLog) {
+    return [];
+  }
+  try {
+    const logs = await (db as any).emailLog.findMany({
+      orderBy: { sentAt: 'desc' },
+      take: 50,
+    });
+    return logs;
+  } catch (err) {
+    console.error('getEmailLogsAction error:', err);
+    return [];
+  }
+}
+
+export async function verifySmtpConnectionAction() {
+  const session = await requireAuth(['OWNER', 'MANAGER']);
+  const diag = await diagnoseSmtpConfig();
+  return diag;
+}
+
+
+// ----------------- TANK DIP CORRECTION ACTION (OWNER ONLY) -----------------
+
+export async function correctTankDipAction(
+  dutySessionId: string,
+  fuelType: 'MS' | 'HSD',
+  correctedLitres: number,
+  reason: string
+) {
+  const session = await requireAuth(['OWNER']);
+
+  if (!dutySessionId || !fuelType || correctedLitres === undefined || correctedLitres === null || correctedLitres < 0) {
+    throw new Error('Invalid parameters for tank dip correction');
+  }
+
+  if (!reason || !reason.trim()) {
+    throw new Error('Correction reason is required for audit trail');
+  }
+
+  const existingDip = await db.tankDip.findUnique({
+    where: { dutySessionId_fuelType: { dutySessionId, fuelType } },
+    include: { dutySession: true }
+  });
+
+  if (!existingDip) {
+    throw new Error('Tank dip record not found for this duty session');
+  }
+
+  // Original chart-derived stock must NEVER be overwritten!
+  const chartVal = existingDip.chartCalculatedLitres ?? existingDip.finalLitres;
+  const oldFinal = existingDip.finalLitres;
+  const newFinal = correctedLitres;
+  const newVariance = newFinal - (existingDip.expectedClosing ?? 0);
+
+  const updatedDip = await db.tankDip.update({
+    where: { dutySessionId_fuelType: { dutySessionId, fuelType } },
+    data: {
+      chartCalculatedLitres: chartVal, // Preserve original chart-derived value
+      correctedLitres: correctedLitres,
+      finalLitres: newFinal,
+      physicalDip: newFinal,
+      variance: newVariance,
+      isCorrected: true,
+      correctionReason: reason.trim(),
+      correctedById: session.id,
+      correctedAt: new Date(),
+    }
+  });
+
+  await logAudit(
+    session.id,
+    'CORRECT_TANK_DIP',
+    'TankDip',
+    existingDip.id,
+    `Original Physical: ${oldFinal} L`,
+    `Corrected Physical: ${newFinal} L | Reason: ${reason.trim()}`
+  );
+
+  // Re-evaluate low-stock alert state for this fuel type based on VERIFIED PHYSICAL STOCK
+  if ((db as any).systemSetting) {
+    const alertStateKey = `${fuelType}_ALERT_STATE`;
+    const currentStateSetting = await (db as any).systemSetting.findUnique({ where: { key: alertStateKey } });
+    const isCurrentlyTriggered = currentStateSetting?.value === 'TRIGGERED';
+
+    if (newFinal <= LOW_FUEL_THRESHOLD_LITRES) {
+      if (!isCurrentlyTriggered) {
+        const dutyNum = existingDip.dutySession?.dutyNumber || 0;
+        await sendLowFuelStockAlert({
+          fuelType,
+          dutyNumber: dutyNum,
+          msStock: fuelType === 'MS' ? {
+            physicalStock: newFinal,
+            bookStock: existingDip.expectedClosing,
+            isCorrected: true,
+            correctionReason: reason.trim()
+          } : undefined,
+          hsdStock: fuelType === 'HSD' ? {
+            physicalStock: newFinal,
+            bookStock: existingDip.expectedClosing,
+            isCorrected: true,
+            correctionReason: reason.trim()
+          } : undefined,
+        });
+        await (db as any).systemSetting.upsert({
+          where: { key: alertStateKey },
+          update: { value: 'TRIGGERED' },
+          create: { key: alertStateKey, value: 'TRIGGERED' }
+        });
+      }
+    } else {
+      // Physical stock > 6000 L, reset alert state
+      await (db as any).systemSetting.upsert({
+        where: { key: alertStateKey },
+        update: { value: 'RESET' },
+        create: { key: alertStateKey, value: 'RESET' }
+      });
+    }
+  }
+
+  revalidatePath('/dashboard');
+  revalidatePath('/acc/history');
+  revalidatePath('/stock');
+
+  return { success: true, updatedDip };
+}
+
+// ----------------- DUTY DELETION ACTION (OWNER ONLY) -----------------
+
+export async function deleteDutyAction(dutySessionId: string, reason: string) {
+  const session = await requireAuth(['OWNER']);
+
+  if (!dutySessionId) {
+    throw new Error('Duty session ID is required for deletion.');
+  }
+
+  if (!reason || !reason.trim()) {
+    throw new Error('Mandatory deletion reason is required for audit trail.');
+  }
+
+  const duty = await db.dutySession.findUnique({
+    where: { id: dutySessionId },
+    include: {
+      creditTransactions: true,
+    }
+  });
+
+  if (!duty) {
+    throw new Error('Duty session not found.');
+  }
+
+  if (duty.status === 'OPEN') {
+    throw new Error(`ACTIVE DUTY CANNOT BE DELETED. Duty #${duty.dutyNumber} is currently active. You must complete or close the duty session before performing deletion.`);
+  }
+
+  const dutyNumber = duty.dutyNumber;
+  const oldSummary = `Duty #${dutyNumber} (${duty.startTime.toISOString().slice(0, 10)}) - Manager: ${duty.managerId}`;
+
+  // Execute deletion inside a transaction
+  await db.$transaction(async (tx) => {
+    // 1. If duty had credit transactions, adjust customer balances accordingly
+    if (duty.creditTransactions && duty.creditTransactions.length > 0) {
+      for (const ct of duty.creditTransactions) {
+        const customer = await tx.customer.findUnique({ where: { id: ct.customerId } });
+        if (customer) {
+          let balanceAdj = 0;
+          if (ct.transactionType === 'CREDIT_SALE') {
+            balanceAdj = -ct.amount; // Remove credit sale -> reduce customer balance
+          } else if (ct.transactionType === 'COLLECTION') {
+            balanceAdj = ct.amount; // Remove collection -> restore customer balance
+          }
+          if (balanceAdj !== 0) {
+            await tx.customer.update({
+              where: { id: ct.customerId },
+              data: { balance: { increment: balanceAdj } }
+            });
+          }
+        }
+      }
+    }
+
+    // 2. Delete DutySession (Prisma cascade-deletes MeterReading, DutyAssignment, OilSale, Expense, TankDip, etc.)
+    await tx.dutySession.delete({
+      where: { id: dutySessionId }
+    });
+  }, TX_OPTIONS);
+
+  // 3. Log Audit Record permanently
+  await logAudit(
+    session.id,
+    'DELETE_DUTY',
+    'DutySession',
+    dutySessionId,
+    oldSummary,
+    `Reason: ${reason.trim()}`
+  );
+
+  // 4. Recalculate central inventory
+  await recalculateCentralInventory();
+  await recalculateCentralOilInventory();
+
+  revalidatePath('/dashboard');
+  revalidatePath('/acc/history');
+  revalidatePath('/reports/credit');
+  revalidatePath('/stock');
+
+  return { success: true, message: `✓ Duty #${dutyNumber} deleted successfully.` };
+}
+
+// ----------------- FULL SYSTEM RESET ACTION (OWNER ONLY) -----------------
+
+export async function resetSystemAction(confirmText: string, ownerPassword?: string) {
+  const session = await requireAuth(['OWNER']);
+
+  if (confirmText.trim().toUpperCase() !== 'RESET SYSTEM') {
+    throw new Error('Reset failed: Confirmation text must match "RESET SYSTEM".');
+  }
+
+  // Validate Owner Password if provided
+  if (ownerPassword) {
+    const ownerUser = await db.user.findUnique({ where: { id: session.id } });
+    if (ownerUser && ownerUser.passwordHash !== hashPassword(ownerPassword)) {
+      throw new Error('Authentication failed: Invalid Owner password.');
+    }
+  }
+
+  // Execute full operational reset in a database transaction
+  await db.$transaction(async (tx) => {
+    // 1. Delete operational records
+    await tx.meterReadingInterval.deleteMany({});
+    await tx.meterReading.deleteMany({});
+    await tx.dutyAssignment.deleteMany({});
+    await tx.shortageAssignment.deleteMany({});
+    await tx.oilSale.deleteMany({});
+    await tx.sampleBoxSale.deleteMany({});
+    await tx.expense.deleteMany({});
+    await tx.creditTransaction.deleteMany({});
+    await tx.tankDip.deleteMany({});
+    await tx.tankSample.deleteMany({});
+    await tx.dutyDensity.deleteMany({});
+    await tx.fuelStockMovement.deleteMany({});
+    await tx.fuelReceipt.deleteMany({});
+    await tx.tankStock.deleteMany({});
+    await tx.oilPurchaseItem.deleteMany({});
+    await tx.oilPurchase.deleteMany({});
+    await tx.dutySession.deleteMany({});
+
+    if ((tx as any).emailLog) {
+      await (tx as any).emailLog.deleteMany({});
+    }
+
+    // 2. Reset customer balances to 0.0
+    await tx.customer.updateMany({
+      data: { balance: 0.0 }
+    });
+
+    // 3. Reset oil product stock quantities to initial baseline
+    const oilProducts = await tx.oilProduct.findMany({});
+    for (const p of oilProducts) {
+      await tx.oilProduct.update({
+        where: { id: p.id },
+        data: { stockQuantity: p.openingStock ?? 0.0 }
+      });
+    }
+
+    // 4. Reset alert states in SystemSetting if present
+    if ((tx as any).systemSetting) {
+      await (tx as any).systemSetting.deleteMany({
+        where: { key: { in: ['MS_ALERT_STATE', 'HSD_ALERT_STATE'] } }
+      });
+    }
+  }, TX_OPTIONS);
+
+  // Log Audit Record permanently
+  await logAudit(
+    session.id,
+    'FULL_SYSTEM_RESET',
+    'System',
+    'ALL_OPERATIONAL_DATA',
+    undefined,
+    'Operational data reset to fresh setup state'
+  );
+
+  // Recalculate inventory
+  await recalculateCentralInventory();
+  await recalculateCentralOilInventory();
+
+  revalidatePath('/dashboard');
+  revalidatePath('/acc/history');
+  revalidatePath('/stock');
+  revalidatePath('/reports/credit');
+
+  return {
+    success: true,
+    message: '✓ System reset successfully. Operational data removed. Ready for first duty initialization.'
+  };
+}
+
+// ----------------- BUSINESS SETTINGS ACTION (OWNER ONLY) -----------------
+
+export async function updateBusinessSettingsAction(settingsPayload: {
+  businessName?: string;
+  businessAddress?: string;
+  businessContact?: string;
+  reportHeader?: string;
+  msLowThreshold?: number;
+  hsdLowThreshold?: number;
+}) {
+  const session = await requireAuth(['OWNER']);
+
+  if (!(db as any).systemSetting) {
+    await db.$executeRaw`CREATE TABLE IF NOT EXISTS SystemSetting (id TEXT PRIMARY KEY, key TEXT UNIQUE, value TEXT, updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP)`;
+  }
+
+  const entries = [
+    { key: 'BUSINESS_NAME', val: (settingsPayload.businessName || '').trim() },
+    { key: 'BUSINESS_ADDRESS', val: (settingsPayload.businessAddress || '').trim() },
+    { key: 'BUSINESS_CONTACT', val: (settingsPayload.businessContact || '').trim() },
+    { key: 'REPORT_HEADER', val: (settingsPayload.reportHeader || '').trim() },
+    { key: 'MS_LOW_THRESHOLD', val: String(settingsPayload.msLowThreshold ?? 6000) },
+    { key: 'HSD_LOW_THRESHOLD', val: String(settingsPayload.hsdLowThreshold ?? 6000) },
+  ];
+
+  for (const entry of entries) {
+    if (entry.val) {
+      if ((db as any).systemSetting) {
+        await (db as any).systemSetting.upsert({
+          where: { key: entry.key },
+          update: { value: entry.val },
+          create: { key: entry.key, value: entry.val },
+        });
+      } else {
+        await db.$executeRaw`INSERT INTO SystemSetting (id, key, value, updatedAt) VALUES (${entry.key}, ${entry.key}, ${entry.val}, CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value = ${entry.val}, updatedAt = CURRENT_TIMESTAMP`;
+      }
+    }
+  }
+
+  await logAudit(
+    session.id,
+    'UPDATE_BUSINESS_SETTINGS',
+    'SystemSetting',
+    'BUSINESS_CONFIG',
+    undefined,
+    JSON.stringify(settingsPayload)
+  );
+
+  revalidatePath('/dashboard');
+  return { success: true, message: '✓ Business settings updated successfully.' };
+}
+
+// ----------------- STAFF ATTENDANCE & SHIFT HANDOVER ACTIONS -----------------
+
+export async function recordStaffHandoverAction(params: {
+  dutySessionId: string;
+  gunId?: string;
+  pumpId: string;
+  outgoingStaffId: string;
+  incomingStaffId?: string | null;
+  handoverTimeStr: string;
+  handoverMeterReading: number;
+  status?: string;
+  reason?: string;
+  remarks?: string;
+}) {
+  const session = await requireAuth(['OWNER', 'MANAGER']);
+  const handoverTime = new Date(params.handoverTimeStr);
+  const {
+    dutySessionId, gunId, pumpId, outgoingStaffId, incomingStaffId,
+    handoverMeterReading, status, reason, remarks
+  } = params;
+
+  const dutySession = await db.dutySession.findUnique({ where: { id: dutySessionId } });
+  if (!dutySession) throw new Error('Duty session not found');
+
+  const outgoingStaff = await db.staff.findUnique({ where: { id: outgoingStaffId } });
+  const incomingStaff = incomingStaffId ? await db.staff.findUnique({ where: { id: incomingStaffId } }) : null;
+
+  await db.$transaction(async (tx) => {
+    // 1. Find active StaffAttendance record for outgoing staff on this pump/gun
+    const currentAttendance = await (tx as any).staffAttendance.findFirst({
+      where: {
+        dutySessionId,
+        staffId: outgoingStaffId,
+        pumpId,
+        ...(gunId ? { gunId } : {}),
+        endTime: null,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (currentAttendance) {
+      await (tx as any).staffAttendance.update({
+        where: { id: currentAttendance.id },
+        data: {
+          endTime: handoverTime,
+          endMeterReading: handoverMeterReading,
+          status: status || 'PARTIAL_DUTY',
+          reason: reason || 'Shift Handover',
+          remarks: remarks || null,
+          incomingStaffId: incomingStaffId || null,
+        },
+      });
+    } else {
+      await (tx as any).staffAttendance.create({
+        data: {
+          dutySessionId,
+          staffId: outgoingStaffId,
+          pumpId,
+          gunId: gunId || null,
+          startTime: dutySession.startTime,
+          endTime: handoverTime,
+          endMeterReading: handoverMeterReading,
+          status: status || 'PARTIAL_DUTY',
+          reason: reason || 'Shift Handover',
+          remarks: remarks || null,
+          incomingStaffId: incomingStaffId || null,
+          recordedById: session.id,
+        },
+      });
+    }
+
+    // 2. Handle incoming staff replacement if provided
+    if (incomingStaffId) {
+      await (tx as any).staffAttendance.create({
+        data: {
+          dutySessionId,
+          staffId: incomingStaffId,
+          pumpId,
+          gunId: gunId || null,
+          fuelType: currentAttendance?.fuelType || 'MS',
+          startTime: handoverTime,
+          startMeterReading: handoverMeterReading,
+          status: 'REPLACEMENT',
+          outgoingStaffId: outgoingStaffId,
+          recordedById: session.id,
+          remarks: remarks || `Took over from ${outgoingStaff?.name || 'Staff'}`,
+        },
+      });
+
+      if (gunId) {
+        await tx.dutyAssignment.upsert({
+          where: { dutySessionId_gunId: { dutySessionId, gunId } },
+          create: {
+            dutySessionId,
+            pumpId,
+            gunId,
+            fuelType: currentAttendance?.fuelType || 'MS',
+            staffId: incomingStaffId,
+          },
+          update: {
+            staffId: incomingStaffId,
+          },
+        });
+      }
+    } else {
+      // No replacement -> remove assignment so it displays NO STAFF ASSIGNED
+      if (gunId) {
+        await tx.dutyAssignment.deleteMany({
+          where: { dutySessionId, gunId },
+        });
+      }
+    }
+
+    await logAudit(
+      session.id,
+      'STAFF_HANDOVER',
+      'StaffAttendance',
+      outgoingStaffId,
+      `Outgoing: ${outgoingStaff?.name}`,
+      `Incoming: ${incomingStaff?.name || 'NONE (Unassigned)'}, Meter: ${handoverMeterReading}, Time: ${handoverTime.toLocaleTimeString()}`
+    );
+  }, TX_OPTIONS);
+
+  revalidatePath('/dashboard');
+  revalidatePath('/staff');
+  return {
+    success: true,
+    message: incomingStaff
+      ? `✓ Handover confirmed: ${outgoingStaff?.name} ➔ ${incomingStaff.name} at meter ${handoverMeterReading}`
+      : `✓ Responsibility ended for ${outgoingStaff?.name}. No replacement assigned.`,
+  };
+}
+
+export async function markStaffAbsentAction(params: {
+  dutySessionId: string;
+  gunId?: string;
+  pumpId: string;
+  staffId: string;
+  replacementStaffId?: string | null;
+  reason?: string;
+  remarks?: string;
+}) {
+  const session = await requireAuth(['OWNER', 'MANAGER']);
+  const { dutySessionId, gunId, pumpId, staffId, replacementStaffId, reason, remarks } = params;
+
+  const dutySession = await db.dutySession.findUnique({ where: { id: dutySessionId } });
+  if (!dutySession) throw new Error('Duty session not found');
+
+  const absentStaff = await db.staff.findUnique({ where: { id: staffId } });
+  const replacementStaff = replacementStaffId ? await db.staff.findUnique({ where: { id: replacementStaffId } }) : null;
+
+  await db.$transaction(async (tx) => {
+    const existing = await (tx as any).staffAttendance.findFirst({
+      where: { dutySessionId, staffId, pumpId, ...(gunId ? { gunId } : {}) },
+    });
+
+    if (existing) {
+      await (tx as any).staffAttendance.update({
+        where: { id: existing.id },
+        data: {
+          status: 'ABSENT',
+          workingDays: 0.0,
+          startTime: null,
+          endTime: null,
+          startMeterReading: null,
+          endMeterReading: null,
+          reason: reason || 'Did not report for duty',
+          remarks: remarks || null,
+          incomingStaffId: replacementStaffId || null,
+        },
+      });
+    } else {
+      await (tx as any).staffAttendance.create({
+        data: {
+          dutySessionId,
+          staffId,
+          pumpId,
+          gunId: gunId || null,
+          status: 'ABSENT',
+          workingDays: 0.0,
+          reason: reason || 'Did not report for duty',
+          remarks: remarks || null,
+          incomingStaffId: replacementStaffId || null,
+          recordedById: session.id,
+        },
+      });
+    }
+
+    if (replacementStaffId) {
+      let openingReading = 0;
+      if (gunId) {
+        const mr = await tx.meterReading.findUnique({
+          where: { dutySessionId_gunId: { dutySessionId, gunId } },
+        });
+        if (mr) openingReading = mr.previousReading;
+      }
+
+      await (tx as any).staffAttendance.create({
+        data: {
+          dutySessionId,
+          staffId: replacementStaffId,
+          pumpId,
+          gunId: gunId || null,
+          startTime: dutySession.startTime,
+          startMeterReading: openingReading,
+          status: 'REPLACEMENT',
+          workingDays: 1.0,
+          outgoingStaffId: staffId,
+          recordedById: session.id,
+          remarks: `Replaced absent staff ${absentStaff?.name || ''}`,
+        },
+      });
+
+      if (gunId) {
+        await tx.dutyAssignment.upsert({
+          where: { dutySessionId_gunId: { dutySessionId, gunId } },
+          create: {
+            dutySessionId,
+            pumpId,
+            gunId,
+            fuelType: existing?.fuelType || 'MS',
+            staffId: replacementStaffId,
+          },
+          update: {
+            staffId: replacementStaffId,
+          },
+        });
+      }
+    } else {
+      if (gunId) {
+        await tx.dutyAssignment.deleteMany({
+          where: { dutySessionId, gunId },
+        });
+      }
+    }
+
+    await logAudit(
+      session.id,
+      'MARK_STAFF_ABSENT',
+      'StaffAttendance',
+      staffId,
+      `Staff: ${absentStaff?.name}`,
+      `Status: ABSENT, Replacement: ${replacementStaff?.name || 'NONE'}`
+    );
+  }, TX_OPTIONS);
+
+  revalidatePath('/dashboard');
+  revalidatePath('/staff');
+  return {
+    success: true,
+    message: `✓ ${absentStaff?.name || 'Staff'} marked ABSENT.${replacementStaff ? ` Replaced by ${replacementStaff.name}.` : ''}`,
+  };
+}
+
+export async function assignMidDutyStaffAction(params: {
+  dutySessionId: string;
+  gunId?: string;
+  pumpId: string;
+  fuelType?: string;
+  staffId: string;
+  startTimeStr?: string;
+  startMeterReading?: number;
+}) {
+  const session = await requireAuth(['OWNER', 'MANAGER']);
+  const { dutySessionId, gunId, pumpId, fuelType, staffId, startTimeStr, startMeterReading } = params;
+
+  const dutySession = await db.dutySession.findUnique({ where: { id: dutySessionId } });
+  if (!dutySession) throw new Error('Duty session not found');
+
+  const startTime = startTimeStr ? new Date(startTimeStr) : new Date();
+
+  await db.$transaction(async (tx) => {
+    let reading = startMeterReading;
+    if (reading === undefined && gunId) {
+      const mr = await tx.meterReading.findUnique({
+        where: { dutySessionId_gunId: { dutySessionId, gunId } },
+      });
+      if (mr) reading = mr.currentReading || mr.previousReading;
+    }
+
+    await (tx as any).staffAttendance.create({
+      data: {
+        dutySessionId,
+        staffId,
+        pumpId,
+        gunId: gunId || null,
+        fuelType: fuelType || 'MS',
+        startTime,
+        startMeterReading: reading || 0,
+        status: 'PRESENT',
+        recordedById: session.id,
+      },
+    });
+
+    if (gunId) {
+      await tx.dutyAssignment.upsert({
+        where: { dutySessionId_gunId: { dutySessionId, gunId } },
+        create: {
+          dutySessionId,
+          pumpId,
+          gunId,
+          fuelType: fuelType || 'MS',
+          staffId,
+        },
+        update: {
+          staffId,
+        },
+      });
+    }
+  }, TX_OPTIONS);
+
+  revalidatePath('/dashboard');
+  revalidatePath('/staff');
+  return { success: true, message: '✓ Staff assigned to pump nozzle successfully.' };
+}
+
+export async function updateStaffAttendanceAction(
+  attendanceId: string,
+  status: string,
+  workingDays: number,
+  remarks?: string,
+  staffId?: string,
+  dutySessionId?: string
+) {
+  const session = await requireAuth(['OWNER', 'MANAGER']);
+
+  if (!attendanceId && !dutySessionId) throw new Error('Attendance ID or Duty Session ID is required');
+  const numDays = Number(workingDays);
+  if (isNaN(numDays) || numDays < 0 || numDays > 5) {
+    throw new Error('Working days must be a valid non-negative number (e.g. 1.0, 0.5, 0.25, 0).');
+  }
+
+  const newStatus = status.trim().toUpperCase();
+
+  // 1. Try finding by ID
+  let existing = attendanceId
+    ? await (db as any).staffAttendance.findUnique({
+        where: { id: attendanceId },
+        include: { staff: true, dutySession: true },
+      })
+    : null;
+
+  // 2. Try finding by dutySessionId + staffId
+  if (!existing && (dutySessionId || attendanceId) && staffId) {
+    const targetDutyId = dutySessionId || attendanceId;
+    existing = await (db as any).staffAttendance.findFirst({
+      where: {
+        dutySessionId: targetDutyId,
+        staffId: staffId,
+      },
+      include: { staff: true, dutySession: true },
+    });
+  }
+
+  // 3. Try finding by dutySessionId alone
+  if (!existing && (dutySessionId || attendanceId)) {
+    const targetDutyId = dutySessionId || attendanceId;
+    existing = await (db as any).staffAttendance.findFirst({
+      where: {
+        dutySessionId: targetDutyId,
+      },
+      include: { staff: true, dutySession: true },
+    });
+  }
+
+  let updated;
+  if (existing) {
+    const oldStatus = existing.status;
+    const oldDays = existing.workingDays !== null && existing.workingDays !== undefined ? existing.workingDays : (existing.status === 'ABSENT' ? 0 : 1.0);
+
+    const targetDutyId = existing.dutySessionId;
+    const targetStaffId = existing.staffId;
+
+    // Update ALL nozzle attendance records for this staff member in this duty session
+    await (db as any).staffAttendance.updateMany({
+      where: {
+        dutySessionId: targetDutyId,
+        staffId: targetStaffId,
+      },
+      data: {
+        status: newStatus,
+        workingDays: numDays,
+        remarks: remarks ? remarks.trim() : null,
+      },
+    });
+
+    updated = await (db as any).staffAttendance.findUnique({
+      where: { id: existing.id },
+    });
+
+    await logAudit(
+      session.id,
+      'UPDATE_STAFF_ATTENDANCE',
+      'StaffAttendance',
+      existing.id,
+      `Status: ${oldStatus}, Days: ${oldDays}`,
+      `Status: ${newStatus}, Days: ${numDays} | Remarks: ${remarks ? remarks.trim() : 'N/A'}`
+    );
+  } else {
+    // Create new StaffAttendance record if missing
+    const targetDutyId = dutySessionId || attendanceId;
+    const targetStaffId = staffId;
+
+    if (!targetStaffId) throw new Error('Staff member is required to create attendance record.');
+
+    const pump = await db.pump.findFirst({ where: { active: true } });
+    if (!pump) throw new Error('No active pump found.');
+
+    updated = await (tx => (tx as any).staffAttendance.create({
+      data: {
+        dutySessionId: targetDutyId,
+        staffId: targetStaffId,
+        pumpId: pump.id,
+        status: newStatus,
+        workingDays: numDays,
+        remarks: remarks ? remarks.trim() : null,
+        recordedById: session.id,
+      },
+    }))(db);
+
+    await logAudit(
+      session.id,
+      'CREATE_STAFF_ATTENDANCE',
+      'StaffAttendance',
+      updated.id,
+      'None',
+      `Status: ${newStatus}, Days: ${numDays} | Remarks: ${remarks ? remarks.trim() : 'N/A'}`
+    );
+  }
+
+  revalidatePath('/dashboard');
+  revalidatePath('/staff');
+  revalidatePath('/reports');
+  return { success: true, updated };
+}
+
+export async function getStaffMonthlyAttendanceReportAction(
+  month: number,
+  year: number,
+  staffIdFilter?: string,
+  pumpIdFilter?: string,
+  statusFilter?: string,
+  includeInactive: boolean = false,
+  customStartDate?: string,
+  customEndDate?: string
+) {
+  const session = await requireAuth(['OWNER', 'MANAGER']);
+
+  let startDate: Date;
+  let endDate: Date;
+
+  if (customStartDate && customEndDate) {
+    startDate = new Date(`${customStartDate}T00:00:00`);
+    endDate = new Date(`${customEndDate}T23:59:59`);
+  } else {
+    startDate = new Date(year, month - 1, 1, 0, 0, 0);
+    endDate = new Date(year, month, 0, 23, 59, 59);
+  }
+
+  const allStaff = await db.staff.findMany({
+    where: includeInactive ? {} : { active: true },
+    orderBy: { name: 'asc' }
+  });
+
+  const attendances = await (db as any).staffAttendance.findMany({
+    where: {
+      dutySession: {
+        startTime: {
+          gte: startDate,
+          lte: endDate,
+        },
+      },
+      ...(staffIdFilter ? { staffId: staffIdFilter } : {}),
+      ...(pumpIdFilter ? { pumpId: pumpIdFilter } : {}),
+      ...(statusFilter ? { status: statusFilter } : {}),
+    },
+    include: {
+      staff: true,
+      pump: true,
+      gun: true,
+      dutySession: true,
+      outgoingStaff: true,
+      incomingStaff: true,
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  const staffSummaryMap: Record<string, {
+    staffId: string;
+    staffName: string;
+    workedDays: number;
+    fullDutiesCount: number;
+    partialDutiesCount: number;
+    emergencyExitsCount: number;
+    absentCount: number;
+    details: any[];
+  }> = {};
+
+  for (const s of allStaff) {
+    if (staffIdFilter && s.id !== staffIdFilter) continue;
+    staffSummaryMap[s.id] = {
+      staffId: s.id,
+      staffName: s.name,
+      workedDays: 0,
+      fullDutiesCount: 0,
+      partialDutiesCount: 0,
+      emergencyExitsCount: 0,
+      absentCount: 0,
+      details: [],
+    };
+  }
+
+  // Group attendances by staffId
+  const attendancesByStaff: Record<string, any[]> = {};
+  for (const att of attendances) {
+    if (!attendancesByStaff[att.staffId]) {
+      attendancesByStaff[att.staffId] = [];
+    }
+    attendancesByStaff[att.staffId].push(att);
+  }
+
+  for (const [sId, staffAtts] of Object.entries(attendancesByStaff)) {
+    if (!staffSummaryMap[sId]) {
+      staffSummaryMap[sId] = {
+        staffId: sId,
+        staffName: staffAtts[0]?.staff?.name || 'Unknown Staff',
+        workedDays: 0,
+        fullDutiesCount: 0,
+        partialDutiesCount: 0,
+        emergencyExitsCount: 0,
+        absentCount: 0,
+        details: [],
+      };
+    }
+
+    const summary = staffSummaryMap[sId];
+
+    // Group this staff member's attendances by dutySessionId
+    const dutyGroupsMap: Record<string, any[]> = {};
+    for (const att of staffAtts) {
+      const dId = att.dutySessionId;
+      if (!dutyGroupsMap[dId]) {
+        dutyGroupsMap[dId] = [];
+      }
+      dutyGroupsMap[dId].push(att);
+    }
+
+    // Sort duty groups by duty start time / createdAt desc
+    const sortedDutyGroupEntries = Object.entries(dutyGroupsMap).sort((a, b) => {
+      const timeA = new Date(a[1][0]?.dutySession?.startTime || a[1][0]?.createdAt).getTime();
+      const timeB = new Date(b[1][0]?.dutySession?.startTime || b[1][0]?.createdAt).getTime();
+      return timeB - timeA;
+    });
+
+    for (const [dId, groupAtts] of sortedDutyGroupEntries) {
+      const firstAtt = groupAtts[0];
+      const dutySession = firstAtt.dutySession;
+
+      const dutyStart = firstAtt.startTime || dutySession?.startTime;
+      const dutyEnd = firstAtt.endTime || dutySession?.endTime || new Date();
+
+      const explicitRecord = groupAtts.find((a: any) => a.workingDays !== null && a.workingDays !== undefined);
+      const wDays = explicitRecord
+        ? Number(explicitRecord.workingDays)
+        : (firstAtt.status === 'ABSENT' ? 0 : 1.0);
+
+      summary.workedDays += wDays;
+
+      if (firstAtt.status === 'ABSENT' || wDays === 0) {
+        summary.absentCount += 1;
+      } else if (firstAtt.status === 'EMERGENCY') {
+        summary.emergencyExitsCount += 1;
+        summary.partialDutiesCount += 1;
+      } else if (firstAtt.status === 'PARTIAL' || firstAtt.status === 'PARTIAL_DUTY' || firstAtt.status === 'EARLY_EXIT' || (wDays > 0 && wDays < 1.0)) {
+        summary.partialDutiesCount += 1;
+      } else {
+        summary.fullDutiesCount += 1;
+      }
+
+      // Collect unique guns and pumps for combined display
+      const pumpToGuns: Record<string, Set<string>> = {};
+      for (const a of groupAtts) {
+        const pName = a.pump?.name || 'Pump';
+        const gName = a.gun?.name || a.fuelType || 'Nozzle';
+        if (!pumpToGuns[pName]) {
+          pumpToGuns[pName] = new Set<string>();
+        }
+        pumpToGuns[pName].add(gName);
+      }
+
+      const pumpParts: string[] = [];
+      const allGunNames: string[] = [];
+
+      for (const [pName, gunsSet] of Object.entries(pumpToGuns)) {
+        const gunsArr = Array.from(gunsSet);
+        allGunNames.push(...gunsArr);
+        pumpParts.push(`${pName} (${gunsArr.join(', ')})`);
+      }
+
+      const pumpNameStr = Object.keys(pumpToGuns).join(', ');
+      const gunNameStr = Array.from(new Set(allGunNames)).join(', ');
+      const pumpNozzleStr = pumpParts.join(', ');
+
+      summary.details.push({
+        id: firstAtt.id,
+        allAttendanceIds: groupAtts.map((a: any) => a.id),
+        staffId: firstAtt.staffId,
+        dutySessionId: firstAtt.dutySessionId,
+        date: dutySession?.startTime
+          ? new Date(dutySession.startTime).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+          : 'N/A',
+        dutyNumber: dutySession?.dutyNumber || 0,
+        staffName: firstAtt.staff?.name || summary.staffName,
+        pumpName: pumpNameStr,
+        gunName: gunNameStr,
+        pumpNozzleStr,
+        startTimeStr: dutyStart ? new Date(dutyStart).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }) : 'N/A',
+        endTimeStr: firstAtt.endTime ? new Date(firstAtt.endTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }) : (dutySession?.endTime ? new Date(dutySession.endTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }) : 'Active'),
+        status: firstAtt.status,
+        startMeter: firstAtt.startMeterReading,
+        endMeter: groupAtts[groupAtts.length - 1]?.endMeterReading || firstAtt.endMeterReading,
+        reason: groupAtts.map((a: any) => a.reason).filter(Boolean).join('; ') || 'N/A',
+        remarks: groupAtts.map((a: any) => a.remarks).filter(Boolean).join('; ') || '',
+        workedDays: wDays,
+        outgoingStaffName: firstAtt.outgoingStaff?.name || null,
+        incomingStaffName: firstAtt.incomingStaff?.name || null,
+      });
+    }
+  }
+
+  const summaryList = Object.values(staffSummaryMap).map((s) => ({
+    ...s,
+    workedDays: Number(s.workedDays.toFixed(2)),
+  }));
+
+  return {
+    month,
+    year,
+    summary: summaryList,
+    recordsCount: attendances.length,
+  };
+}
+
+

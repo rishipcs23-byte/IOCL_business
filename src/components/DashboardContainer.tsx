@@ -4,10 +4,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Fuel, LayoutDashboard, History, FileSpreadsheet, DollarSign, Settings,
-  Activity, Users, ShieldAlert, LogOut, ArrowRight, UserCheck, CheckCircle2,
+  Activity, Users, ShieldAlert, LogOut, ArrowRight, UserCheck, UserX, CheckCircle2,
   AlertTriangle, Plus, Trash2, Calendar, FileText, ChevronRight, HelpCircle,
   Database, Info, TrendingUp, ArrowUpRight, ArrowDownRight, Wallet, HardDrive, BarChart3, CreditCard,
-  Edit, Eye, Layers, Building2, Check, ChevronDown, Filter, Lock, ShieldCheck, FlaskConical, Menu, X
+  Edit, Eye, Layers, Building2, Check, ChevronDown, Filter, Lock, ShieldCheck, FlaskConical, Menu, X, Mail,
+  RefreshCw, Wrench, Printer
 } from 'lucide-react';
 import {
   logoutAction, getActiveDutySession, startNewDutySession, saveMeterReadingsAction,
@@ -18,7 +19,12 @@ import {
   addOilProductAction, updateOilPriceAction, toggleOilProductStatusAction, deleteOilProductAction,
   getStaticData, getCreditLedgerReport, updateMeterReadingAction,
   getHistoricalDuties, getExpenseReport, getOilSalesReport, getOilPurchasesReport, recordTankSampleAction,
-  recordOilPurchaseAction, assignShortageAction, recordSampleBoxSaleAction, deleteSampleBoxSaleAction
+  recordOilPurchaseAction, assignShortageAction, recordSampleBoxSaleAction, deleteSampleBoxSaleAction,
+  sendTestEmailAction, getEmailLogsAction,
+  getEmailRecipientsAction, addEmailRecipientAction, updateEmailRecipientAction, toggleEmailRecipientStatusAction, deleteEmailRecipientAction,
+  deleteDutyAction, resetSystemAction, updateBusinessSettingsAction, getBusinessSettingsAction,
+  addPumpAction, togglePumpAction, deletePumpAction, addGunAction, toggleGunAction, deleteGunAction,
+  recordStaffHandoverAction, markStaffAbsentAction, assignMidDutyStaffAction, getStaffMonthlyAttendanceReportAction, updateStaffAttendanceAction
 } from '@/lib/actions';
 import * as XLSX from 'xlsx';
 import OwnerPastDutyReport from './OwnerPastDutyReport';
@@ -118,6 +124,7 @@ export default function DashboardContainer({
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
+
   // --- Change Duty Wizard State ---
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardStep, setWizardStep] = useState<1 | 2 | 'review' | 'firstDuty'>(1); // 1: Close active duty, review: Final report review, 2: Start new duty, firstDuty: First duty setup
@@ -206,7 +213,7 @@ export default function DashboardContainer({
   const [reportsTab, setReportsTab] = useState<'sales' | 'staff' | 'credit' | 'expenses' | 'oil' | 'stock' | 'cash'>('sales');
 
   // Aggregated Fuel Meter Sales Report State
-  const [fuelReportPreset, setFuelReportPreset] = useState<'ALL' | 'TODAY' | 'WEEK' | 'MONTH' | 'YEAR'>('ALL');
+  const [fuelReportPreset, setFuelReportPreset] = useState<'ALL' | 'TODAY' | 'YESTERDAY' | 'THIS_WEEK' | 'LAST_WEEK' | 'THIS_MONTH' | 'LAST_MONTH' | 'THIS_YEAR' | 'LAST_YEAR' | 'CUSTOM' | 'WEEK' | 'MONTH' | 'YEAR'>('ALL');
   const [fuelReportDate, setFuelReportDate] = useState<string>('');
   const [fuelReportStartDate, setFuelReportStartDate] = useState<string>('');
   const [fuelReportEndDate, setFuelReportEndDate] = useState<string>('');
@@ -219,43 +226,50 @@ export default function DashboardContainer({
   const [showDetailedMeterAudit, setShowDetailedMeterAudit] = useState<boolean>(false);
   const [selectedDrillDownKey, setSelectedDrillDownKey] = useState<string | null>(null);
   const [selectedDrillDownType, setSelectedDrillDownType] = useState<'PUMP' | 'STAFF' | 'PERIOD' | null>(null);
+  const [selectedDayDrillDownDate, setSelectedDayDrillDownDate] = useState<string | null>(null);
+  const [showDayDrillDownModal, setShowDayDrillDownModal] = useState<boolean>(false);
 
-  const handleQuickFilter = (preset: 'ALL' | 'TODAY' | 'WEEK' | 'MONTH' | 'YEAR') => {
+  const handleQuickFilter = (preset: 'ALL' | 'TODAY' | 'YESTERDAY' | 'THIS_WEEK' | 'LAST_WEEK' | 'THIS_MONTH' | 'LAST_MONTH' | 'THIS_YEAR' | 'LAST_YEAR' | 'CUSTOM') => {
     setFuelReportPreset(preset);
     const now = new Date();
     const todayStr = now.toLocaleDateString('en-CA');
 
-    if (preset === 'ALL') {
-      setFuelReportDate('');
-      setFuelReportStartDate('');
-      setFuelReportEndDate('');
-      setFuelReportMonth('');
-      setFuelReportYear('');
-    } else if (preset === 'TODAY') {
+    setFuelReportDate('');
+    setFuelReportStartDate('');
+    setFuelReportEndDate('');
+    setFuelReportMonth('');
+    setFuelReportYear('');
+
+    if (preset === 'TODAY') {
       setFuelReportDate(todayStr);
-      setFuelReportStartDate('');
-      setFuelReportEndDate('');
-      setFuelReportMonth('');
-      setFuelReportYear('');
-    } else if (preset === 'WEEK') {
-      const pastWeek = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-      setFuelReportStartDate(pastWeek.toLocaleDateString('en-CA'));
+    } else if (preset === 'YESTERDAY') {
+      const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      setFuelReportDate(yesterday.toLocaleDateString('en-CA'));
+    } else if (preset === 'THIS_WEEK') {
+      const dayOfWeek = now.getDay() === 0 ? 7 : now.getDay();
+      const monday = new Date(now);
+      monday.setDate(now.getDate() - (dayOfWeek - 1));
+      setFuelReportStartDate(monday.toLocaleDateString('en-CA'));
       setFuelReportEndDate(todayStr);
-      setFuelReportDate('');
-      setFuelReportMonth('');
-      setFuelReportYear('');
-    } else if (preset === 'MONTH') {
+    } else if (preset === 'LAST_WEEK') {
+      const dayOfWeek = now.getDay() === 0 ? 7 : now.getDay();
+      const lastWeekMon = new Date(now);
+      lastWeekMon.setDate(now.getDate() - (dayOfWeek - 1) - 7);
+      const lastWeekSun = new Date(lastWeekMon);
+      lastWeekSun.setDate(lastWeekMon.getDate() + 6);
+      setFuelReportStartDate(lastWeekMon.toLocaleDateString('en-CA'));
+      setFuelReportEndDate(lastWeekSun.toLocaleDateString('en-CA'));
+    } else if (preset === 'THIS_MONTH') {
       setFuelReportMonth(todayStr.slice(0, 7));
-      setFuelReportDate('');
-      setFuelReportStartDate('');
-      setFuelReportEndDate('');
-      setFuelReportYear('');
-    } else if (preset === 'YEAR') {
+    } else if (preset === 'LAST_MONTH') {
+      const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const yr = lastMonthDate.getFullYear();
+      const mo = String(lastMonthDate.getMonth() + 1).padStart(2, '0');
+      setFuelReportMonth(`${yr}-${mo}`);
+    } else if (preset === 'THIS_YEAR') {
       setFuelReportYear(todayStr.slice(0, 4));
-      setFuelReportDate('');
-      setFuelReportStartDate('');
-      setFuelReportEndDate('');
-      setFuelReportMonth('');
+    } else if (preset === 'LAST_YEAR') {
+      setFuelReportYear(String(now.getFullYear() - 1));
     }
   };
 
@@ -290,6 +304,8 @@ export default function DashboardContainer({
   const [expandedDuties, setExpandedDuties] = useState<Record<string, boolean>>({});
   const [selectedAttendanceDetailRow, setSelectedAttendanceDetailRow] = useState<any | null>(null);
   const [showStaffPerformanceOverview, setShowStaffPerformanceOverview] = useState<boolean>(false);
+  const [rosterFilter, setRosterFilter] = useState<'ACTIVE' | 'INACTIVE' | 'ALL'>('ACTIVE');
+  const [attRosterStatusFilter, setAttRosterStatusFilter] = useState<'ACTIVE' | 'INACTIVE' | 'ALL'>('ACTIVE');
 
   // Auto-scroll content area to top whenever active main tab or sub-tab changes
   useEffect(() => {
@@ -357,6 +373,569 @@ export default function DashboardContainer({
   const [correctionReason, setCorrectionReason] = useState<string>('');
   const [isSubmittingReadingEdit, setIsSubmittingReadingEdit] = useState<boolean>(false);
   const [expandedPumpId, setExpandedPumpId] = useState<string | null>(null);
+
+  // Multi-Recipient Email System State
+  const [emailRecipients, setEmailRecipients] = useState<any[]>([]);
+  const [showRecipientModal, setShowRecipientModal] = useState<boolean>(false);
+  const [editingRecipient, setEditingRecipient] = useState<any | null>(null);
+  const [recNameInput, setRecNameInput] = useState<string>('');
+  const [recEmailInput, setRecEmailInput] = useState<string>('');
+  const [recDutyReportsInput, setRecDutyReportsInput] = useState<boolean>(true);
+  const [recLowStockInput, setRecLowStockInput] = useState<boolean>(true);
+  const [isSavingRecipient, setIsSavingRecipient] = useState<boolean>(false);
+  const [testTargetEmail, setTestTargetEmail] = useState<string>('');
+
+  // Email test & log state
+  const [isSendingTestEmail, setIsSendingTestEmail] = useState<boolean>(false);
+  const [testEmailStatus, setTestEmailStatus] = useState<{ success: boolean; message: string } | null>(null);
+  const [emailLogs, setEmailLogs] = useState<any[]>([]);
+  const [isLoadingEmailLogs, setIsLoadingEmailLogs] = useState<boolean>(false);
+
+  // Maintenance & System Reset State
+  const [showClearReadingsModal, setShowClearReadingsModal] = useState<boolean>(false);
+  const [showResetModal, setShowResetModal] = useState<boolean>(false);
+  const [resetTextInput, setResetTextInput] = useState<string>('');
+  const [resetPasswordInput, setResetPasswordInput] = useState<string>('');
+  const [isResettingSystem, setIsResettingSystem] = useState<boolean>(false);
+
+  // Business Branding & Identity Settings State (Owner Only)
+  const [bizNameInput, setBizNameInput] = useState<string>(initialStaticData?.businessSettings?.BUSINESS_NAME || 'IOCL Petrol Bunk & Retail Outlet');
+  const [bizAddressInput, setBizAddressInput] = useState<string>(initialStaticData?.businessSettings?.BUSINESS_ADDRESS || 'Main Highway Station, Retail Outlet');
+  const [bizContactInput, setBizContactInput] = useState<string>(initialStaticData?.businessSettings?.BUSINESS_CONTACT || '+91 9876543210');
+  const [reportHeaderInput, setReportHeaderInput] = useState<string>(initialStaticData?.businessSettings?.REPORT_HEADER || 'IOCL Authorized Dealer Accounting Ledger');
+  const [msLowThresholdInput, setMsLowThresholdInput] = useState<number>(Number(initialStaticData?.businessSettings?.MS_LOW_THRESHOLD || 6000));
+  const [hsdLowThresholdInput, setHsdLowThresholdInput] = useState<number>(Number(initialStaticData?.businessSettings?.HSD_LOW_THRESHOLD || 6000));
+  const [isSavingBizSettings, setIsSavingBizSettings] = useState<boolean>(false);
+
+  // Dynamic Pump & Nozzle (Gun) Configuration State
+  const [newPumpName, setNewPumpName] = useState<string>('');
+  const [newGunPumpId, setNewGunPumpId] = useState<string>('');
+  const [newGunName, setNewGunName] = useState<string>('');
+  const [newGunFuelType, setNewGunFuelType] = useState<'MS' | 'HSD'>('MS');
+
+  // Staff Handover & Attendance State
+  const [showHandoverModal, setShowHandoverModal] = useState<boolean>(false);
+  const [handoverTarget, setHandoverTarget] = useState<{
+    dutySessionId: string;
+    gunId?: string;
+    gunName?: string;
+    pumpId: string;
+    pumpName?: string;
+    outgoingStaffId: string;
+    outgoingStaffName: string;
+    currentReading?: number;
+  } | null>(null);
+  const [incomingStaffInput, setIncomingStaffInput] = useState<string>('');
+  const [handoverTimeInput, setHandoverTimeInput] = useState<string>('');
+  const [handoverMeterInput, setHandoverMeterInput] = useState<number>(0);
+  const [handoverStatusInput, setHandoverStatusInput] = useState<'EMERGENCY' | 'PARTIAL_DUTY' | 'EARLY_EXIT'>('EMERGENCY');
+  const [handoverReasonInput, setHandoverReasonInput] = useState<string>('Emergency');
+  const [handoverRemarksInput, setHandoverRemarksInput] = useState<string>('');
+  const [isSubmittingHandover, setIsSubmittingHandover] = useState<boolean>(false);
+
+  // Mark Absent State
+  const [showAbsentModal, setShowAbsentModal] = useState<boolean>(false);
+  const [absentTarget, setAbsentTarget] = useState<{
+    dutySessionId: string;
+    gunId?: string;
+    gunName?: string;
+    pumpId: string;
+    staffId: string;
+    staffName: string;
+  } | null>(null);
+  const [absentReplacementInput, setAbsentReplacementInput] = useState<string>('');
+  const [absentReasonInput, setAbsentReasonInput] = useState<string>('Did not report');
+  const [isSubmittingAbsent, setIsSubmittingAbsent] = useState<boolean>(false);
+
+  // Monthly Worked Days Attendance State
+  const [attFilterMonth, setAttFilterMonth] = useState<number>(new Date().getMonth() + 1);
+  const [attFilterYear, setAttFilterYear] = useState<number>(new Date().getFullYear());
+  const [attFilterStaffId, setAttFilterStaffId] = useState<string>('');
+  const [attFilterStatus, setAttFilterStatus] = useState<string>('');
+  const [attFilterPreset, setAttFilterPreset] = useState<'THIS_MONTH' | 'LAST_MONTH' | 'WEEKLY' | 'CUSTOM'>('THIS_MONTH');
+  const [attCustomStartDate, setAttCustomStartDate] = useState<string>('');
+  const [attCustomEndDate, setAttCustomEndDate] = useState<string>('');
+  const [monthlyAttData, setMonthlyAttData] = useState<any>(null);
+  const [isLoadingMonthlyAtt, setIsLoadingMonthlyAtt] = useState<boolean>(false);
+  const [detailModalStaff, setDetailModalStaff] = useState<any | null>(null);
+  const [showAttDetailModal, setShowAttDetailModal] = useState<boolean>(false);
+
+  // Edit Attendance Modal State
+  const [showEditAttModal, setShowEditAttModal] = useState<boolean>(false);
+  const [editingAttRecord, setEditingAttRecord] = useState<any | null>(null);
+  const [editAttId, setEditAttId] = useState<string>('');
+  const [editAttStaffId, setEditAttStaffId] = useState<string>('');
+  const [editAttDutySessionId, setEditAttDutySessionId] = useState<string>('');
+  const [editAttStaffName, setEditAttStaffName] = useState<string>('');
+  const [editAttDutyNumber, setEditAttDutyNumber] = useState<number | string>('');
+  const [editAttDate, setEditAttDate] = useState<string>('');
+  const [editAttStatusInput, setEditAttStatusInput] = useState<string>('PRESENT');
+  const [editAttDaysInput, setEditAttDaysInput] = useState<number | string>(1.0);
+  const [editAttRemarksInput, setEditAttRemarksInput] = useState<string>('');
+  const [isSubmittingEditAtt, setIsSubmittingEditAtt] = useState<boolean>(false);
+
+  const handleAttPresetChange = (preset: 'THIS_MONTH' | 'LAST_MONTH' | 'WEEKLY' | 'CUSTOM') => {
+    setAttFilterPreset(preset);
+    const now = new Date();
+    if (preset === 'THIS_MONTH') {
+      setAttFilterMonth(now.getMonth() + 1);
+      setAttFilterYear(now.getFullYear());
+      setAttCustomStartDate('');
+      setAttCustomEndDate('');
+    } else if (preset === 'LAST_MONTH') {
+      const prevMonth = now.getMonth() === 0 ? 12 : now.getMonth();
+      const prevYear = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
+      setAttFilterMonth(prevMonth);
+      setAttFilterYear(prevYear);
+      setAttCustomStartDate('');
+      setAttCustomEndDate('');
+    } else if (preset === 'WEEKLY') {
+      const todayStr = now.toISOString().slice(0, 10);
+      const weekAgo = new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000);
+      const weekAgoStr = weekAgo.toISOString().slice(0, 10);
+      setAttCustomStartDate(weekAgoStr);
+      setAttCustomEndDate(todayStr);
+    } else if (preset === 'CUSTOM') {
+      if (!attCustomStartDate) {
+        const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+        const todayStr = now.toISOString().slice(0, 10);
+        setAttCustomStartDate(firstDay);
+        setAttCustomEndDate(todayStr);
+      }
+    }
+  };
+
+  const loadMonthlyAttendance = async (
+    overrideStart?: string,
+    overrideEnd?: string
+  ) => {
+    setIsLoadingMonthlyAtt(true);
+    try {
+      const useStart = overrideStart !== undefined ? overrideStart : (attFilterPreset === 'CUSTOM' || attFilterPreset === 'WEEKLY' ? attCustomStartDate : undefined);
+      const useEnd = overrideEnd !== undefined ? overrideEnd : (attFilterPreset === 'CUSTOM' || attFilterPreset === 'WEEKLY' ? attCustomEndDate : undefined);
+
+      const data = await getStaffMonthlyAttendanceReportAction(
+        attFilterMonth,
+        attFilterYear,
+        attFilterStaffId || undefined,
+        undefined,
+        attFilterStatus || undefined,
+        attRosterStatusFilter !== 'ACTIVE',
+        useStart || undefined,
+        useEnd || undefined
+      );
+      setMonthlyAttData(data);
+      return data;
+    } catch (err) {
+      console.error('Failed to load monthly attendance report:', err);
+      return null;
+    } finally {
+      setIsLoadingMonthlyAtt(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'reports' && reportsTab === 'staff') {
+      loadMonthlyAttendance();
+    }
+  }, [activeTab, reportsTab, attFilterMonth, attFilterYear, attFilterStaffId, attFilterStatus, attRosterStatusFilter, attFilterPreset, attCustomStartDate, attCustomEndDate]);
+
+  const handleOpenEditAtt = (record: any) => {
+    setEditingAttRecord(record);
+    setEditAttId(record.id);
+    setEditAttStaffId(record.staffId || detailModalStaff?.staffId || '');
+    setEditAttDutySessionId(record.dutySessionId || '');
+    setEditAttStaffName(record.staffName || detailModalStaff?.staffName || 'Staff');
+    setEditAttDutyNumber(record.dutyNumber || 'N/A');
+    setEditAttDate(record.date || '');
+    setEditAttStatusInput(record.status || 'PRESENT');
+    setEditAttDaysInput(record.workedDays !== undefined ? record.workedDays : (record.status === 'ABSENT' ? 0 : 1.0));
+    setEditAttRemarksInput(record.remarks || '');
+    setShowEditAttModal(true);
+  };
+
+  const handleSubmitEditAtt = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editAttId && !editAttDutySessionId) return;
+    setIsSubmittingEditAtt(true);
+    try {
+      const res = await updateStaffAttendanceAction(
+        editAttId,
+        editAttStatusInput,
+        Number(editAttDaysInput),
+        editAttRemarksInput,
+        editAttStaffId || detailModalStaff?.staffId,
+        editAttDutySessionId
+      );
+      flashMessage('✓ Attendance updated successfully.', 'success');
+      setShowEditAttModal(false);
+      const freshData = await loadMonthlyAttendance();
+      if (freshData && freshData.summary && detailModalStaff) {
+        const updatedStaff = freshData.summary.find((s: any) => s.staffId === detailModalStaff.staffId);
+        if (updatedStaff) {
+          setDetailModalStaff(updatedStaff);
+        }
+      }
+    } catch (err: any) {
+      flashMessage(err?.message || 'Failed to update attendance', 'error');
+    } finally {
+      setIsSubmittingEditAtt(false);
+    }
+  };
+
+  const handleOpenHandover = (item: {
+    dutySessionId: string;
+    gunId?: string;
+    gunName?: string;
+    pumpId: string;
+    pumpName?: string;
+    outgoingStaffId: string;
+    outgoingStaffName: string;
+    currentReading?: number;
+  }) => {
+    setHandoverTarget(item);
+    setIncomingStaffInput('');
+    const nowStr = new Date().toISOString().slice(0, 16);
+    setHandoverTimeInput(nowStr);
+    setHandoverMeterInput(item.currentReading || 0);
+    setHandoverStatusInput('EMERGENCY');
+    setHandoverReasonInput('Emergency');
+    setHandoverRemarksInput('');
+    setShowHandoverModal(true);
+  };
+
+  const handleSubmitHandover = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!handoverTarget) return;
+    setIsSubmittingHandover(true);
+    try {
+      const res = await recordStaffHandoverAction({
+        dutySessionId: handoverTarget.dutySessionId,
+        gunId: handoverTarget.gunId,
+        pumpId: handoverTarget.pumpId,
+        outgoingStaffId: handoverTarget.outgoingStaffId,
+        incomingStaffId: incomingStaffInput || null,
+        handoverTimeStr: handoverTimeInput,
+        handoverMeterReading: Number(handoverMeterInput),
+        status: handoverStatusInput,
+        reason: handoverReasonInput,
+        remarks: handoverRemarksInput,
+      });
+      flashMessage(res.message, 'success');
+      setShowHandoverModal(false);
+      await refreshActiveDuty();
+    } catch (err: any) {
+      flashMessage(err?.message || 'Failed to record handover', 'error');
+    } finally {
+      setIsSubmittingHandover(false);
+    }
+  };
+
+  const handleOpenAbsent = (item: {
+    dutySessionId: string;
+    gunId?: string;
+    gunName?: string;
+    pumpId: string;
+    staffId: string;
+    staffName: string;
+  }) => {
+    setAbsentTarget(item);
+    setAbsentReplacementInput('');
+    setAbsentReasonInput('Did not report');
+    setShowAbsentModal(true);
+  };
+
+  const handleSubmitAbsent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!absentTarget) return;
+    setIsSubmittingAbsent(true);
+    try {
+      const res = await markStaffAbsentAction({
+        dutySessionId: absentTarget.dutySessionId,
+        gunId: absentTarget.gunId,
+        pumpId: absentTarget.pumpId,
+        staffId: absentTarget.staffId,
+        replacementStaffId: absentReplacementInput || null,
+        reason: absentReasonInput,
+      });
+      flashMessage(res.message, 'success');
+      setShowAbsentModal(false);
+      await refreshActiveDuty();
+    } catch (err: any) {
+      flashMessage(err?.message || 'Failed to mark staff absent', 'error');
+    } finally {
+      setIsSubmittingAbsent(false);
+    }
+  };
+
+  const handleSaveBusinessSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingBizSettings(true);
+    try {
+      const res = await updateBusinessSettingsAction({
+        businessName: bizNameInput,
+        businessAddress: bizAddressInput,
+        businessContact: bizContactInput,
+        reportHeader: reportHeaderInput,
+        msLowThreshold: msLowThresholdInput,
+        hsdLowThreshold: hsdLowThresholdInput,
+      });
+      flashMessage(res.message, 'success');
+      await refreshActiveDuty();
+    } catch (err: any) {
+      flashMessage(err?.message || 'Failed to update business settings', 'error');
+    } finally {
+      setIsSavingBizSettings(false);
+    }
+  };
+
+  const handleAddPump = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPumpName.trim()) return;
+    setActionLoading(true);
+    try {
+      const res = await addPumpAction(newPumpName.trim());
+      if (res.success) {
+        flashMessage(`Pump "${newPumpName}" created successfully.`, 'success');
+        setNewPumpName('');
+        await refreshActiveDuty();
+      }
+    } catch (err: any) {
+      flashMessage(err?.message || 'Failed to add pump', 'error');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleAddGun = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newGunPumpId || !newGunName.trim()) return;
+    setActionLoading(true);
+    try {
+      const res = await addGunAction(newGunPumpId, newGunName.trim(), newGunFuelType);
+      if (res.success) {
+        flashMessage(`Nozzle "${newGunName}" (${newGunFuelType}) added successfully.`, 'success');
+        setNewGunName('');
+        await refreshActiveDuty();
+      }
+    } catch (err: any) {
+      flashMessage(err?.message || 'Failed to add nozzle', 'error');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleTogglePump = async (pumpId: string, active: boolean) => {
+    setActionLoading(true);
+    try {
+      await togglePumpAction(pumpId, active);
+      flashMessage('Pump status updated.', 'success');
+      await refreshActiveDuty();
+    } catch (err: any) {
+      flashMessage(err?.message || 'Failed to update pump', 'error');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleToggleGun = async (gunId: string, active: boolean) => {
+    setActionLoading(true);
+    try {
+      await toggleGunAction(gunId, active);
+      flashMessage('Nozzle status updated.', 'success');
+      await refreshActiveDuty();
+    } catch (err: any) {
+      flashMessage(err?.message || 'Failed to update nozzle', 'error');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleDeleteGun = async (gunId: string, name: string) => {
+    if (!confirm(`Are you sure you want to permanently delete nozzle "${name}"? This action cannot be undone.`)) return;
+    setActionLoading(true);
+    try {
+      await deleteGunAction(gunId);
+      flashMessage(`Nozzle "${name}" has been permanently deleted.`, 'success');
+      await refreshActiveDuty();
+    } catch (err: any) {
+      flashMessage(err?.message || 'Failed to delete nozzle', 'error');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleDeletePump = async (pumpId: string, name: string) => {
+    if (!confirm(`Are you sure you want to permanently delete pump unit "${name}" and all its nozzles? This action cannot be undone.`)) return;
+    setActionLoading(true);
+    try {
+      await deletePumpAction(pumpId);
+      flashMessage(`Pump unit "${name}" has been permanently deleted.`, 'success');
+      await refreshActiveDuty();
+    } catch (err: any) {
+      flashMessage(err?.message || 'Failed to delete pump unit', 'error');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleConfirmClearCurrentInputs = () => {
+    setOngoingReadings({});
+    setClosingReadings({});
+    setShowClearReadingsModal(false);
+    flashMessage('Current uncommitted pump reading inputs cleared. Historical records were not changed.', 'success');
+  };
+
+  const handleOpenResetModal = () => {
+    setShowResetModal(true);
+    setResetTextInput('');
+    setResetPasswordInput('');
+  };
+
+  const handleConfirmSystemReset = async () => {
+    if (resetTextInput.trim() !== 'RESET SYSTEM') {
+      flashMessage('Confirmation text must match exactly "RESET SYSTEM"', 'error');
+      return;
+    }
+    setIsResettingSystem(true);
+    try {
+      const res = await resetSystemAction(resetTextInput.trim(), resetPasswordInput);
+      flashMessage(res.message, 'success');
+      setShowResetModal(false);
+      await refreshActiveDuty();
+    } catch (err: any) {
+      flashMessage(err?.message || 'Failed to reset system', 'error');
+    } finally {
+      setIsResettingSystem(false);
+    }
+  };
+
+  const handleFetchEmailLogs = async () => {
+    setIsLoadingEmailLogs(true);
+    try {
+      const logs = await getEmailLogsAction();
+      setEmailLogs(logs || []);
+    } catch (err) {
+      console.error('Failed to load email logs:', err);
+    } finally {
+      setIsLoadingEmailLogs(false);
+    }
+  };
+
+  const loadEmailRecipients = async () => {
+    try {
+      const list = await getEmailRecipientsAction();
+      setEmailRecipients(list || []);
+    } catch (err) {
+      console.error('Failed to load email recipients:', err);
+    }
+  };
+
+  // Automatically load saved email recipients and logs from database on component mount
+  useEffect(() => {
+    loadEmailRecipients();
+    handleFetchEmailLogs();
+  }, []);
+
+  const handleOpenAddRecipient = () => {
+    setEditingRecipient(null);
+    setRecNameInput('');
+    setRecEmailInput('');
+    setRecDutyReportsInput(true);
+    setRecLowStockInput(true);
+    setShowRecipientModal(true);
+  };
+
+  const handleOpenEditRecipient = (rec: any) => {
+    setEditingRecipient(rec);
+    setRecNameInput(rec.name || '');
+    setRecEmailInput(rec.email || '');
+    setRecDutyReportsInput(rec.dutyReportsEnabled ?? true);
+    setRecLowStockInput(rec.lowFuelAlertsEnabled ?? true);
+    setShowRecipientModal(true);
+  };
+
+  const handleSaveEmailRecipient = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!recNameInput.trim()) {
+      flashMessage('Please enter recipient name', 'error');
+      return;
+    }
+    if (!recEmailInput.trim()) {
+      flashMessage('Please enter recipient email address', 'error');
+      return;
+    }
+    setIsSavingRecipient(true);
+    try {
+      if (editingRecipient) {
+        await updateEmailRecipientAction(editingRecipient.id, {
+          name: recNameInput.trim(),
+          email: recEmailInput.trim(),
+          dutyReportsEnabled: recDutyReportsInput,
+          lowFuelAlertsEnabled: recLowStockInput,
+        });
+        flashMessage('Email recipient updated successfully', 'success');
+      } else {
+        await addEmailRecipientAction({
+          name: recNameInput.trim(),
+          email: recEmailInput.trim(),
+          dutyReportsEnabled: recDutyReportsInput,
+          lowFuelAlertsEnabled: recLowStockInput,
+        });
+        flashMessage('Email recipient added successfully', 'success');
+      }
+      setShowRecipientModal(false);
+      await loadEmailRecipients();
+    } catch (err: any) {
+      flashMessage(err?.message || 'Failed to save email recipient', 'error');
+    } finally {
+      setIsSavingRecipient(false);
+    }
+  };
+
+  const handleToggleRecipientStatus = async (id: string, currentActive: boolean) => {
+    try {
+      await toggleEmailRecipientStatusAction(id, !currentActive);
+      flashMessage(`Recipient ${!currentActive ? 'enabled' : 'disabled'} successfully`, 'success');
+      await loadEmailRecipients();
+    } catch (err: any) {
+      flashMessage(err?.message || 'Failed to update recipient status', 'error');
+    }
+  };
+
+  const handleDeleteRecipient = async (id: string, name: string) => {
+    if (!confirm(`Are you sure you want to delete recipient "${name}"?\nHistorical email delivery logs for past deliveries will be preserved.`)) {
+      return;
+    }
+    try {
+      await deleteEmailRecipientAction(id);
+      flashMessage('Email recipient deleted successfully', 'success');
+      await loadEmailRecipients();
+    } catch (err: any) {
+      flashMessage(err?.message || 'Failed to delete recipient', 'error');
+    }
+  };
+
+  const handleSendTestEmailToTarget = async () => {
+    setIsSendingTestEmail(true);
+    setTestEmailStatus(null);
+    try {
+      const res = await sendTestEmailAction(testTargetEmail || undefined);
+      setTestEmailStatus(res);
+      if (res.success) {
+        flashMessage(res.message, 'success');
+      } else {
+        flashMessage(res.message, 'error');
+      }
+      handleFetchEmailLogs();
+    } catch (err: any) {
+      const msg = `✕ Email could not be sent: ${err?.message || 'Unknown error'}`;
+      setTestEmailStatus({ success: false, message: msg });
+      flashMessage(msg, 'error');
+    } finally {
+      setIsSendingTestEmail(false);
+    }
+  };
 
   const handleDateFilterChange = (dateVal: string) => {
     setFilterDate(dateVal);
@@ -1029,7 +1608,9 @@ export default function DashboardContainer({
   const msLitresRaw = activeDuty?.meterReadings
     ?.filter((mr: any) => mr.gun.fuelType === 'MS')
     .reduce((sum: number, mr: any) => {
-      const prevVal = openingReadings[mr.gunId] !== undefined ? openingReadings[mr.gunId] : mr.previousReading;
+      const prevVal = (openingReadings[mr.gunId] !== undefined && !isNaN(Number(openingReadings[mr.gunId])))
+        ? Number(openingReadings[mr.gunId])
+        : mr.previousReading;
       const val = closingReadings[mr.gunId] !== undefined ? closingReadings[mr.gunId] : mr.currentReading;
       return sum + Math.max(0, val - prevVal);
     }, 0) || 0;
@@ -1043,7 +1624,9 @@ export default function DashboardContainer({
   const hsdLitresRaw = activeDuty?.meterReadings
     ?.filter((mr: any) => mr.gun.fuelType === 'HSD')
     .reduce((sum: number, mr: any) => {
-      const prevVal = openingReadings[mr.gunId] !== undefined ? openingReadings[mr.gunId] : mr.previousReading;
+      const prevVal = (openingReadings[mr.gunId] !== undefined && !isNaN(Number(openingReadings[mr.gunId])))
+        ? Number(openingReadings[mr.gunId])
+        : mr.previousReading;
       const val = closingReadings[mr.gunId] !== undefined ? closingReadings[mr.gunId] : mr.currentReading;
       return sum + Math.max(0, val - prevVal);
     }, 0) || 0;
@@ -1109,7 +1692,9 @@ export default function DashboardContainer({
 
     // 1. Validate Meter Closing Readings
     for (const mr of activeDuty.meterReadings) {
-      const prevVal = openingReadings[mr.gunId] !== undefined ? openingReadings[mr.gunId] : mr.previousReading;
+      const prevVal = (openingReadings[mr.gunId] !== undefined && !isNaN(Number(openingReadings[mr.gunId])))
+        ? Number(openingReadings[mr.gunId])
+        : mr.previousReading;
       const currentVal = closingReadings[mr.gunId] !== undefined ? closingReadings[mr.gunId] : mr.currentReading;
 
       if (closingReadings[mr.gunId] === undefined && mr.currentReading <= 0) {
@@ -1117,8 +1702,13 @@ export default function DashboardContainer({
         return;
       }
 
-      if (currentVal < prevVal) {
-        highlightAndScrollTo(`closing-reading-${mr.gunId}`, `Closing reading (${currentVal}) for ${mr.gun.name} cannot be lower than opening reading (${prevVal}).`);
+      const hasIntervals = mr.intervals && mr.intervals.length > 0;
+      const applicablePrev = hasIntervals
+        ? mr.intervals[mr.intervals.length - 1].startReading
+        : prevVal;
+
+      if (currentVal < applicablePrev) {
+        highlightAndScrollTo(`closing-reading-${mr.gunId}`, `Closing reading (${currentVal}) for ${mr.gun.name} cannot be lower than the previous reading (${applicablePrev}).`);
         return;
       }
     }
@@ -1285,7 +1875,9 @@ export default function DashboardContainer({
   const msActiveDispensedLitres = activeDuty ? activeDuty.meterReadings
     .filter((mr: any) => mr.gun?.fuelType === 'MS')
     .reduce((sum: number, mr: any) => {
-      const prevVal = openingReadings[mr.gunId] !== undefined ? openingReadings[mr.gunId] : mr.previousReading;
+      const prevVal = (openingReadings[mr.gunId] !== undefined && !isNaN(Number(openingReadings[mr.gunId])))
+        ? Number(openingReadings[mr.gunId])
+        : mr.previousReading;
       const currentVal = closingReadings[mr.gunId] !== undefined ? closingReadings[mr.gunId] : mr.currentReading;
       return sum + Math.max(0, currentVal - prevVal);
     }, 0) : 0;
@@ -1293,7 +1885,9 @@ export default function DashboardContainer({
   const hsdActiveDispensedLitres = activeDuty ? activeDuty.meterReadings
     .filter((mr: any) => mr.gun?.fuelType === 'HSD')
     .reduce((sum: number, mr: any) => {
-      const prevVal = openingReadings[mr.gunId] !== undefined ? openingReadings[mr.gunId] : mr.previousReading;
+      const prevVal = (openingReadings[mr.gunId] !== undefined && !isNaN(Number(openingReadings[mr.gunId])))
+        ? Number(openingReadings[mr.gunId])
+        : mr.previousReading;
       const currentVal = closingReadings[mr.gunId] !== undefined ? closingReadings[mr.gunId] : mr.currentReading;
       return sum + Math.max(0, currentVal - prevVal);
     }, 0) : 0;
@@ -1327,6 +1921,23 @@ export default function DashboardContainer({
     isCorrected: hsdIsEditingStock,
     correctedLitres: hsdCorrectedStockInput,
   });
+
+  // Latest verified physical stock for website HIGH ALERT notification banner (≤ 6,000 L threshold)
+  const lastClosedDutyForAlert = historicalDuties?.find((d: any) => d.status === 'CLOSED');
+  const msLastDipAlert = lastClosedDutyForAlert?.tankDips?.find((t: any) => t.fuelType === 'MS');
+  const hsdLastDipAlert = lastClosedDutyForAlert?.tankDips?.find((t: any) => t.fuelType === 'HSD');
+
+  const verifiedMsPhysical = msMetrics.dipCm !== null && msMetrics.dipCm !== undefined && msMetrics.finalVerifiedStock !== null && msMetrics.finalVerifiedStock !== undefined
+    ? msMetrics.finalVerifiedStock
+    : (msLastDipAlert ? (msLastDipAlert.finalLitres ?? msLastDipAlert.physicalDip) : null);
+
+  const verifiedHsdPhysical = hsdMetrics.dipCm !== null && hsdMetrics.dipCm !== undefined && hsdMetrics.finalVerifiedStock !== null && hsdMetrics.finalVerifiedStock !== undefined
+    ? hsdMetrics.finalVerifiedStock
+    : (hsdLastDipAlert ? (hsdLastDipAlert.finalLitres ?? hsdLastDipAlert.physicalDip) : null);
+
+  const isMsStockCritical = verifiedMsPhysical !== null && verifiedMsPhysical !== undefined && verifiedMsPhysical <= 6000;
+  const isHsdStockCritical = verifiedHsdPhysical !== null && verifiedHsdPhysical !== undefined && verifiedHsdPhysical <= 6000;
+  const isAnyStockCritical = isMsStockCritical || isHsdStockCritical;
 
   // Step 4 Final Review Screen -> Perform Atomic Database Closing
   const handleConfirmCloseDuty = async () => {
@@ -1609,30 +2220,36 @@ export default function DashboardContainer({
     }
   };
 
-  const handleToggleStaff = async (id: string, active: boolean) => {
+  const handleToggleStaff = async (id: string, active: boolean, staffName?: string) => {
+    const actionLabel = active ? 'Enable' : 'Disable (Temporary)';
+    if (!confirm(`${actionLabel} staff member "${staffName || 'Staff'}"?\n\n${active ? `"${staffName || 'Staff'}" will become active again for duty assignments.` : `"${staffName || 'Staff'}" will be hidden from active duty assignment dropdowns, but all historical duty and attendance records will remain saved.`}`)) return;
     setActionLoading(true);
     try {
       await toggleStaffStatusAction(id, active);
-      flashMessage(`Staff member ${active ? 'enabled' : 'disabled'} successfully.`, 'success');
+      flashMessage(`Staff member "${staffName || 'Staff'}" ${active ? 'enabled' : 'disabled'} successfully.`, 'success');
       router.refresh();
+      const freshStatic = await getStaticData();
+      setStaticData(freshStatic);
     } catch (err: any) {
-      flashMessage(err.message, 'error');
+      flashMessage(err.message || 'Failed to update staff status', 'error');
     } finally {
       setActionLoading(false);
     }
   };
 
-  const handleDeleteStaff = async (id: string) => {
-    if (!confirm('Are you sure you want to delete or deactivate this staff member?')) return;
+  const handleDeleteStaff = async (id: string, staffName?: string) => {
+    if (!confirm(`PERMANENTLY DELETE staff member "${staffName || 'Staff'}"?\n\n⚠️ WARNING: This will delete "${staffName || 'Staff'}" entirely from the database. This action CANNOT be undone.`)) return;
     setActionLoading(true);
     try {
       const res = await deleteStaffAction(id);
       if (res.success) {
-        flashMessage(res.message || 'Staff status updated.', 'success');
+        flashMessage(res.message || `Staff member "${staffName || 'Staff'}" permanently deleted.`, 'success');
         router.refresh();
+        const freshStatic = await getStaticData();
+        setStaticData(freshStatic);
       }
     } catch (err: any) {
-      flashMessage(err.message, 'error');
+      flashMessage(err.message || 'Failed to delete staff member', 'error');
     } finally {
       setActionLoading(false);
     }
@@ -1758,11 +2375,162 @@ export default function DashboardContainer({
     }
   };
 
+  const handlePrintFuelReport = (
+    filteredReadingRows: any[],
+    summary: { totalMsLitres: number; totalMsRevenue: number; totalHsdLitres: number; totalHsdRevenue: number; totalFuelLitres: number; totalFuelRevenue: number },
+    sortedPeriods: any[]
+  ) => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      flashMessage('Please allow popups to print report.', 'error');
+      return;
+    }
+
+    const rangeText = fuelReportDate ? `Single Date: ${fuelReportDate}` :
+      fuelReportStartDate && fuelReportEndDate ? `Range: ${fuelReportStartDate} to ${fuelReportEndDate}` :
+      fuelReportMonth ? `Month: ${fuelReportMonth}` :
+      fuelReportYear ? `Year: ${fuelReportYear}` : `Preset: ${fuelReportPreset}`;
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <title>IOCL Fuel Sales & Meter Verification Report</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 12px; color: #1e293b; padding: 24px; line-height: 1.4; }
+            .header { border-bottom: 2px solid #0284c7; padding-bottom: 12px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: flex-start; }
+            .title { font-size: 18px; font-weight: 800; color: #0f172a; text-transform: uppercase; margin: 0; }
+            .subtitle { font-size: 11px; color: #64748b; margin-top: 4px; }
+            .badge { display: inline-block; padding: 4px 8px; font-size: 10px; font-weight: bold; background: #e0f2fe; color: #0369a1; border-radius: 4px; }
+            .section-title { font-size: 13px; font-weight: 800; text-transform: uppercase; margin: 20px 0 10px; color: #0f172a; border-bottom: 1px solid #cbd5e1; padding-bottom: 4px; }
+            .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+            .kpi-card { border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px; background: #f8fafc; }
+            .kpi-label { font-size: 10px; font-weight: bold; color: #64748b; text-transform: uppercase; }
+            .kpi-val { font-size: 18px; font-weight: 800; font-family: monospace; color: #0f172a; margin-top: 4px; }
+            .kpi-sub { font-size: 11px; font-weight: bold; color: #2563eb; margin-top: 2px; }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 11px; }
+            th, td { border: 1px solid #cbd5e1; padding: 6px 10px; text-align: left; }
+            th { background: #f1f5f9; font-weight: bold; text-transform: uppercase; font-size: 10px; color: #475569; }
+            .text-right { text-align: right; }
+            .font-mono { font-family: monospace; }
+            .font-bold { font-weight: bold; }
+            .footer { margin-top: 40px; border-top: 1px dashed #cbd5e1; padding-top: 16px; display: flex; justify-content: space-between; font-size: 11px; color: #64748b; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div>
+              <h1 class="title">IOCL PETROL PUMP — FUEL SALES & METER REPORT</h1>
+              <div class="subtitle">Official Station Sales, Meter Verification, Stock & Revenue Audit Register</div>
+            </div>
+            <div class="badge">${rangeText}</div>
+          </div>
+
+          <div class="kpi-grid">
+            <div class="kpi-card">
+              <div class="kpi-label">MS (Petrol) Volume</div>
+              <div class="kpi-val">${summary.totalMsLitres.toFixed(2)} L</div>
+              <div class="kpi-sub">₹${summary.totalMsRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">HSD (Diesel) Volume</div>
+              <div class="kpi-val">${summary.totalHsdLitres.toFixed(2)} L</div>
+              <div class="kpi-sub" style="color: #059669;">₹${summary.totalHsdRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Total Fuel Volume</div>
+              <div class="kpi-val">${summary.totalFuelLitres.toFixed(2)} L</div>
+              <div class="kpi-sub" style="color: #d97706;">Combined Sales</div>
+            </div>
+            <div class="kpi-card" style="background: #eff6ff; border-color: #93c5fd;">
+              <div class="kpi-label" style="color: #1e40af;">Total Fuel Revenue</div>
+              <div class="kpi-val" style="color: #1e3a8a;">₹${summary.totalFuelRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+              <div class="kpi-sub" style="color: #1d4ed8;">Net Sales Value</div>
+            </div>
+          </div>
+
+          <div class="section-title">1. Daily Aggregated Sales Summary</div>
+          <table>
+            <thead>
+              <tr>
+                <th>Date / Period</th>
+                <th class="text-right">MS Litres (L)</th>
+                <th class="text-right">HSD Litres (L)</th>
+                <th class="text-right">Total Fuel (L)</th>
+                <th class="text-right">Total Sales (₹)</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${sortedPeriods.map(p => `
+                <tr>
+                  <td class="font-bold">${p.periodKey}</td>
+                  <td class="text-right font-mono">${p.msLitres.toFixed(2)} L</td>
+                  <td class="text-right font-mono">${p.hsdLitres.toFixed(2)} L</td>
+                  <td class="text-right font-mono font-bold">${p.totalLitres.toFixed(2)} L</td>
+                  <td class="text-right font-mono font-bold">₹${p.totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+
+          <div class="section-title">2. Granular Nozzle Meter Readings Audit Log</div>
+          <table>
+            <thead>
+              <tr>
+                <th>Duty Session</th>
+                <th>Nozzle</th>
+                <th>Fuel</th>
+                <th>Staff</th>
+                <th class="text-right">Opening</th>
+                <th class="text-right">Closing</th>
+                <th class="text-right">Litres</th>
+                <th class="text-right">Rate</th>
+                <th class="text-right">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${filteredReadingRows.map(r => {
+                const mr = r.reading;
+                const litres = mr.litresSold || Math.max(0, mr.currentReading - mr.previousReading);
+                const amount = mr.salesAmount || (litres * mr.priceUsed);
+                return `
+                  <tr>
+                    <td>Duty #${r.duty.dutyNumber}</td>
+                    <td class="font-bold">${mr.gun?.name || 'Nozzle'}</td>
+                    <td>${r.fuelType}</td>
+                    <td>${r.assignedStaff?.name || 'Unassigned'}</td>
+                    <td class="text-right font-mono">${(mr.previousReading || 0).toFixed(2)}</td>
+                    <td class="text-right font-mono">${(mr.currentReading || 0).toFixed(2)}</td>
+                    <td class="text-right font-mono font-bold">${litres.toFixed(2)} L</td>
+                    <td class="text-right font-mono">₹${(mr.priceUsed || 0).toFixed(2)}</td>
+                    <td class="text-right font-mono font-bold">₹${amount.toFixed(2)}</td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+
+          <div class="footer">
+            <div>Verified by: Account Manager Signature _______________________</div>
+            <div>Station Owner Signature: _______________________</div>
+          </div>
+        </body>
+      </html>
+    `;
+
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+    printWindow.focus();
+    setTimeout(() => {
+      printWindow.print();
+    }, 300);
+  };
+
   const getNavItemClass = (isSelected: boolean) =>
-    `w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium transition-all ${
-      isSelected
-        ? 'bg-blue-50 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 font-semibold border border-blue-100 dark:border-blue-900 shadow-sm'
-        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
+    `w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium transition-all ${isSelected
+      ? 'bg-blue-50 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 font-semibold border border-blue-100 dark:border-blue-900 shadow-sm'
+      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
     }`;
 
   return (
@@ -1774,12 +2542,16 @@ export default function DashboardContainer({
         <div className="shrink-0">
           {/* Logo Brand */}
           <div className="h-16 border-b border-[var(--border-color)] flex items-center px-6 gap-3 bg-[var(--bg-surface)]">
-            <div className="h-10 w-10 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-sm">
+            <div className="h-10 w-10 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-sm shrink-0">
               <Fuel className="h-6 w-6" />
             </div>
-            <div>
-              <span className="font-bold text-sm tracking-tight text-[var(--text-primary)]">BUNK ACCOUNTING</span>
-              <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium uppercase tracking-wider">Control Panel</p>
+            <div className="min-w-0 flex-1">
+              <span className="font-bold text-sm tracking-tight text-[var(--text-primary)] block truncate">
+                {staticData?.businessSettings?.BUSINESS_NAME || 'PETROL BUNK ACCOUNTING'}
+              </span>
+              <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium uppercase tracking-wider truncate">
+                {staticData?.businessSettings?.BUSINESS_ADDRESS || 'Control Panel'}
+              </p>
             </div>
           </div>
 
@@ -1822,11 +2594,10 @@ export default function DashboardContainer({
             <span className="px-3 text-[10px] text-slate-400 font-bold uppercase tracking-wider block mb-1">Daily Operations</span>
             <button
               onClick={() => setActiveTab('current-duty')}
-              className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-medium transition-all ${
-                activeTab === 'current-duty'
+              className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-medium transition-all ${activeTab === 'current-duty'
                   ? 'bg-blue-50 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 font-semibold border border-blue-100 dark:border-blue-900 shadow-sm'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
-              }`}
+                }`}
             >
               <div className="flex items-center gap-3">
                 <Activity className="h-4 w-4" />
@@ -2042,11 +2813,10 @@ export default function DashboardContainer({
                 <span className="px-3 text-[10px] text-slate-400 font-bold uppercase tracking-wider block mb-1">Daily Operations</span>
                 <button
                   onClick={() => { setActiveTab('current-duty'); setMobileSidebarOpen(false); }}
-                  className={`w-full flex items-center justify-between px-3.5 py-3 rounded-xl text-xs font-medium transition-all touch-target-44 ${
-                    activeTab === 'current-duty'
+                  className={`w-full flex items-center justify-between px-3.5 py-3 rounded-xl text-xs font-medium transition-all touch-target-44 ${activeTab === 'current-duty'
                       ? 'bg-blue-50 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 font-semibold border border-blue-100 dark:border-blue-900 shadow-sm'
                       : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
-                  }`}
+                    }`}
                 >
                   <div className="flex items-center gap-3">
                     <Activity className="h-4 w-4 shrink-0" />
@@ -2275,6 +3045,46 @@ export default function DashboardContainer({
           </div>
         </header>
 
+        {/* HIGH ALERT NOTIFICATION BANNER (Website In-App High Alert for Physical Stock ≤ 6,000 L) */}
+        {isAnyStockCritical && (
+          <div className="bg-gradient-to-r from-red-950 via-rose-900 to-red-950 border-b-2 border-red-500 p-4 shadow-2xl text-white flex items-center justify-between gap-4 animate-pulse shrink-0">
+            <div className="flex items-center gap-3.5">
+              <div className="h-10 w-10 rounded-xl bg-red-600/40 border border-red-400/50 flex items-center justify-center shrink-0 shadow-lg">
+                <AlertTriangle className="h-6 w-6 text-red-300 animate-bounce" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="bg-red-600 text-white text-[10px] font-black uppercase px-2 py-0.5 rounded tracking-widest shadow-md">
+                    🚨 HIGH ALERT
+                  </span>
+                  <h4 className="font-extrabold text-sm sm:text-base text-red-100 tracking-wide">
+                    {isMsStockCritical && isHsdStockCritical
+                      ? 'CRITICAL LOW FUEL STOCK — BOTH PETROL (MS) & DIESEL (HSD) ≤ 6,000 L'
+                      : isMsStockCritical
+                        ? `CRITICAL LOW FUEL STOCK — MOTOR SPIRIT (MS PETROL) AT ${verifiedMsPhysical?.toLocaleString('en-IN')} L (≤ 6,000 L)`
+                        : `CRITICAL LOW FUEL STOCK — HIGH SPEED DIESEL (HSD) AT ${verifiedHsdPhysical?.toLocaleString('en-IN')} L (≤ 6,000 L)`}
+                  </h4>
+                </div>
+                <p className="text-xs text-red-200/90 mt-1 font-medium">
+                  Verified physical tank dip stock has reached or fallen below the 6,000 L threshold. Server-side email alerts dispatched to Owner &amp; Manager. Please order fuel delivery immediately!
+                </p>
+              </div>
+            </div>
+            <div className="hidden md:flex items-center gap-2 shrink-0">
+              {isMsStockCritical && (
+                <span className="px-3.5 py-1.5 rounded-xl bg-red-900/80 border border-red-500/60 font-mono text-xs font-bold text-red-100 shadow-md">
+                  MS: {verifiedMsPhysical?.toLocaleString('en-IN')} L
+                </span>
+              )}
+              {isHsdStockCritical && (
+                <span className="px-3.5 py-1.5 rounded-xl bg-red-900/80 border border-red-500/60 font-mono text-xs font-bold text-red-100 shadow-md">
+                  HSD: {verifiedHsdPhysical?.toLocaleString('en-IN')} L
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Dynamic Alerts */}
         {errorMessage && (
           <div className="bg-red-950/40 border border-red-500/30 text-red-400 px-8 py-3 text-sm flex items-center gap-3 animate-fade-in shrink-0">
@@ -2290,49 +3100,79 @@ export default function DashboardContainer({
         )}
 
         {/* Content Body */}
-        <div ref={mainContentRef} className="flex-1 overflow-y-auto p-3.5 sm:p-6 lg:p-8 pb-28 lg:pb-8 space-y-6 sm:space-y-8 custom-scrollbar">
+        <div ref={mainContentRef} className="flex-1 overflow-y-auto p-3.5 sm:p-5 lg:p-6 pb-20 custom-scrollbar">
+
+          {/* NO DUTY INITIALIZED COMPACT PANEL (Shown after Full Reset or fresh install) */}
+          {(!historicalDuties || historicalDuties.length === 0) && !activeDuty && (
+            <div className="bg-[var(--bg-surface)] border border-[var(--border-color)] rounded-xl p-5 sm:p-6 max-w-xl mx-auto my-4 shadow-sm text-center space-y-3">
+              <div className="h-10 w-10 bg-blue-50 dark:bg-blue-950/70 text-blue-600 dark:text-blue-400 rounded-xl border border-blue-200 dark:border-blue-800 flex items-center justify-center mx-auto shadow-sm">
+                <Fuel className="h-5 w-5" />
+              </div>
+              <div className="space-y-1">
+                <h2 className="text-lg sm:text-xl font-bold text-[var(--text-primary)] tracking-tight">NO DUTY HAS BEEN INITIALIZED</h2>
+                <p className="text-xs text-[var(--text-muted)] max-w-md mx-auto leading-relaxed">
+                  Set up your first duty by assigning staff, entering opening meter readings, fuel prices, and opening tank stock.
+                </p>
+              </div>
+              <div className="pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setWizardOpen(true);
+                    setWizardStep('firstDuty');
+                  }}
+                  className="px-4 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-sm transition-all flex items-center justify-center gap-2 mx-auto cursor-pointer"
+                >
+                  <Plus className="h-4 w-4" />
+                  START / INITIALIZE FIRST DUTY
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* TAB 1: OWNER DASHBOARD & VERIFICATION REPORT */}
           {activeTab === 'dashboard' && session.role === 'OWNER' && (
-            <div className="space-y-8">
+            <div className="space-y-4">
               {/* TOP CONTROLS & GLOBAL FILTER BAR */}
-              <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl flex flex-wrap items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 bg-indigo-600/20 text-indigo-400 rounded-xl border border-indigo-500/30 flex items-center justify-center">
-                    <ShieldCheck className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <h2 className="text-lg font-black text-white uppercase tracking-wider">Owner Operations & Verification Dashboard</h2>
-                    <p className="text-xs text-slate-400">Authoritative 24-Hour Bunk Ledger & Shift Reconciliation Control</p>
+              <div className="bg-[var(--bg-surface)] border border-[var(--border-color)] p-4 rounded-xl shadow-sm space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border-color)] pb-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="h-8 w-8 bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 rounded-lg border border-blue-200 dark:border-blue-800 flex items-center justify-center shrink-0 shadow-sm">
+                      <ShieldCheck className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <h2 className="text-base font-bold text-[var(--text-primary)] tracking-tight">OWNER OPERATIONS &amp; VERIFICATION DASHBOARD</h2>
+                      <p className="text-xs text-[var(--text-muted)] font-medium mt-0.5">Authoritative 24-Hour Bunk Ledger &amp; Shift Reconciliation Control</p>
+                    </div>
                   </div>
                 </div>
 
                 {/* Global Filters Bar */}
-                <div className="flex flex-wrap items-center gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 text-xs">
                   {/* Filter 1: Report Date */}
-                  <div className="flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800 text-xs">
-                    <Calendar className="h-3.5 w-3.5 text-sky-400" />
-                    <span className="text-slate-400 font-semibold">Date:</span>
+                  <div className="flex items-center gap-2 bg-[var(--bg-surface-secondary)] px-3 py-1.5 rounded-lg border border-[var(--border-subtle)] text-xs h-9">
+                    <Calendar className="h-3.5 w-3.5 text-blue-500 shrink-0" />
+                    <span className="text-[var(--text-muted)] font-semibold shrink-0">Date:</span>
                     <input
                       type="date"
                       value={filterDate}
                       onChange={(e) => handleDateFilterChange(e.target.value)}
-                      className="bg-transparent text-white font-bold focus:outline-none cursor-pointer"
+                      className="bg-transparent text-[var(--text-primary)] font-bold focus:outline-none cursor-pointer w-full"
                     />
                   </div>
 
                   {/* Filter 2: Duty Session */}
-                  <div className="flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800 text-xs">
-                    <Filter className="h-3.5 w-3.5 text-indigo-400" />
-                    <span className="text-slate-400 font-semibold">Duty Session:</span>
+                  <div className="flex items-center gap-2 bg-[var(--bg-surface-secondary)] px-3 py-1.5 rounded-lg border border-[var(--border-subtle)] text-xs h-9">
+                    <Filter className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
+                    <span className="text-[var(--text-muted)] font-semibold shrink-0">Duty Session:</span>
                     <select
                       value={selectedDutyId}
                       onChange={(e) => handleDutyFilterChange(e.target.value)}
-                      className="bg-transparent text-white font-bold focus:outline-none cursor-pointer"
+                      className="bg-transparent text-[var(--text-primary)] font-bold focus:outline-none cursor-pointer w-full truncate"
                     >
-                      <option value="CURRENT" className="bg-slate-900 text-white">Current Active Duty {activeDuty ? `#${activeDuty.dutyNumber}` : '(Closed)'}</option>
+                      <option value="CURRENT">Current Active Duty {activeDuty ? `#${activeDuty.dutyNumber}` : '(Closed)'}</option>
                       {initialHistoricalDuties.map((hd: any) => (
-                        <option key={hd.id} value={hd.id} className="bg-slate-900 text-white">
+                        <option key={hd.id} value={hd.id}>
                           Duty #{hd.dutyNumber} ({new Date(hd.startTime).toLocaleDateString()}) - {hd.status}
                         </option>
                       ))}
@@ -2340,33 +3180,33 @@ export default function DashboardContainer({
                   </div>
 
                   {/* Filter 3: Pump */}
-                  <div className="flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800 text-xs">
-                    <Fuel className="h-3.5 w-3.5 text-amber-400" />
-                    <span className="text-slate-400 font-semibold">Pump:</span>
+                  <div className="flex items-center gap-2 bg-[var(--bg-surface-secondary)] px-3 py-1.5 rounded-lg border border-[var(--border-subtle)] text-xs h-9">
+                    <Fuel className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                    <span className="text-[var(--text-muted)] font-semibold shrink-0">Pump:</span>
                     <select
                       value={filterPumpId}
                       onChange={(e) => setFilterPumpId(e.target.value)}
-                      className="bg-transparent text-white font-bold focus:outline-none cursor-pointer"
+                      className="bg-transparent text-[var(--text-primary)] font-bold focus:outline-none cursor-pointer w-full"
                     >
-                      <option value="ALL" className="bg-slate-900 text-white">All Pumps</option>
+                      <option value="ALL">All Pumps</option>
                       {staticData.pumps.map((p: any) => (
-                        <option key={p.id} value={p.id} className="bg-slate-900 text-white">{p.name}</option>
+                        <option key={p.id} value={p.id}>{p.name}</option>
                       ))}
                     </select>
                   </div>
 
                   {/* Filter 4: Staff */}
-                  <div className="flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800 text-xs">
-                    <Users className="h-3.5 w-3.5 text-emerald-400" />
-                    <span className="text-slate-400 font-semibold">Staff:</span>
+                  <div className="flex items-center gap-2 bg-[var(--bg-surface-secondary)] px-3 py-1.5 rounded-lg border border-[var(--border-subtle)] text-xs h-9">
+                    <Users className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                    <span className="text-[var(--text-muted)] font-semibold shrink-0">Staff:</span>
                     <select
                       value={filterStaffId}
                       onChange={(e) => setFilterStaffId(e.target.value)}
-                      className="bg-transparent text-white font-bold focus:outline-none cursor-pointer"
+                      className="bg-transparent text-[var(--text-primary)] font-bold focus:outline-none cursor-pointer w-full"
                     >
-                      <option value="ALL" className="bg-slate-900 text-white">All Staff</option>
+                      <option value="ALL">All Staff</option>
                       {staticData.staff.map((s: any) => (
-                        <option key={s.id} value={s.id} className="bg-slate-900 text-white">{s.name}</option>
+                        <option key={s.id} value={s.id}>{s.name}</option>
                       ))}
                     </select>
                   </div>
@@ -3302,13 +4142,24 @@ export default function DashboardContainer({
                             <h3 className="font-extrabold text-white text-lg">Gun Meter Readings (Grouped by Pump)</h3>
                             <p className="text-xs text-slate-400 mt-1">Enter current meter reading for each gun. Litres sold and sales are calculated automatically.</p>
                           </div>
-                          <button
-                            onClick={handleSaveOngoingReadings}
-                            disabled={actionLoading}
-                            className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition-all shadow-md"
-                          >
-                            {actionLoading ? 'Saving...' : 'Save Meter Readings'}
-                          </button>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setShowClearReadingsModal(true)}
+                              className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs transition-all border border-slate-700 flex items-center gap-1.5 cursor-pointer"
+                              title="Clear uncommitted pump reading inputs"
+                            >
+                              <RefreshCw className="h-3.5 w-3.5" />
+                              Clear Inputs
+                            </button>
+                            <button
+                              onClick={handleSaveOngoingReadings}
+                              disabled={actionLoading}
+                              className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition-all shadow-md"
+                            >
+                              {actionLoading ? 'Saving...' : 'Save Meter Readings'}
+                            </button>
+                          </div>
                         </div>
 
                         {/* PUMP 1 SECTION */}
@@ -3824,19 +4675,6 @@ export default function DashboardContainer({
                             <span className="text-white font-bold text-sm font-mono" suppressHydrationWarning>{new Date(activeDuty.startTime).toLocaleString()}</span>
                           </div>
                         </div>
-
-                        {/* Active Staff list */}
-                        <div className="border-t border-slate-800 pt-4 space-y-2 text-xs">
-                          <span className="text-slate-450 block font-bold uppercase tracking-wider text-[10px]">Staff Assignments</span>
-                          <div className="grid grid-cols-2 gap-2 text-slate-300">
-                            {activeDuty.assignments.map((as: any, idx: number) => (
-                              <div key={idx} className="bg-slate-950 px-3 py-2 rounded border border-slate-850">
-                                <span className="text-[10px] text-slate-500 block font-bold uppercase">{as.pump.name} - {as.fuelType}</span>
-                                <span className="text-slate-100 font-bold">{as.staff.name}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
                       </div>
 
                       {/* Oil sales entry */}
@@ -4290,8 +5128,7 @@ export default function DashboardContainer({
                   totalRevenue: number;
                 }> = {};
 
-                // Pre-populate with static pumps so all pumps are visible
-                (staticData.pumps || [{ id: 'p1', name: 'Pump 1' }, { id: 'p2', name: 'Pump 2' }]).forEach((p: any) => {
+                (staticData.pumps || []).forEach((p: any) => {
                   salesByPumpMap[p.id] = {
                     pumpId: p.id,
                     pumpName: p.name,
@@ -4376,9 +5213,13 @@ export default function DashboardContainer({
                 const salesByPeriodMap: Record<string, {
                   periodKey: string;
                   msLitres: number;
+                  msRevenue: number;
                   hsdLitres: number;
+                  hsdRevenue: number;
                   totalLitres: number;
                   totalRevenue: number;
+                  dutiesCount: number;
+                  dutyIds: Set<string>;
                 }> = {};
 
                 filteredReadingRows.forEach(r => {
@@ -4388,24 +5229,36 @@ export default function DashboardContainer({
                     salesByPeriodMap[periodKey] = {
                       periodKey,
                       msLitres: 0,
+                      msRevenue: 0,
                       hsdLitres: 0,
+                      hsdRevenue: 0,
                       totalLitres: 0,
-                      totalRevenue: 0
+                      totalRevenue: 0,
+                      dutiesCount: 0,
+                      dutyIds: new Set()
                     };
                   }
+                  salesByPeriodMap[periodKey].dutyIds.add(r.duty.id);
                   const litres = r.reading.litresSold || Math.max(0, r.reading.currentReading - r.reading.previousReading);
                   const revenue = r.reading.salesAmount || (litres * r.reading.priceUsed);
 
                   if (r.fuelType === 'MS') {
                     salesByPeriodMap[periodKey].msLitres += litres;
+                    salesByPeriodMap[periodKey].msRevenue += revenue;
                   } else {
                     salesByPeriodMap[periodKey].hsdLitres += litres;
+                    salesByPeriodMap[periodKey].hsdRevenue += revenue;
                   }
                   salesByPeriodMap[periodKey].totalLitres += litres;
                   salesByPeriodMap[periodKey].totalRevenue += revenue;
                 });
 
+                Object.values(salesByPeriodMap).forEach(p => {
+                  p.dutiesCount = p.dutyIds.size;
+                });
+
                 const sortedPeriods = Object.values(salesByPeriodMap).sort((a, b) => b.periodKey.localeCompare(a.periodKey));
+                const maxPeriodVolume = Math.max(...sortedPeriods.map(p => p.totalLitres), 1);
 
                 // 7. Drill-Down Filtered Rows
                 let activeDrillDownRows = filteredReadingRows;
@@ -4431,18 +5284,31 @@ export default function DashboardContainer({
                           <BarChart3 className="h-5 w-5" />
                         </div>
                         <div>
-                          <h4 className="font-extrabold text-white text-base uppercase tracking-wider">Fuel Meter Sales Verification Report</h4>
-                          <p className="text-xs text-slate-400">Owner Executive Summary → Verification → Granular Meter Drill-Down</p>
+                          <h4 className="font-extrabold text-white text-base uppercase tracking-wider">Fuel Sales & Meter Verification Report</h4>
+                          <p className="text-xs text-slate-400">Meter Readings → Fuel Sales Reconciliation → Daily & Monthly Granular Drill-Down</p>
                         </div>
                       </div>
 
                       <div className="flex items-center gap-2">
                         <button
+                          type="button"
                           onClick={() => handleExportExcel('sales-report-table', 'Fuel_Sales_Report')}
-                          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all shadow-md shadow-indigo-600/20"
+                          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all shadow-md cursor-pointer"
                         >
                           <FileSpreadsheet className="h-4 w-4" />
-                          Export Excel Report
+                          Export Excel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handlePrintFuelReport(
+                            filteredReadingRows,
+                            { totalMsLitres, totalMsRevenue, totalHsdLitres, totalHsdRevenue, totalFuelLitres, totalFuelRevenue },
+                            sortedPeriods
+                          )}
+                          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold transition-all shadow-md cursor-pointer border border-slate-700"
+                        >
+                          <Printer className="h-4 w-4 text-indigo-400" />
+                          Print / Export PDF
                         </button>
                       </div>
                     </div>
@@ -4452,22 +5318,27 @@ export default function DashboardContainer({
                       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-4">
                         <div className="flex items-center gap-2">
                           <Filter className="h-4 w-4 text-indigo-400" />
-                          <span className="text-xs font-bold text-white uppercase tracking-wider">Report Filter Bar</span>
+                          <span className="text-xs font-bold text-white uppercase tracking-wider">Date Range & Filter Controls</span>
                         </div>
 
                         {/* Quick Filter Preset Pills */}
-                        <div className="flex flex-wrap items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800">
+                        <div className="flex flex-wrap items-center gap-1.5 bg-slate-950 p-1.5 rounded-xl border border-slate-800">
                           {[
-                            { id: 'ALL', label: 'All Time' },
                             { id: 'TODAY', label: 'Today' },
-                            { id: 'WEEK', label: 'This Week' },
-                            { id: 'MONTH', label: 'This Month' },
-                            { id: 'YEAR', label: 'This Year' },
+                            { id: 'YESTERDAY', label: 'Yesterday' },
+                            { id: 'THIS_WEEK', label: 'This Week' },
+                            { id: 'LAST_WEEK', label: 'Last Week' },
+                            { id: 'THIS_MONTH', label: 'This Month' },
+                            { id: 'LAST_MONTH', label: 'Last Month' },
+                            { id: 'THIS_YEAR', label: 'This Year' },
+                            { id: 'LAST_YEAR', label: 'Last Year' },
+                            { id: 'ALL', label: 'All Time' },
                           ].map((p) => (
                             <button
                               key={p.id}
+                              type="button"
                               onClick={() => handleQuickFilter(p.id as any)}
-                              className={`px-3 py-1 text-[11px] font-bold rounded-lg transition-all ${fuelReportPreset === p.id
+                              className={`px-3 py-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer ${fuelReportPreset === p.id
                                 ? 'bg-indigo-600 text-white shadow-sm'
                                 : 'text-slate-400 hover:text-slate-200 hover:bg-slate-850'
                                 }`}
@@ -4488,7 +5359,7 @@ export default function DashboardContainer({
                             value={fuelReportDate}
                             onChange={(e) => {
                               setFuelReportDate(e.target.value);
-                              setFuelReportPreset('ALL');
+                              setFuelReportPreset('CUSTOM');
                             }}
                             className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono focus:border-indigo-500 focus:outline-none"
                           />
@@ -4502,7 +5373,7 @@ export default function DashboardContainer({
                             value={fuelReportStartDate}
                             onChange={(e) => {
                               setFuelReportStartDate(e.target.value);
-                              setFuelReportPreset('ALL');
+                              setFuelReportPreset('CUSTOM');
                             }}
                             className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono focus:border-indigo-500 focus:outline-none"
                           />
@@ -4516,7 +5387,7 @@ export default function DashboardContainer({
                             value={fuelReportEndDate}
                             onChange={(e) => {
                               setFuelReportEndDate(e.target.value);
-                              setFuelReportPreset('ALL');
+                              setFuelReportPreset('CUSTOM');
                             }}
                             className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono focus:border-indigo-500 focus:outline-none"
                           />
@@ -4530,7 +5401,7 @@ export default function DashboardContainer({
                             value={fuelReportMonth}
                             onChange={(e) => {
                               setFuelReportMonth(e.target.value);
-                              setFuelReportPreset('ALL');
+                              setFuelReportPreset('CUSTOM');
                             }}
                             className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono focus:border-indigo-500 focus:outline-none"
                           />
@@ -4545,7 +5416,7 @@ export default function DashboardContainer({
                             className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-semibold focus:border-indigo-500 focus:outline-none"
                           >
                             <option value="ALL">All Pumps</option>
-                            {(staticData.pumps || [{ id: 'p1', name: 'Pump 1' }, { id: 'p2', name: 'Pump 2' }]).map((p: any) => (
+                            {(staticData.pumps || []).map((p: any) => (
                               <option key={p.id} value={p.id}>{p.name}</option>
                             ))}
                           </select>
@@ -4584,11 +5455,12 @@ export default function DashboardContainer({
                       {/* Reset Filters Bar */}
                       <div className="flex justify-between items-center pt-2">
                         <div className="text-[11px] text-slate-400 font-mono">
-                          Active matching readings: <span className="font-bold text-indigo-400">{filteredReadingRows.length} entries</span>
+                          Active matching meter entries: <span className="font-bold text-indigo-400">{filteredReadingRows.length} entries</span>
                         </div>
                         <button
+                          type="button"
                           onClick={handleResetFuelFilters}
-                          className="text-[11px] font-bold text-slate-400 hover:text-white transition-all underline underline-offset-4"
+                          className="text-[11px] font-bold text-slate-400 hover:text-white transition-all underline underline-offset-4 cursor-pointer"
                         >
                           Clear All Filters
                         </button>
@@ -4606,8 +5478,9 @@ export default function DashboardContainer({
                           Adjust your date, pump, staff, or fuel type selection above to display aggregated sales metrics.
                         </p>
                         <button
+                          type="button"
                           onClick={handleResetFuelFilters}
-                          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all"
+                          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
                         >
                           Reset Filters
                         </button>
@@ -4617,47 +5490,207 @@ export default function DashboardContainer({
                         {/* 1. AGGREGATE EXECUTIVE KPI CARDS */}
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                           {/* MS Litres & Revenue */}
-                          <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl space-y-2">
+                          <div className="bg-slate-900 border border-indigo-500/30 p-5 rounded-2xl shadow-xl space-y-2">
                             <div className="flex justify-between items-center text-xs">
-                              <span className="font-bold text-slate-400 uppercase tracking-wider">Total MS Litres</span>
-                              <span className="px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 text-[10px] font-black">MS</span>
+                              <span className="font-bold text-indigo-300 uppercase tracking-wider">MS (Petrol) Sold</span>
+                              <span className="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-[10px] font-black">MS</span>
                             </div>
-                            <div className="font-mono text-2xl font-black text-white">{totalMsLitres.toFixed(2)} <span className="text-xs font-normal text-slate-400">L</span></div>
-                            <div className="text-xs text-indigo-400 font-mono font-bold">₹{totalMsRevenue.toFixed(2)} Revenue</div>
+                            <div className="font-mono text-2xl font-black text-white">{totalMsLitres.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span className="text-xs font-normal text-slate-400">L</span></div>
+                            <div className="text-xs text-indigo-400 font-mono font-bold">₹{totalMsRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Revenue</div>
                           </div>
 
                           {/* HSD Litres & Revenue */}
-                          <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl space-y-2">
+                          <div className="bg-slate-900 border border-emerald-500/30 p-5 rounded-2xl shadow-xl space-y-2">
                             <div className="flex justify-between items-center text-xs">
-                              <span className="font-bold text-slate-400 uppercase tracking-wider">Total HSD Litres</span>
-                              <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-black">HSD</span>
+                              <span className="font-bold text-emerald-300 uppercase tracking-wider">HSD (Diesel) Sold</span>
+                              <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-black">HSD</span>
                             </div>
-                            <div className="font-mono text-2xl font-black text-white">{totalHsdLitres.toFixed(2)} <span className="text-xs font-normal text-slate-400">L</span></div>
-                            <div className="text-xs text-emerald-400 font-mono font-bold">₹{totalHsdRevenue.toFixed(2)} Revenue</div>
+                            <div className="font-mono text-2xl font-black text-white">{totalHsdLitres.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span className="text-xs font-normal text-slate-400">L</span></div>
+                            <div className="text-xs text-emerald-400 font-mono font-bold">₹{totalHsdRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Revenue</div>
                           </div>
 
                           {/* Total Fuel Volume */}
-                          <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl space-y-2">
+                          <div className="bg-slate-900 border border-amber-500/30 p-5 rounded-2xl shadow-xl space-y-2">
                             <div className="flex justify-between items-center text-xs">
-                              <span className="font-bold text-slate-400 uppercase tracking-wider">Total Fuel Volume</span>
-                              <span className="px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-black">MS + HSD</span>
+                              <span className="font-bold text-amber-300 uppercase tracking-wider">Total Fuel Volume</span>
+                              <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-black">MS + HSD</span>
                             </div>
-                            <div className="font-mono text-2xl font-black text-amber-300">{totalFuelLitres.toFixed(2)} <span className="text-xs font-normal text-slate-400">L</span></div>
+                            <div className="font-mono text-2xl font-black text-amber-300">{totalFuelLitres.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span className="text-xs font-normal text-slate-400">L</span></div>
                             <div className="text-xs text-slate-400">Combined Volume Sold</div>
                           </div>
 
                           {/* Total Fuel Revenue */}
-                          <div className="bg-gradient-to-br from-indigo-950/60 to-slate-900 border border-indigo-500/30 p-5 rounded-2xl shadow-2xl space-y-2">
+                          <div className="bg-gradient-to-br from-indigo-950/80 via-slate-900 to-slate-900 border border-indigo-500/40 p-5 rounded-2xl shadow-2xl space-y-2">
                             <div className="flex justify-between items-center text-xs">
                               <span className="font-bold text-indigo-300 uppercase tracking-wider">Total Fuel Revenue</span>
-                              <span className="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 font-black text-[10px]">TOTAL</span>
+                              <span className="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 font-black text-[10px]">NET SALES</span>
                             </div>
-                            <div className="font-mono text-2xl font-black text-white">₹{totalFuelRevenue.toFixed(2)}</div>
+                            <div className="font-mono text-2xl font-black text-white">₹{totalFuelRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
                             <div className="text-xs text-indigo-300/80 font-medium">Aggregated Sales Value</div>
                           </div>
                         </div>
 
-                        {/* 2. SALES BY PUMP SECTION */}
+                        {/* 2. DAILY SALES VOLUME TREND BAR CHART */}
+                        {sortedPeriods.length > 0 && (
+                          <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">
+                            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+                              <div className="flex items-center gap-2">
+                                <BarChart3 className="h-5 w-5 text-indigo-400" />
+                                <div>
+                                  <h4 className="font-extrabold text-white text-sm uppercase tracking-wider">Daily Fuel Sales Trend</h4>
+                                  <p className="text-xs text-slate-400">Daily MS vs HSD volume visual trend across selected period</p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-3 text-xs font-bold font-mono">
+                                <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-sm bg-indigo-500 inline-block"></span> MS (Petrol)</span>
+                                <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-sm bg-emerald-500 inline-block"></span> HSD (Diesel)</span>
+                              </div>
+                            </div>
+
+                            <div className="space-y-3 pt-2">
+                              {sortedPeriods.slice(0, 14).map((p) => {
+                                const msPct = Math.min(100, Math.max(0, (p.msLitres / maxPeriodVolume) * 100));
+                                const hsdPct = Math.min(100, Math.max(0, (p.hsdLitres / maxPeriodVolume) * 100));
+
+                                return (
+                                  <div
+                                    key={p.periodKey}
+                                    onClick={() => {
+                                      setSelectedDayDrillDownDate(p.periodKey);
+                                      setShowDayDrillDownModal(true);
+                                    }}
+                                    className="group bg-slate-950 hover:bg-slate-900 p-3 rounded-xl border border-slate-850 hover:border-indigo-500/50 transition-all cursor-pointer space-y-2"
+                                  >
+                                    <div className="flex justify-between items-center text-xs">
+                                      <div className="flex items-center gap-2 font-bold">
+                                        <span className="text-indigo-400 font-sans">{p.periodKey}</span>
+                                        <span className="text-[10px] text-slate-500 font-mono font-normal">({p.dutiesCount} Duty{p.dutiesCount > 1 ? 'ies' : ''})</span>
+                                      </div>
+                                      <div className="font-mono text-xs text-slate-300 font-bold group-hover:text-indigo-300 transition-colors">
+                                        Total: <strong className="text-white">{p.totalLitres.toFixed(2)} L</strong> | <span className="text-indigo-400">₹{p.totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                      </div>
+                                    </div>
+
+                                    {/* Visual Bar Stack */}
+                                    <div className="space-y-1">
+                                      <div className="flex items-center gap-2 text-[10px] font-mono">
+                                        <span className="w-8 text-indigo-400 font-bold shrink-0">MS</span>
+                                        <div className="flex-1 bg-slate-900 h-3 rounded-full overflow-hidden">
+                                          <div className="bg-gradient-to-r from-indigo-600 to-indigo-400 h-full rounded-full transition-all duration-500" style={{ width: `${msPct}%` }}></div>
+                                        </div>
+                                        <span className="w-20 text-right font-bold text-white shrink-0">{p.msLitres.toFixed(2)} L</span>
+                                      </div>
+
+                                      <div className="flex items-center gap-2 text-[10px] font-mono">
+                                        <span className="w-8 text-emerald-400 font-bold shrink-0">HSD</span>
+                                        <div className="flex-1 bg-slate-900 h-3 rounded-full overflow-hidden">
+                                          <div className="bg-gradient-to-r from-emerald-600 to-emerald-400 h-full rounded-full transition-all duration-500" style={{ width: `${hsdPct}%` }}></div>
+                                        </div>
+                                        <span className="w-20 text-right font-bold text-white shrink-0">{p.hsdLitres.toFixed(2)} L</span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 3. DAILY BREAKDOWN REGISTER TABLE */}
+                        <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden space-y-0">
+                          <div className="p-6 border-b border-slate-800 flex flex-wrap items-center justify-between gap-4">
+                            <div className="flex items-center gap-2">
+                              <Calendar className="h-5 w-5 text-indigo-400" />
+                              <div>
+                                <h4 className="font-extrabold text-white text-sm uppercase tracking-wider">Daily Fuel Sales & Meter Register</h4>
+                                <p className="text-xs text-slate-400">Click any date to drill down into exact nozzle readings, checkpoint values & duty reports</p>
+                              </div>
+                            </div>
+
+                            {/* Grouping Selector */}
+                            <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
+                              {[
+                                { id: 'DATE', label: 'Date-wise' },
+                                { id: 'MONTH', label: 'Month-wise' },
+                                { id: 'YEAR', label: 'Year-wise' },
+                              ].map((g) => (
+                                <button
+                                  key={g.id}
+                                  type="button"
+                                  onClick={() => setFuelReportGroupBy(g.id as any)}
+                                  className={`px-3 py-1 font-bold rounded-lg transition-all cursor-pointer ${fuelReportGroupBy === g.id
+                                    ? 'bg-indigo-600 text-white shadow-sm'
+                                    : 'text-slate-400 hover:text-slate-200'
+                                    }`}
+                                >
+                                  {g.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-left border-collapse text-xs">
+                              <thead>
+                                <tr className="bg-slate-950 border-b border-slate-800 text-slate-400 uppercase font-bold text-[10px]">
+                                  <th className="p-3">{fuelReportGroupBy === 'YEAR' ? 'Year' : fuelReportGroupBy === 'MONTH' ? 'Month' : 'Date'}</th>
+                                  <th className="p-3 text-right">MS Litres</th>
+                                  <th className="p-3 text-right">HSD Litres</th>
+                                  <th className="p-3 text-right">Total Litres</th>
+                                  <th className="p-3 text-right">MS Revenue</th>
+                                  <th className="p-3 text-right">HSD Revenue</th>
+                                  <th className="p-3 text-right">Total Sales</th>
+                                  <th className="p-3 text-center">Duties</th>
+                                  <th className="p-3 text-center">Action</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-800/40 font-mono">
+                                {sortedPeriods.map((period) => (
+                                  <tr
+                                    key={period.periodKey}
+                                    className="hover:bg-slate-950/60 transition-all cursor-pointer"
+                                    onClick={() => {
+                                      setSelectedDayDrillDownDate(period.periodKey);
+                                      setShowDayDrillDownModal(true);
+                                    }}
+                                  >
+                                    <td className="p-3 font-bold font-sans text-indigo-400 flex items-center gap-1.5">
+                                      <Calendar className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
+                                      {period.periodKey}
+                                    </td>
+                                    <td className="p-3 text-right text-slate-200">{period.msLitres.toFixed(2)} L</td>
+                                    <td className="p-3 text-right text-slate-200">{period.hsdLitres.toFixed(2)} L</td>
+                                    <td className="p-3 text-right text-white font-black">{period.totalLitres.toFixed(2)} L</td>
+                                    <td className="p-3 text-right text-indigo-300">₹{period.msRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                    <td className="p-3 text-right text-emerald-300">₹{period.hsdRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                    <td className="p-3 text-right text-indigo-400 font-black">₹{period.totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                    <td className="p-3 text-center font-sans">
+                                      <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-bold text-[10px]">
+                                        {period.dutiesCount}
+                                      </span>
+                                    </td>
+                                    <td className="p-3 text-center">
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setSelectedDayDrillDownDate(period.periodKey);
+                                          setShowDayDrillDownModal(true);
+                                        }}
+                                        className="px-3 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-sans text-[11px] font-bold transition-all shadow flex items-center gap-1 mx-auto cursor-pointer"
+                                      >
+                                        <Eye className="h-3.5 w-3.5" />
+                                        View Day Details
+                                      </button>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+
+                        {/* 4. SALES BY PUMP SECTION */}
                         <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">
                           <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                             <div className="flex items-center gap-2">
@@ -4701,12 +5734,13 @@ export default function DashboardContainer({
                                 <div className="flex justify-between items-center pt-2 text-xs border-t border-slate-800/50">
                                   <span className="text-slate-400">Total Pump Volume: <strong className="text-white font-mono">{pump.totalLitres.toFixed(2)} L</strong></span>
                                   <button
+                                    type="button"
                                     onClick={() => {
                                       setSelectedDrillDownKey(pump.pumpId);
                                       setSelectedDrillDownType('PUMP');
                                       setShowDetailedMeterAudit(true);
                                     }}
-                                    className="text-xs font-bold text-indigo-400 hover:text-indigo-300 flex items-center gap-1 transition-all"
+                                    className="text-xs font-bold text-indigo-400 hover:text-indigo-300 flex items-center gap-1 transition-all cursor-pointer"
                                   >
                                     View Pump Meter Readings <ChevronRight className="h-3.5 w-3.5" />
                                   </button>
@@ -4716,7 +5750,7 @@ export default function DashboardContainer({
                           </div>
                         </div>
 
-                        {/* 3. SALES BY STAFF SECTION */}
+                        {/* 5. SALES BY STAFF SECTION */}
                         <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden">
                           <div className="p-6 border-b border-slate-800 flex justify-between items-center">
                             <div className="flex items-center gap-2">
@@ -4767,12 +5801,13 @@ export default function DashboardContainer({
                                       <td className="p-3 text-right text-indigo-400 font-black">₹{staff.totalRevenue.toFixed(2)}</td>
                                       <td className="p-3 text-center">
                                         <button
+                                          type="button"
                                           onClick={() => {
                                             setSelectedDrillDownKey(staff.staffId);
                                             setSelectedDrillDownType('STAFF');
                                             setShowDetailedMeterAudit(true);
                                           }}
-                                          className="px-2.5 py-1 rounded bg-slate-800 hover:bg-indigo-600 text-slate-300 hover:text-white font-sans text-[11px] font-bold transition-all"
+                                          className="px-2.5 py-1 rounded bg-slate-800 hover:bg-indigo-600 text-slate-300 hover:text-white font-sans text-[11px] font-bold transition-all cursor-pointer"
                                         >
                                           View Readings
                                         </button>
@@ -4785,87 +5820,13 @@ export default function DashboardContainer({
                           </div>
                         </div>
 
-                        {/* 4. DATE-WISE / MONTH-WISE / YEAR-WISE AGGREGATE TABLE */}
-                        <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden space-y-0">
-                          <div className="p-6 border-b border-slate-800 flex flex-wrap items-center justify-between gap-4">
-                            <div className="flex items-center gap-2">
-                              <Calendar className="h-5 w-5 text-indigo-400" />
-                              <div>
-                                <h4 className="font-extrabold text-white text-sm uppercase tracking-wider">Periodic Aggregated Sales Summary</h4>
-                                <p className="text-xs text-slate-400">Consolidated fuel volume and sales value over time</p>
-                              </div>
-                            </div>
-
-                            {/* Grouping Selector */}
-                            <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
-                              {[
-                                { id: 'DATE', label: 'Date-wise' },
-                                { id: 'MONTH', label: 'Month-wise' },
-                                { id: 'YEAR', label: 'Year-wise' },
-                              ].map((g) => (
-                                <button
-                                  key={g.id}
-                                  onClick={() => setFuelReportGroupBy(g.id as any)}
-                                  className={`px-3 py-1 font-bold rounded-lg transition-all ${fuelReportGroupBy === g.id
-                                    ? 'bg-indigo-600 text-white shadow-sm'
-                                    : 'text-slate-400 hover:text-slate-200'
-                                    }`}
-                                >
-                                  {g.label}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-
-                          <div className="overflow-x-auto">
-                            <table className="w-full text-left border-collapse text-xs">
-                              <thead>
-                                <tr className="bg-slate-950 border-b border-slate-800 text-slate-400 uppercase font-bold">
-                                  <th className="p-3">{fuelReportGroupBy === 'YEAR' ? 'Year' : fuelReportGroupBy === 'MONTH' ? 'Month' : 'Date'}</th>
-                                  <th className="p-3 text-right">MS Litres</th>
-                                  <th className="p-3 text-right">HSD Litres</th>
-                                  <th className="p-3 text-right">Total Litres</th>
-                                  <th className="p-3 text-right">Total Revenue</th>
-                                  <th className="p-3 text-center">Audit Option</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-slate-800/40 font-mono">
-                                {sortedPeriods.map((period) => (
-                                  <tr
-                                    key={period.periodKey}
-                                    className={`hover:bg-slate-950/40 transition-all ${selectedDrillDownKey === period.periodKey && selectedDrillDownType === 'PERIOD' ? 'bg-indigo-950/20' : ''}`}
-                                  >
-                                    <td className="p-3 font-bold font-sans text-indigo-400">{period.periodKey}</td>
-                                    <td className="p-3 text-right text-slate-200">{period.msLitres.toFixed(2)} L</td>
-                                    <td className="p-3 text-right text-slate-200">{period.hsdLitres.toFixed(2)} L</td>
-                                    <td className="p-3 text-right text-white font-black">{period.totalLitres.toFixed(2)} L</td>
-                                    <td className="p-3 text-right text-indigo-400 font-black">₹{period.totalRevenue.toFixed(2)}</td>
-                                    <td className="p-3 text-center">
-                                      <button
-                                        onClick={() => {
-                                          setSelectedDrillDownKey(period.periodKey);
-                                          setSelectedDrillDownType('PERIOD');
-                                          setShowDetailedMeterAudit(true);
-                                        }}
-                                        className="px-2.5 py-1 rounded bg-slate-800 hover:bg-indigo-600 text-slate-300 hover:text-white font-sans text-[11px] font-bold transition-all"
-                                      >
-                                        View Details
-                                      </button>
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-
-                        {/* 5. EXPANDABLE DRILL-DOWN DETAILED METER AUDIT TABLE */}
+                        {/* 6. EXPANDABLE DRILL-DOWN DETAILED METER AUDIT TABLE */}
                         <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden space-y-4 p-6">
                           <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
                             <div>
                               <h4 className="font-extrabold text-white text-sm uppercase tracking-wider flex items-center gap-2">
                                 <FileText className="h-4 w-4 text-indigo-400" />
-                                Detailed Meter Audit Log (Drill-Down Verification)
+                                Detailed Nozzle Meter Audit Log (Drill-Down Verification)
                               </h4>
                               <p className="text-xs text-slate-400 mt-0.5">Granular nozzle meter readings, opening/closing values, rates, and computed sales.</p>
                             </div>
@@ -4873,19 +5834,21 @@ export default function DashboardContainer({
                             <div className="flex items-center gap-3">
                               {selectedDrillDownKey && (
                                 <button
+                                  type="button"
                                   onClick={() => {
                                     setSelectedDrillDownKey(null);
                                     setSelectedDrillDownType(null);
                                   }}
-                                  className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-950 text-slate-300 hover:text-white text-xs font-bold transition-all"
+                                  className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-950 text-slate-300 hover:text-white text-xs font-bold transition-all cursor-pointer"
                                 >
                                   Clear Filter: {selectedDrillDownKey}
                                 </button>
                               )}
 
                               <button
+                                type="button"
                                 onClick={() => setShowDetailedMeterAudit(!showDetailedMeterAudit)}
-                                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 border border-slate-700 text-white font-bold text-xs transition-all flex items-center gap-2"
+                                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 border border-slate-700 text-white font-bold text-xs transition-all flex items-center gap-2 cursor-pointer"
                               >
                                 {showDetailedMeterAudit ? 'Hide Meter Details' : 'View Meter Details'}
                                 <ChevronDown className={`h-4 w-4 transition-transform ${showDetailedMeterAudit ? 'rotate-180' : ''}`} />
@@ -4897,7 +5860,7 @@ export default function DashboardContainer({
                             <div className="overflow-x-auto border border-slate-800 rounded-xl">
                               <table id="sales-report-table" className="w-full text-left border-collapse text-xs">
                                 <thead>
-                                  <tr className="bg-slate-950 border-b border-slate-800 text-slate-400 uppercase font-bold">
+                                  <tr className="bg-slate-950 border-b border-slate-800 text-slate-400 uppercase font-bold text-[10px]">
                                     <th className="p-3">Duty Session</th>
                                     <th className="p-3">Gun Name</th>
                                     <th className="p-3">Fuel Type</th>
@@ -5040,10 +6003,10 @@ export default function DashboardContainer({
                       if (!msHandled && !hsdHandled) msHandled = true;
                     }
 
-                    // Status Determination: Override -> default PRESENT if assigned -> default ABSENT if unassigned (as requested by user)
+                    // Status Determination: Override -> default PRESENT if assigned -> default NOT_SCHEDULED if unassigned
                     const overrideKey = `${d.id}_${s.id}`;
                     const status: 'PRESENT' | 'ABSENT' | 'NOT_SCHEDULED' =
-                      attendanceOverrides[overrideKey] || (hasAssignment ? 'PRESENT' : 'ABSENT');
+                      attendanceOverrides[overrideKey] || (hasAssignment ? 'PRESENT' : 'NOT_SCHEDULED');
 
                     // Filter constraints
                     if (staffReportStaff !== 'ALL' && s.id !== staffReportStaff && s.name !== staffReportStaff) return;
@@ -5248,19 +6211,17 @@ export default function DashboardContainer({
                     <!DOCTYPE html>
                     <html>
                       <head>
-                        <title>Monthly Staff Attendance & Payroll Roster - ${activeMonthLabel}</title>
+                        <title>Staff Attendance Roster - ${activeMonthLabel}</title>
                         <style>
                           body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 24px; color: #0f172a; }
                           .header { border-bottom: 2px solid #0f172a; padding-bottom: 12px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: flex-end; }
                           h2 { margin: 0; font-size: 20px; color: #0f172a; text-transform: uppercase; letter-spacing: 0.5px; }
                           p { font-size: 12px; color: #64748b; margin: 4px 0 0 0; font-family: monospace; }
-                          table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 11px; }
-                          th, td { border: 1px solid #cbd5e1; padding: 8px 10px; text-align: left; }
-                          th { background-color: #f1f5f9; font-weight: bold; text-transform: uppercase; font-size: 10px; color: #475569; letter-spacing: 0.5px; }
+                          table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 12px; }
+                          th, td { border: 1px solid #cbd5e1; padding: 10px 12px; text-align: left; }
+                          th { background-color: #f1f5f9; font-weight: bold; text-transform: uppercase; font-size: 11px; color: #475569; letter-spacing: 0.5px; }
                           .text-right { text-align: right; }
                           .text-center { text-align: center; }
-                          .badge-present { background: #dcfce7; color: #166534; padding: 2px 8px; border-radius: 4px; font-weight: bold; }
-                          .badge-absent { background: #fee2e2; color: #991b1b; padding: 2px 8px; border-radius: 4px; font-weight: bold; }
                           .footer { margin-top: 48px; display: flex; justify-content: space-between; font-size: 11px; color: #475569; }
                           @media print { body { margin: 0; } }
                         </style>
@@ -5268,8 +6229,8 @@ export default function DashboardContainer({
                       <body>
                         <div class="header">
                           <div>
-                            <h2>IOCL Fuel Station - Monthly Staff Attendance Roster</h2>
-                            <p>Monthly Period: ${activeMonthLabel} | Total Duty Sessions: ${filteredDuties.length}</p>
+                            <h2>IOCL Fuel Station - Staff Attendance Register</h2>
+                            <p>Period: ${activeMonthLabel}</p>
                           </div>
                           <div style="text-align: right; font-size: 11px; color: #64748b;">
                             Printed On: ${new Date().toLocaleDateString('en-IN')}
@@ -5281,27 +6242,15 @@ export default function DashboardContainer({
                             <tr>
                               <th class="text-center">S.No</th>
                               <th>Staff Member</th>
-                              <th>Designation / Role</th>
-                              <th class="text-right">Total Duties</th>
-                              <th class="text-right">Days Worked (Present)</th>
-                              <th class="text-right">Days Absent</th>
-                              <th class="text-right">Attendance Rate</th>
-                              <th class="text-right">MS Duties</th>
-                              <th class="text-right">HSD Duties</th>
+                              <th class="text-right">Working Days</th>
                             </tr>
                           </thead>
                           <tbody>
-                            ${staffMonthlySummaries.map((s: any, idx: number) => `
+                            ${(monthlyAttData?.summary || []).map((s: any, idx: number) => `
                               <tr>
                                 <td class="text-center"><strong>${idx + 1}</strong></td>
                                 <td><strong>${s.staffName}</strong></td>
-                                <td>${s.role}</td>
-                                <td class="text-right">${s.totalDutyDays}</td>
-                                <td class="text-right"><span class="badge-present">${s.presentCount} Shifts</span></td>
-                                <td class="text-right"><span class="badge-absent">${s.absentCount} Days</span></td>
-                                <td class="text-right font-mono"><strong>${s.attendanceRate}%</strong></td>
-                                <td class="text-right">${s.msDuties}</td>
-                                <td class="text-right">${s.hsdDuties}</td>
+                                <td class="text-right font-mono"><strong>${Number.isInteger(s.workedDays) ? s.workedDays : s.workedDays.toFixed(2).replace(/\.?0+$/, '')}</strong></td>
                               </tr>
                             `).join('')}
                           </tbody>
@@ -5325,149 +6274,216 @@ export default function DashboardContainer({
 
                 return (
                   <div className="space-y-4">
-                    {/* 1. TOP SUMMARY KPI CARDS (Compact Responsive Row / Mobile 2-Col Grid) */}
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                      {/* TOTAL STAFF */}
-                      <div className="bg-slate-900 border border-slate-800 px-4 py-3 rounded-xl shadow-md flex items-center justify-between">
+                    {/* ULTRA-SIMPLE STAFF ATTENDANCE & WORKING DAYS REGISTER */}
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
+                      <div className="flex flex-wrap justify-between items-center border-b border-slate-800 pb-3 gap-3">
                         <div>
-                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Staff</span>
-                          <span className="text-xl font-extrabold text-white font-mono mt-0.5 block">{totalStaffCount}</span>
+                          <h3 className="font-extrabold text-white text-base flex items-center gap-2">
+                            <Calendar className="h-5 w-5 text-indigo-400" />
+                            Staff Attendance Register
+                          </h3>
+                          <p className="text-xs text-slate-400 mt-0.5">
+                            Monthly Working Days summary (Assigned = 1.0 day, Absent = 0.0 days, Partial = Editable).
+                          </p>
                         </div>
-                        <div className="h-9 w-9 bg-indigo-950/60 border border-indigo-800/40 rounded-lg flex items-center justify-center text-indigo-400 shrink-0">
-                          <Users className="h-4 w-4" />
-                        </div>
-                      </div>
-
-                      {/* PRESENT DUTIES */}
-                      <div className="bg-slate-900 border border-slate-800 px-4 py-3 rounded-xl shadow-md flex items-center justify-between">
-                        <div>
-                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Present Duties</span>
-                          <span className="text-xl font-extrabold text-emerald-400 font-mono mt-0.5 block">{presentDutiesCount}</span>
-                        </div>
-                        <div className="h-9 w-9 bg-emerald-950/60 border border-emerald-800/40 rounded-lg flex items-center justify-center text-emerald-400 shrink-0">
-                          <UserCheck className="h-4 w-4" />
-                        </div>
-                      </div>
-
-                      {/* ABSENT DUTIES */}
-                      <div className="bg-slate-900 border border-slate-800 px-4 py-3 rounded-xl shadow-md flex items-center justify-between">
-                        <div>
-                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Absent Duties</span>
-                          <span className="text-xl font-extrabold text-red-400 font-mono mt-0.5 block">{absentDutiesCount}</span>
-                        </div>
-                        <div className="h-9 w-9 bg-red-950/60 border border-red-800/40 rounded-lg flex items-center justify-center text-red-400 shrink-0">
-                          <AlertTriangle className="h-4 w-4" />
-                        </div>
-                      </div>
-
-                      {/* NOT SCHEDULED */}
-                      <div className="bg-slate-900 border border-slate-800 px-4 py-3 rounded-xl shadow-md flex items-center justify-between">
-                        <div>
-                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Not Scheduled</span>
-                          <span className="text-xl font-extrabold text-slate-400 font-mono mt-0.5 block">{notScheduledCount}</span>
-                        </div>
-                        <div className="h-9 w-9 bg-slate-950 border border-slate-800 rounded-lg flex items-center justify-center text-slate-400 shrink-0">
-                          <Calendar className="h-4 w-4" />
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* 2. COMPACT STAFF PERFORMANCE OVERVIEW / MONTHLY ROSTER SUMMARY TABLE */}
-                    <div className="bg-slate-900 border border-slate-800 rounded-xl shadow-md overflow-hidden">
-                      <div className="px-4 py-3 bg-slate-950/80 flex flex-wrap items-center justify-between gap-3 border-b border-slate-800">
-                        <button
-                          type="button"
-                          onClick={() => setShowStaffPerformanceOverview(!showStaffPerformanceOverview)}
-                          className="flex items-center gap-2 text-xs font-bold text-slate-200 hover:text-white transition-colors"
-                        >
-                          <BarChart3 className="h-4 w-4 text-indigo-400" />
-                          <span className="uppercase tracking-wider">Monthly Staff Attendance & Shift Ledger</span>
-                          <span className="bg-indigo-950 text-indigo-300 border border-indigo-800 text-[10px] px-2 py-0.5 rounded-full font-mono">
-                            {activeMonthLabel}
-                          </span>
-                          <ChevronDown className={`h-4 w-4 text-indigo-400 transition-transform ${showStaffPerformanceOverview ? 'rotate-180' : ''}`} />
-                        </button>
-
                         <div className="flex items-center gap-2">
                           <button
                             type="button"
-                            onClick={handleExportMonthlyRosterPDF}
-                            className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shadow"
+                            onClick={() => {
+                              if (!monthlyAttData || !monthlyAttData.summary) return;
+                              const sheetData = monthlyAttData.summary.map((s: any) => ({
+                                'Staff Member': s.staffName,
+                                'Working Days': s.workedDays,
+                              }));
+                              const ws = XLSX.utils.json_to_sheet(sheetData);
+                              const wb = XLSX.utils.book_new();
+                              XLSX.utils.book_append_sheet(wb, ws, 'Staff_Attendance');
+                              XLSX.writeFile(wb, `Staff_Attendance_${attFilterMonth}_${attFilterYear}.xlsx`);
+                            }}
+                            className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
                           >
-                            <FileText className="h-3.5 w-3.5" />
-                            <span>Export Monthly Roster PDF</span>
+                            <FileSpreadsheet className="h-4 w-4" />
+                            Export Excel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleExportMonthlyRosterPDF}
+                            className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <FileText className="h-4 w-4" />
+                            Export PDF
                           </button>
                         </div>
                       </div>
 
-                      {showStaffPerformanceOverview && (
-                        <div className="overflow-x-auto p-2">
-                          <table className="w-full text-left border-collapse text-xs">
-                            <thead>
-                              <tr className="bg-slate-950/90 text-slate-400 uppercase font-bold text-[10px] border-b border-slate-800 font-mono">
-                                <th className="p-2.5">Staff Member</th>
-                                <th className="p-2.5 text-center">Month</th>
-                                <th className="p-2.5 text-right">Total Duties</th>
-                                <th className="p-2.5 text-right">Days Worked (Present)</th>
-                                <th className="p-2.5 text-right">Days Absent</th>
-                                <th className="p-2.5 text-right">Attendance Rate</th>
-                                <th className="p-2.5 text-right">MS Duties</th>
-                                <th className="p-2.5 text-right">HSD Duties</th>
-                                <th className="p-2.5 text-center">Action</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-800/40 font-mono text-[11px]">
-                              {staffMonthlySummaries.map((summary: any) => {
-                                const rateNum = parseFloat(summary.attendanceRate);
-                                const isHighRate = rateNum >= 80;
-                                return (
-                                  <tr key={summary.staffId} className="hover:bg-slate-950/40 transition-all">
-                                    <td className="p-2.5 font-sans font-bold text-white flex items-center gap-2.5">
-                                      <div className="h-7 w-7 rounded-full bg-indigo-600/20 border border-indigo-500/30 text-indigo-400 font-extrabold flex items-center justify-center text-[10px] shrink-0">
-                                        {summary.staffName.slice(0, 2).toUpperCase()}
-                                      </div>
-                                      <div>
-                                        <div className="text-white">{summary.staffName}</div>
-                                        <div className="text-[10px] text-slate-500 font-normal font-mono">{summary.role}</div>
-                                      </div>
-                                    </td>
-                                    <td className="p-2.5 text-center font-sans text-[11px] text-slate-400 font-medium">
-                                      {summary.monthLabel}
-                                    </td>
-                                    <td className="p-2.5 text-right text-slate-300 font-bold">{summary.totalDutyDays}</td>
-                                    <td className="p-2.5 text-right">
-                                      <span className="px-2 py-0.5 rounded bg-emerald-950/80 border border-emerald-800/60 text-emerald-400 font-bold text-[11px]">
-                                        {summary.presentCount} Shifts
-                                      </span>
-                                    </td>
-                                    <td className="p-2.5 text-right">
-                                      <span className={`px-2 py-0.5 rounded font-bold text-[11px] ${summary.absentCount > 0 ? 'bg-red-950/80 border border-red-800/60 text-red-400' : 'text-slate-500'}`}>
-                                        {summary.absentCount} Days
-                                      </span>
-                                    </td>
-                                    <td className="p-2.5 text-right font-mono">
-                                      <span className={`px-2 py-0.5 rounded font-bold text-[11px] border ${isHighRate ? 'bg-emerald-950/40 border-emerald-800/50 text-emerald-400' : 'bg-amber-950/40 border-amber-800/50 text-amber-400'}`}>
-                                        {summary.attendanceRate}%
-                                      </span>
-                                    </td>
-                                    <td className="p-2.5 text-right text-indigo-300 font-bold">{summary.msDuties}</td>
-                                    <td className="p-2.5 text-right text-emerald-300 font-bold">{summary.hsdDuties}</td>
-                                    <td className="p-2.5 text-center">
-                                      <button
-                                        type="button"
-                                        onClick={() => setStaffHistoryModal({ open: true, staffId: summary.staffId, staffName: summary.staffName })}
-                                        className="px-2.5 py-1 rounded bg-indigo-950 text-indigo-400 border border-indigo-800 text-[10px] font-bold font-sans hover:bg-indigo-900 transition-all shadow-xs"
-                                      >
-                                        History
-                                      </button>
-                                    </td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
+                      {/* Filters */}
+                      <div className="grid grid-cols-2 md:grid-cols-6 gap-3 bg-slate-950 p-3 rounded-xl border border-slate-850 text-xs">
+                        <div>
+                          <label className="text-[10px] text-slate-400 font-bold uppercase block mb-1">Period Preset</label>
+                          <select
+                            value={attFilterPreset}
+                            onChange={(e) => handleAttPresetChange(e.target.value as any)}
+                            className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-white font-bold text-xs focus:border-indigo-500 focus:outline-none"
+                          >
+                            <option value="THIS_MONTH">This Month</option>
+                            <option value="LAST_MONTH">Last Month</option>
+                            <option value="WEEKLY">Last 7 Days (Weekly)</option>
+                            <option value="CUSTOM">Custom Date Range</option>
+                          </select>
                         </div>
-                      )}
+                        {attFilterPreset === 'CUSTOM' || attFilterPreset === 'WEEKLY' ? (
+                          <>
+                            <div>
+                              <label className="text-[10px] text-slate-400 font-bold uppercase block mb-1">Start Date</label>
+                              <input
+                                type="date"
+                                value={attCustomStartDate}
+                                onChange={(e) => setAttCustomStartDate(e.target.value)}
+                                className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-white font-bold text-xs focus:border-indigo-500 focus:outline-none"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[10px] text-slate-400 font-bold uppercase block mb-1">End Date</label>
+                              <input
+                                type="date"
+                                value={attCustomEndDate}
+                                onChange={(e) => setAttCustomEndDate(e.target.value)}
+                                className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-white font-bold text-xs focus:border-indigo-500 focus:outline-none"
+                              />
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div>
+                              <label className="text-[10px] text-slate-400 font-bold uppercase block mb-1">Month</label>
+                              <select
+                                value={attFilterMonth}
+                                onChange={(e) => setAttFilterMonth(Number(e.target.value))}
+                                className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-white font-bold text-xs focus:border-indigo-500 focus:outline-none"
+                              >
+                                {['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'].map((m, i) => (
+                                  <option key={i} value={i + 1}>{m}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="text-[10px] text-slate-400 font-bold uppercase block mb-1">Year</label>
+                              <select
+                                value={attFilterYear}
+                                onChange={(e) => setAttFilterYear(Number(e.target.value))}
+                                className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-white font-bold text-xs focus:border-indigo-500 focus:outline-none"
+                              >
+                                {[2024, 2025, 2026, 2027].map((y) => (
+                                  <option key={y} value={y}>{y}</option>
+                                ))}
+                              </select>
+                            </div>
+                          </>
+                        )}
+                        <div>
+                          <label className="text-[10px] text-slate-400 font-bold uppercase block mb-1">Staff Roster Filter</label>
+                          <select
+                            value={attRosterStatusFilter}
+                            onChange={(e) => setAttRosterStatusFilter(e.target.value as any)}
+                            className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-white font-bold text-xs focus:border-indigo-500 focus:outline-none"
+                          >
+                            <option value="ACTIVE">Active Staff Only (Default)</option>
+                            <option value="INACTIVE">Inactive Staff</option>
+                            <option value="ALL">All Staff (Include Historical)</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-slate-400 font-bold uppercase block mb-1">Staff Member</label>
+                          <select
+                            value={attFilterStaffId}
+                            onChange={(e) => setAttFilterStaffId(e.target.value)}
+                            className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-white font-bold text-xs focus:border-indigo-500 focus:outline-none"
+                          >
+                            <option value="">All Staff Members</option>
+                            {((attRosterStatusFilter === 'ALL' || attRosterStatusFilter === 'INACTIVE' ? (staticData.allStaff || staticData.staff) : staticData.staff) || []).map((s: any) => (
+                              <option key={s.id} value={s.id}>{s.name} {!s.active ? '(Inactive)' : ''}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-slate-400 font-bold uppercase block mb-1">Status Filter</label>
+                          <select
+                            value={attFilterStatus}
+                            onChange={(e) => setAttFilterStatus(e.target.value)}
+                            className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-white font-bold text-xs focus:border-indigo-500 focus:outline-none"
+                          >
+                            <option value="">All Statuses</option>
+                            <option value="PRESENT">PRESENT</option>
+                            <option value="PARTIAL">PARTIAL</option>
+                            <option value="EMERGENCY">EMERGENCY</option>
+                            <option value="ABSENT">ABSENT</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* Unified Simple Staff Attendance Table */}
+                      <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-950">
+                        <table className="w-full text-left text-xs text-slate-300">
+                          <thead className="bg-slate-900 text-slate-400 uppercase text-[10px] font-bold border-b border-slate-800 font-mono">
+                            <tr>
+                              <th className="p-3">Staff Member</th>
+                              <th className="p-3 text-right">Working Days</th>
+                              <th className="p-3 text-center">Action</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-850 font-mono">
+                            {isLoadingMonthlyAtt ? (
+                              <tr>
+                                <td colSpan={3} className="p-4 text-center text-slate-400 text-xs italic font-sans">Loading attendance records...</td>
+                              </tr>
+                            ) : (!monthlyAttData || !monthlyAttData.summary || monthlyAttData.summary.length === 0) ? (
+                              <tr>
+                                <td colSpan={3} className="p-4 text-center text-slate-400 text-xs italic font-sans">No attendance records for selected period.</td>
+                              </tr>
+                            ) : (
+                              monthlyAttData.summary
+                                .filter((s: any) => !attFilterStaffId || s.staffId === attFilterStaffId)
+                                .map((s: any) => {
+                                  const displayDays = Number.isInteger(s.workedDays)
+                                    ? s.workedDays.toString()
+                                    : s.workedDays.toFixed(2).replace(/\.?0+$/, '');
+                                  return (
+                                    <tr key={s.staffId} className="hover:bg-slate-900/50 transition-colors">
+                                      <td className="p-3 font-bold text-white flex items-center gap-3">
+                                        <div className="h-8 w-8 rounded-full bg-indigo-600/20 border border-indigo-500/30 text-indigo-400 font-extrabold flex items-center justify-center text-xs shrink-0 font-mono">
+                                          {s.staffName.slice(0, 2).toUpperCase()}
+                                        </div>
+                                        <div>
+                                          <div className="text-white font-bold text-sm font-sans">{s.staffName}</div>
+                                          <div className="text-[10px] text-slate-400 font-normal font-mono">PUMP ATTENDANT</div>
+                                        </div>
+                                      </td>
+                                      <td className="p-3 text-right font-mono font-black text-indigo-400 text-base">
+                                        {displayDays}
+                                      </td>
+                                      <td className="p-3 text-center">
+                                        <div className="flex items-center justify-center gap-2">
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setDetailModalStaff(s);
+                                              setShowAttDetailModal(true);
+                                            }}
+                                            className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow flex items-center gap-1.5 cursor-pointer font-sans"
+                                            title="View full attendance history, shift details, and worked days breakdown"
+                                          >
+                                            <Eye className="h-3.5 w-3.5" />
+                                            View History
+                                          </button>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  );
+                                })
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
 
                     {/* 3. STICKY COMPACT FILTER & SEARCH BAR */}
@@ -5631,7 +6647,7 @@ export default function DashboardContainer({
                             className="w-full bg-slate-900 border border-slate-800 rounded-md px-2 py-1 text-white font-semibold text-[11px] focus:border-indigo-500 focus:outline-none"
                           >
                             <option value="ALL">All Pumps</option>
-                            {(staticData.pumps || [{ id: 'p1', name: 'Pump 1' }, { id: 'p2', name: 'Pump 2' }]).map((p: any) => (
+                            {(staticData.pumps || []).map((p: any) => (
                               <option key={p.id} value={p.name}>{p.name}</option>
                             ))}
                           </select>
@@ -5897,7 +6913,7 @@ export default function DashboardContainer({
                           >
                             ← Prev
                           </button>
-                          
+
                           {Array.from({ length: totalPagesCount }, (_, i) => i + 1)
                             .filter(p => p === 1 || p === totalPagesCount || Math.abs(p - currentReportPage) <= 1)
                             .map((pNum, index, array) => {
@@ -5978,7 +6994,7 @@ export default function DashboardContainer({
                             {/* Meter Readings for Assigned Guns */}
                             <div className="bg-slate-950 p-4 rounded-xl border border-slate-850 space-y-3 text-xs">
                               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block border-b border-slate-850 pb-2">Assigned Meter Readings</span>
-                              
+
                               {(() => {
                                 const targetDuty = filteredDuties.find(d => d.id === selectedAttendanceDetailRow.dutyId);
                                 const staffReadings = (targetDuty?.meterReadings || []).filter((mr: any) =>
@@ -6531,7 +7547,21 @@ export default function DashboardContainer({
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 {/* Staff Management */}
                 <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
-                  <h3 className="font-extrabold text-white text-base border-b border-slate-800 pb-2">Staff Roster Management</h3>
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                    <h3 className="font-extrabold text-white text-base">Staff Roster Management</h3>
+                    <div className="flex items-center gap-1.5 text-xs">
+                      <span className="text-[10px] text-slate-400 font-bold uppercase font-mono">View:</span>
+                      <select
+                        value={rosterFilter}
+                        onChange={(e) => setRosterFilter(e.target.value as any)}
+                        className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1 text-white text-xs font-bold focus:border-indigo-500 focus:outline-none cursor-pointer"
+                      >
+                        <option value="ACTIVE">Active Staff Only (Default)</option>
+                        <option value="INACTIVE">Inactive Staff</option>
+                        <option value="ALL">All Staff</option>
+                      </select>
+                    </div>
+                  </div>
 
                   <form onSubmit={handleAddStaff} className="flex gap-4">
                     <input
@@ -6544,7 +7574,7 @@ export default function DashboardContainer({
                     />
                     <button
                       type="submit"
-                      className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition-all shadow-md flex items-center gap-1 shrink-0"
+                      className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition-all shadow-md flex items-center gap-1 shrink-0 cursor-pointer"
                     >
                       <Plus className="h-4 w-4" /> Add Staff
                     </button>
@@ -6553,31 +7583,60 @@ export default function DashboardContainer({
                   <div className="overflow-y-auto max-h-72 border border-slate-850 rounded-xl">
                     <table className="w-full text-left border-collapse text-xs">
                       <thead>
-                        <tr className="bg-slate-950 border-b border-slate-850 text-slate-450 uppercase font-bold">
+                        <tr className="bg-slate-950 border-b border-slate-850 text-slate-450 uppercase font-bold font-mono text-[10px]">
                           <th className="p-3">Name</th>
                           <th className="p-3 text-center">Status</th>
                           <th className="p-3 text-center">Action</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-800/40">
-                        {staticData.staff.map((s: any, idx: number) => (
-                          <tr key={idx} className="hover:bg-slate-950/20">
+                        {((staticData.allStaff || staticData.staff || []).filter((s: any) => {
+                          if (rosterFilter === 'ACTIVE') return s.active;
+                          if (rosterFilter === 'INACTIVE') return !s.active;
+                          return true;
+                        })).map((s: any, idx: number) => (
+                          <tr key={s.id || idx} className="hover:bg-slate-950/20">
                             <td className="p-3 font-semibold text-slate-200">{s.name}</td>
                             <td className="p-3 text-center">
                               {s.active ? (
                                 <span className="inline-flex px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">ACTIVE</span>
                               ) : (
-                                <span className="inline-flex px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-850 text-slate-500 border border-slate-700">DISABLED</span>
+                                <span className="inline-flex px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-850 text-slate-500 border border-slate-700">INACTIVE</span>
                               )}
                             </td>
                             <td className="p-3 text-center">
-                              <button
-                                onClick={() => handleToggleStaff(s.id, !s.active)}
-                                className={`px-2.5 py-1 rounded text-[10px] font-bold ${s.active ? 'bg-red-950/50 hover:bg-red-900/50 text-red-400' : 'bg-emerald-950/50 hover:bg-emerald-900/50 text-emerald-400'
-                                  }`}
-                              >
-                                {s.active ? 'Disable' : 'Enable'}
-                              </button>
+                              <div className="flex items-center justify-center gap-2">
+                                {s.active ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleStaff(s.id, false, s.name)}
+                                    className="px-2.5 py-1 rounded text-[10px] font-bold bg-amber-950/60 hover:bg-amber-900/80 text-amber-300 border border-amber-500/40 cursor-pointer inline-flex items-center gap-1 transition-all"
+                                    title="Temporarily disable staff member from active roster"
+                                  >
+                                    <UserX className="h-3 w-3" />
+                                    Disable
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleStaff(s.id, true, s.name)}
+                                    className="px-2.5 py-1 rounded text-[10px] font-bold bg-emerald-950/60 hover:bg-emerald-900/80 text-emerald-300 border border-emerald-500/40 cursor-pointer inline-flex items-center gap-1 transition-all"
+                                    title="Enable staff member for active roster"
+                                  >
+                                    <UserCheck className="h-3 w-3" />
+                                    Enable
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteStaff(s.id, s.name)}
+                                  className="px-2.5 py-1 rounded text-[10px] font-bold bg-red-950/60 hover:bg-red-900/80 text-red-300 border border-red-500/40 cursor-pointer inline-flex items-center gap-1 transition-all"
+                                  title="Permanently delete staff member entirely from system database"
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                  Delete
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         ))}
@@ -6646,19 +7705,665 @@ export default function DashboardContainer({
                               )}
                             </td>
                             <td className="p-3 text-center">
-                              <button
-                                onClick={() => handleToggleCustomer(c.id, !c.active)}
-                                className={`px-2.5 py-1 rounded text-[10px] font-bold ${c.active ? 'bg-red-950/50 hover:bg-red-900/50 text-red-400' : 'bg-emerald-950/50 hover:bg-emerald-900/50 text-emerald-400'
-                                  }`}
-                              >
-                                {c.active ? 'Disable' : 'Enable'}
-                              </button>
+                              <div className="flex items-center justify-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleCustomer(c.id, !c.active)}
+                                  className={`px-2.5 py-1 rounded text-[10px] font-bold ${c.active ? 'bg-amber-950/50 hover:bg-amber-900/50 text-amber-400 border border-amber-500/30' : 'bg-emerald-950/50 hover:bg-emerald-900/50 text-emerald-400 border border-emerald-500/30'
+                                    }`}
+                                  title={c.active ? 'Disable Customer Account' : 'Enable Customer Account'}
+                                >
+                                  {c.active ? 'Disable' : 'Enable'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteCustomer(c.id)}
+                                  className="px-2.5 py-1 rounded text-[10px] font-bold bg-rose-950/50 text-rose-400 border border-rose-500/30 hover:bg-rose-900/50 flex items-center gap-1 cursor-pointer"
+                                  title="Delete Customer Account"
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                  Delete
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
+                </div>
+              </div>
+
+              {/* Business Branding & Retail Outlet Identity Settings (Owner Only) */}
+              {session.role === 'OWNER' && (
+                <div className="bg-[var(--bg-surface)] border border-[var(--border-color)] rounded-xl p-5 shadow-sm space-y-4">
+                  <div className="flex flex-wrap justify-between items-center border-b border-[var(--border-color)] pb-3 gap-3">
+                    <div>
+                      <h3 className="font-bold text-[var(--text-primary)] text-base flex items-center gap-2">
+                        <Building2 className="h-5 w-5 text-blue-500" />
+                        Bunk Identity &amp; Retail Outlet Branding
+                      </h3>
+                      <p className="text-xs text-[var(--text-muted)] mt-0.5">
+                        Configure petrol bunk identity, location, contact, report headers, and low-stock threshold triggers.
+                      </p>
+                    </div>
+                    <span className="text-[10px] font-mono px-2.5 py-1 bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 font-bold rounded-lg uppercase">
+                      Owner Controlled
+                    </span>
+                  </div>
+
+                  <form onSubmit={handleSaveBusinessSettings} className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1">Business / Bunk Station Name *</label>
+                        <input
+                          type="text"
+                          required
+                          value={bizNameInput}
+                          onChange={(e) => setBizNameInput(e.target.value)}
+                          className="w-full bg-[var(--bg-surface-secondary)] border border-[var(--border-subtle)] rounded-lg p-2.5 text-xs text-[var(--text-primary)] font-bold focus:border-blue-500 focus:outline-none"
+                          placeholder="e.g. Swastik IOCL Fuel Station & Retail Outlet"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1">Station Address &amp; Location *</label>
+                        <input
+                          type="text"
+                          required
+                          value={bizAddressInput}
+                          onChange={(e) => setBizAddressInput(e.target.value)}
+                          className="w-full bg-[var(--bg-surface-secondary)] border border-[var(--border-subtle)] rounded-lg p-2.5 text-xs text-[var(--text-primary)] font-bold focus:border-blue-500 focus:outline-none"
+                          placeholder="e.g. NH-44 Highway Junction, Hyderabad"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1">Contact Phone / Details</label>
+                        <input
+                          type="text"
+                          value={bizContactInput}
+                          onChange={(e) => setBizContactInput(e.target.value)}
+                          className="w-full bg-[var(--bg-surface-secondary)] border border-[var(--border-subtle)] rounded-lg p-2.5 text-xs text-[var(--text-primary)] font-bold focus:border-blue-500 focus:outline-none"
+                          placeholder="e.g. +91 9876543210"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1">MS Petrol Low Alert Threshold (L)</label>
+                        <input
+                          type="number"
+                          min="500"
+                          step="500"
+                          required
+                          value={msLowThresholdInput}
+                          onChange={(e) => setMsLowThresholdInput(Number(e.target.value))}
+                          className="w-full bg-[var(--bg-surface-secondary)] border border-[var(--border-subtle)] rounded-lg p-2.5 text-xs text-[var(--text-primary)] font-mono font-bold focus:border-blue-500 focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1">HSD Diesel Low Alert Threshold (L)</label>
+                        <input
+                          type="number"
+                          min="500"
+                          step="500"
+                          required
+                          value={hsdLowThresholdInput}
+                          onChange={(e) => setHsdLowThresholdInput(Number(e.target.value))}
+                          className="w-full bg-[var(--bg-surface-secondary)] border border-[var(--border-subtle)] rounded-lg p-2.5 text-xs text-[var(--text-primary)] font-mono font-bold focus:border-blue-500 focus:outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1">Official Report &amp; Invoice Header Text</label>
+                      <input
+                        type="text"
+                        value={reportHeaderInput}
+                        onChange={(e) => setReportHeaderInput(e.target.value)}
+                        className="w-full bg-[var(--bg-surface-secondary)] border border-[var(--border-subtle)] rounded-lg p-2.5 text-xs text-[var(--text-primary)] font-bold focus:border-blue-500 focus:outline-none"
+                        placeholder="e.g. Swastik Fuel Station Daily Shift Accounting Ledger"
+                      />
+                    </div>
+
+                    <div className="flex justify-end pt-2">
+                      <button
+                        type="submit"
+                        disabled={isSavingBizSettings}
+                        className="px-5 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-sm transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                      >
+                        <CheckCircle2 className="h-4 w-4" />
+                        {isSavingBizSettings ? 'Saving Settings...' : 'Save Business Settings'}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              )}
+
+              {/* Dynamic Pumps & Nozzles (Guns) Master Configuration Card (Owner Only) */}
+              {session.role === 'OWNER' && (
+                <div className="bg-[var(--bg-surface)] border border-[var(--border-color)] rounded-xl p-5 shadow-sm space-y-5">
+                  <div className="flex justify-between items-center border-b border-[var(--border-color)] pb-3">
+                    <div>
+                      <h3 className="font-bold text-[var(--text-primary)] text-base flex items-center gap-2">
+                        <Fuel className="h-5 w-5 text-amber-500" />
+                        Pumps &amp; Dispensing Nozzles Configuration
+                      </h3>
+                      <p className="text-xs text-[var(--text-muted)] mt-0.5">
+                        Add or modify fuel pumps, dispensing guns, and active nozzle assignments dynamically.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Add New Pump & Gun Forms */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Add Pump Form */}
+                    <form onSubmit={handleAddPump} className="bg-[var(--bg-surface-secondary)] p-3.5 rounded-xl border border-[var(--border-subtle)] space-y-3">
+                      <h4 className="font-bold text-xs text-[var(--text-primary)]">Add New Fuel Dispensing Pump</h4>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          required
+                          value={newPumpName}
+                          onChange={(e) => setNewPumpName(e.target.value)}
+                          className="flex-1 bg-[var(--input-background)] border border-[var(--border-subtle)] rounded-lg p-2 text-xs text-[var(--text-primary)] font-bold focus:border-blue-500 focus:outline-none"
+                          placeholder="e.g. Pump 3 (High-Speed)"
+                        />
+                        <button
+                          type="submit"
+                          className="px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-sm flex items-center gap-1 shrink-0"
+                        >
+                          <Plus className="h-3.5 w-3.5" /> Add Pump
+                        </button>
+                      </div>
+                    </form>
+
+                    {/* Add Gun Form */}
+                    <form onSubmit={handleAddGun} className="bg-[var(--bg-surface-secondary)] p-3.5 rounded-xl border border-[var(--border-subtle)] space-y-3">
+                      <h4 className="font-bold text-xs text-[var(--text-primary)]">Add New Dispensing Nozzle (Gun)</h4>
+                      <div className="grid grid-cols-3 gap-2">
+                        <select
+                          value={newGunPumpId}
+                          onChange={(e) => setNewGunPumpId(e.target.value)}
+                          required
+                          className="bg-[var(--input-background)] border border-[var(--border-subtle)] rounded-lg p-2 text-xs text-[var(--text-primary)] font-bold focus:border-blue-500 focus:outline-none"
+                        >
+                          <option value="">Select Pump</option>
+                          {(staticData.pumps || []).map((p: any) => (
+                            <option key={p.id} value={p.id}>{p.name}</option>
+                          ))}
+                        </select>
+                        <input
+                          type="text"
+                          required
+                          value={newGunName}
+                          onChange={(e) => setNewGunName(e.target.value)}
+                          className="bg-[var(--input-background)] border border-[var(--border-subtle)] rounded-lg p-2 text-xs text-[var(--text-primary)] font-bold focus:border-blue-500 focus:outline-none"
+                          placeholder="Gun Name (e.g. MS-5)"
+                        />
+                        <select
+                          value={newGunFuelType}
+                          onChange={(e) => setNewGunFuelType(e.target.value as any)}
+                          className="bg-[var(--input-background)] border border-[var(--border-subtle)] rounded-lg p-2 text-xs text-[var(--text-primary)] font-bold focus:border-blue-500 focus:outline-none"
+                        >
+                          <option value="MS">MS (Petrol)</option>
+                          <option value="HSD">HSD (Diesel)</option>
+                        </select>
+                      </div>
+                      <div className="flex justify-end">
+                        <button
+                          type="submit"
+                          className="px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-sm flex items-center gap-1"
+                        >
+                          <Plus className="h-3.5 w-3.5" /> Add Nozzle
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+
+                  {/* Configured Master Pump Units Table */}
+                  <div className="space-y-2">
+                    <h4 className="font-bold text-xs text-[var(--text-primary)]">Master Pump Units</h4>
+                    <div className="overflow-x-auto border border-[var(--border-subtle)] rounded-xl">
+                      <table className="w-full text-left border-collapse text-xs">
+                        <thead>
+                          <tr className="bg-[var(--bg-surface-secondary)] border-b border-[var(--border-subtle)] text-[var(--text-muted)] uppercase font-bold">
+                            <th className="p-3">Pump Unit Name</th>
+                            <th className="p-3 text-center">Attached Nozzles</th>
+                            <th className="p-3 text-center">Status</th>
+                            <th className="p-3 text-center">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-[var(--border-subtle)] font-mono">
+                          {(staticData.allPumps || staticData.pumps || []).map((p: any, idx: number) => (
+                            <tr key={idx} className="hover:bg-[var(--bg-surface-hover)]">
+                              <td className="p-3 font-sans font-bold text-[var(--text-primary)]">{p.name}</td>
+                              <td className="p-3 text-center font-bold text-indigo-400">{(p.guns || []).length} Nozzles</td>
+                              <td className="p-3 text-center font-sans">
+                                {p.active ? (
+                                  <span className="inline-flex px-2 py-0.5 rounded text-[9px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">ACTIVE</span>
+                                ) : (
+                                  <span className="inline-flex px-2 py-0.5 rounded text-[9px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-500 border border-slate-300 dark:border-slate-700">DISABLED</span>
+                                )}
+                              </td>
+                              <td className="p-3 text-center font-sans">
+                                <div className="flex items-center justify-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleTogglePump(p.id, !p.active)}
+                                    className={`px-2.5 py-1 rounded text-[10px] font-bold ${p.active ? 'bg-amber-950/40 text-amber-500 border border-amber-500/30' : 'bg-emerald-950/40 text-emerald-400 border border-emerald-500/30'}`}
+                                  >
+                                    {p.active ? 'Disable' : 'Enable'}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeletePump(p.id, p.name)}
+                                    className="px-2.5 py-1 rounded text-[10px] font-bold bg-rose-950/40 text-rose-400 border border-rose-500/30 hover:bg-rose-900/60 flex items-center gap-1 cursor-pointer"
+                                    title="Permanently delete this pump unit and its nozzles"
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                    Delete Pump
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Configured Guns List Table */}
+                  <div className="overflow-x-auto border border-[var(--border-subtle)] rounded-xl">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="bg-[var(--bg-surface-secondary)] border-b border-[var(--border-subtle)] text-[var(--text-muted)] uppercase font-bold">
+                          <th className="p-3">Pump Unit</th>
+                          <th className="p-3">Gun / Nozzle Name</th>
+                          <th className="p-3">Fuel Type</th>
+                          <th className="p-3 text-center">Status</th>
+                          <th className="p-3 text-center">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[var(--border-subtle)] font-mono">
+                        {(staticData.allGuns || staticData.guns || []).map((g: any, idx: number) => (
+                          <tr key={idx} className="hover:bg-[var(--bg-surface-hover)]">
+                            <td className="p-3 font-sans font-bold text-[var(--text-primary)]">{g.pump?.name || 'Pump Unit'}</td>
+                            <td className="p-3 font-bold text-blue-600 dark:text-blue-400">{g.name}</td>
+                            <td className="p-3 font-bold text-[var(--text-secondary)]">{g.fuelType}</td>
+                            <td className="p-3 text-center font-sans">
+                              {g.active ? (
+                                <span className="inline-flex px-2 py-0.5 rounded text-[9px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">ACTIVE</span>
+                              ) : (
+                                <span className="inline-flex px-2 py-0.5 rounded text-[9px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-500 border border-slate-300 dark:border-slate-700">DISABLED</span>
+                              )}
+                            </td>
+                            <td className="p-3 text-center font-sans">
+                              <div className="flex items-center justify-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleGun(g.id, !g.active)}
+                                  className={`px-2.5 py-1 rounded text-[10px] font-bold ${g.active ? 'bg-amber-950/40 text-amber-500 border border-amber-500/30' : 'bg-emerald-950/40 text-emerald-400 border border-emerald-500/30'}`}
+                                >
+                                  {g.active ? 'Disable' : 'Enable'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteGun(g.id, g.name)}
+                                  className="px-2.5 py-1 rounded text-[10px] font-bold bg-rose-950/40 text-rose-400 border border-rose-500/30 hover:bg-rose-900/60 flex items-center gap-1 cursor-pointer"
+                                  title="Permanently delete this nozzle"
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                  Delete
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Email Alerts & Reports Configuration Card */}
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-5">
+                <div className="flex flex-wrap justify-between items-center border-b border-slate-800 pb-3 gap-3">
+                  <div>
+                    <h3 className="font-extrabold text-white text-base flex items-center gap-2">
+                      <Settings className="h-5 w-5 text-indigo-400" />
+                      Email Alerts &amp; Reports Configuration
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Fully configurable multi-recipient email notification system. Manage recipients for duty closing reports &amp; low fuel stock alerts.
+                    </p>
+                  </div>
+                  {session?.role === 'OWNER' && (
+                    <button
+                      type="button"
+                      onClick={handleOpenAddRecipient}
+                      className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md transition-all flex items-center gap-2 shrink-0"
+                    >
+                      <Plus className="h-4 w-4" />
+                      + Add Email Recipient
+                    </button>
+                  )}
+                </div>
+
+                {/* Email Recipients Table */}
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center">
+                    <h4 className="font-bold text-slate-300 text-xs flex items-center gap-2">
+                      <Mail className="h-4 w-4 text-indigo-400" />
+                      Configured Email Recipients ({emailRecipients.length})
+                    </h4>
+                    <span className="text-[11px] text-slate-400">
+                      SMTP Sender: <code className="text-emerald-400 font-mono font-semibold">{initialStaticData?.businessSettings?.SMTP_USER || 'Gmail SMTP'}</code>
+                    </span>
+                  </div>
+
+                  {emailRecipients.length === 0 ? (
+                    <div className="bg-slate-950 p-6 rounded-xl border border-slate-800 text-center text-slate-400 text-xs">
+                      No email recipients configured yet. Click <strong>+ Add Email Recipient</strong> above to add recipients.
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-950">
+                      <table className="w-full text-left text-xs text-slate-300">
+                        <thead className="bg-slate-900 text-slate-400 uppercase text-[10px] font-bold border-b border-slate-800">
+                          <tr>
+                            <th className="p-3">Recipient Name</th>
+                            <th className="p-3">Email Address</th>
+                            <th className="p-3 text-center">Duty Reports</th>
+                            <th className="p-3 text-center">Low Fuel Alert</th>
+                            <th className="p-3 text-center">Status</th>
+                            {session?.role === 'OWNER' && <th className="p-3 text-right">Actions</th>}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-850">
+                          {emailRecipients.map((rec) => (
+                            <tr key={rec.id} className={`hover:bg-slate-900/50 ${!rec.active ? 'opacity-60 bg-slate-950/40' : ''}`}>
+                              <td className="p-3 font-bold text-white flex items-center gap-2">
+                                <span className="h-2 w-2 rounded-full bg-indigo-500" />
+                                {rec.name}
+                              </td>
+                              <td className="p-3 font-mono text-indigo-300 text-[11px]">
+                                {rec.email}
+                              </td>
+                              <td className="p-3 text-center font-bold">
+                                {rec.dutyReportsEnabled ? (
+                                  <span className="inline-flex items-center gap-1 text-emerald-400 text-xs" title="Enabled">
+                                    ✅ <span className="hidden sm:inline text-[11px] font-semibold">Yes</span>
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 text-slate-500 text-xs" title="Disabled">
+                                    ❌ <span className="hidden sm:inline text-[11px] font-semibold">No</span>
+                                  </span>
+                                )}
+                              </td>
+                              <td className="p-3 text-center font-bold">
+                                {rec.lowFuelAlertsEnabled ? (
+                                  <span className="inline-flex items-center gap-1 text-emerald-400 text-xs" title="Enabled">
+                                    ✅ <span className="hidden sm:inline text-[11px] font-semibold">Yes</span>
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 text-slate-500 text-xs" title="Disabled">
+                                    ❌ <span className="hidden sm:inline text-[11px] font-semibold">No</span>
+                                  </span>
+                                )}
+                              </td>
+                              <td className="p-3 text-center">
+                                {rec.active ? (
+                                  <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-bold text-[10px] border border-emerald-500/30">
+                                    Active
+                                  </span>
+                                ) : (
+                                  <span className="px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-400 font-bold text-[10px] border border-slate-700">
+                                    Disabled
+                                  </span>
+                                )}
+                              </td>
+                              {session?.role === 'OWNER' && (
+                                <td className="p-3 text-right">
+                                  <div className="flex items-center justify-end gap-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenEditRecipient(rec)}
+                                      className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-indigo-300 font-bold text-[11px] transition-all"
+                                      title="Edit Recipient"
+                                    >
+                                      Edit
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleToggleRecipientStatus(rec.id, rec.active)}
+                                      className={`px-2.5 py-1 rounded font-bold text-[11px] transition-all ${rec.active
+                                          ? 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30'
+                                          : 'bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30'
+                                        }`}
+                                      title={rec.active ? 'Disable Recipient' : 'Enable Recipient'}
+                                    >
+                                      {rec.active ? 'Disable' : 'Enable'}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteRecipient(rec.id, rec.name)}
+                                      className="px-2.5 py-1 rounded bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 font-bold text-[11px] transition-all"
+                                      title="Delete Recipient (Preserves Delivery Logs)"
+                                    >
+                                      Delete
+                                    </button>
+                                  </div>
+                                </td>
+                              )}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+                {/* Test Email Dispatcher Section */}
+                <div className="bg-slate-950 p-4 rounded-xl border border-slate-850 space-y-3">
+                  <h4 className="font-bold text-slate-300 text-xs flex items-center gap-2">
+                    <Mail className="h-4 w-4 text-emerald-400" />
+                    Test Email Dispatcher
+                  </h4>
+                  <div className="flex flex-wrap items-center gap-3 text-xs">
+                    <div className="flex-1 min-w-[200px]">
+                      <label className="text-[10px] text-slate-400 font-bold uppercase block mb-1">
+                        Select Configured Recipient
+                      </label>
+                      <select
+                        value={testTargetEmail}
+                        onChange={(e) => setTestTargetEmail(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono text-xs focus:border-indigo-500 focus:outline-none"
+                      >
+                        <option value="">Send to All Active Recipients</option>
+                        {emailRecipients.map((r) => (
+                          <option key={r.id} value={r.email}>
+                            {r.name} ({r.email}) {!r.active ? '[Disabled]' : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex-1 min-w-[200px]">
+                      <label className="text-[10px] text-slate-400 font-bold uppercase block mb-1">
+                        Or Custom Test Email Address
+                      </label>
+                      <input
+                        type="email"
+                        placeholder="Or type custom test address..."
+                        value={testTargetEmail}
+                        onChange={(e) => setTestTargetEmail(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono text-xs focus:border-indigo-500 focus:outline-none"
+                      />
+                    </div>
+                    <div className="shrink-0 self-end">
+                      <button
+                        type="button"
+                        onClick={handleSendTestEmailToTarget}
+                        disabled={isSendingTestEmail}
+                        className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md transition-all flex items-center gap-2 disabled:opacity-50"
+                      >
+                        <Mail className="h-4 w-4" />
+                        {isSendingTestEmail ? 'Sending Test Email...' : 'Send Test Email'}
+                      </button>
+                    </div>
+                  </div>
+                  {testEmailStatus && (
+                    <div className={`p-3 rounded-xl text-xs font-bold ${testEmailStatus.success ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400' : 'bg-rose-500/10 border border-rose-500/30 text-rose-400'}`}>
+                      {testEmailStatus.message}
+                    </div>
+                  )}
+                </div>
+
+                {/* Email Logs Table in System Configuration */}
+                <div className="mt-4 border-t border-slate-800/80 pt-4 space-y-3">
+                  <div className="flex justify-between items-center">
+                    <h4 className="font-bold text-slate-300 text-xs flex items-center gap-2">
+                      <Mail className="h-4 w-4 text-indigo-400" />
+                      Recent Server Email Delivery Logs
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={handleFetchEmailLogs}
+                      className="text-[11px] text-indigo-400 hover:text-indigo-300 font-semibold"
+                    >
+                      Refresh Delivery History
+                    </button>
+                  </div>
+                  {isLoadingEmailLogs ? (
+                    <p className="text-slate-500 text-xs italic">Loading email logs...</p>
+                  ) : emailLogs.length === 0 ? (
+                    <p className="text-slate-500 text-xs italic">No email delivery logs recorded yet.</p>
+                  ) : (
+                    <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-950">
+                      <table className="w-full text-left text-xs text-slate-300">
+                        <thead className="bg-slate-900 text-slate-400 uppercase text-[10px] font-bold">
+                          <tr>
+                            <th className="p-2.5">Sent At</th>
+                            <th className="p-2.5">Email Type</th>
+                            <th className="p-2.5">Reference</th>
+                            <th className="p-2.5">Recipients</th>
+                            <th className="p-2.5">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-850 font-mono text-[11px]">
+                          {emailLogs.slice(0, 10).map((log: any) => (
+                            <tr key={log.id} className="hover:bg-slate-900/50">
+                              <td className="p-2.5 text-slate-400">{new Date(log.sentAt).toLocaleString('en-IN')}</td>
+                              <td className="p-2.5 font-bold text-white">{log.emailType}</td>
+                              <td className="p-2.5 text-indigo-300">{log.reference || 'N/A'}</td>
+                              <td className="p-2.5 text-slate-300 max-w-[200px] truncate">{log.recipients}</td>
+                              <td className="p-2.5">
+                                {log.status === 'SENT' ? (
+                                  <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-bold text-[10px]">✓ SENT</span>
+                                ) : (
+                                  <span className="px-2 py-0.5 rounded bg-rose-500/20 text-rose-400 font-bold text-[10px]" title={log.errorMessage}>✕ FAILED</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* System Configuration -> Advanced Maintenance Operations */}
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
+                <div className="border-b border-slate-800 pb-3 flex flex-wrap justify-between items-center gap-2">
+                  <div>
+                    <h3 className="font-extrabold text-white text-base flex items-center gap-2">
+                      <Wrench className="h-5 w-5 text-indigo-400" />
+                      System Maintenance &amp; Operational Controls
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Clear uncommitted reading inputs, manage completed duties, or perform full system reset.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {/* 1. RESET CURRENT PUMP READINGS (LOW RISK) */}
+                  <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 flex flex-col justify-between space-y-3">
+                    <div>
+                      <div className="flex items-center gap-1.5 text-indigo-400 font-bold text-[11px] uppercase tracking-wider mb-1">
+                        <RefreshCw className="h-3.5 w-3.5 text-indigo-400" />
+                        <span>Low Risk: Form Input State</span>
+                      </div>
+                      <h4 className="font-extrabold text-slate-100 text-sm">Clear Current Reading Inputs</h4>
+                      <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                        Clear current uncommitted pump reading inputs without affecting historical records or closed reports.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowClearReadingsModal(true)}
+                      className="w-full px-3 py-2 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 font-bold text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" />
+                      Reset Pump Readings
+                    </button>
+                  </div>
+
+                  {/* 2. DELETE DUTY (HIGH RISK - OWNER ONLY) */}
+                  {session.role === 'OWNER' && (
+                    <div className="bg-slate-950 border border-amber-900/40 rounded-xl p-4 flex flex-col justify-between space-y-3">
+                      <div>
+                        <div className="flex items-center gap-1.5 text-amber-400 font-bold text-[11px] uppercase tracking-wider mb-1">
+                          <AlertTriangle className="h-3.5 w-3.5 text-amber-400" />
+                          <span>High Risk: Specific Duty</span>
+                        </div>
+                        <h4 className="font-extrabold text-slate-100 text-sm">Delete Completed Duty</h4>
+                        <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                          Permanently delete a selected completed duty. Requires mandatory owner authentication and audit reason.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveTab('reports');
+                          flashMessage('Select a completed duty from Past Duty Reports to proceed with deletion.', 'success');
+                        }}
+                        className="w-full px-3 py-2 rounded-xl bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/30 font-bold text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <FileText className="h-3.5 w-3.5" />
+                        Manage Past Duties
+                      </button>
+                    </div>
+                  )}
+
+                  {/* 3. FULL SYSTEM RESET (CRITICAL RISK - OWNER ONLY) */}
+                  {session.role === 'OWNER' && (
+                    <div className="bg-slate-950 border border-rose-900/40 rounded-xl p-4 flex flex-col justify-between space-y-3">
+                      <div>
+                        <div className="flex items-center gap-1.5 text-rose-400 font-bold text-[11px] uppercase tracking-wider mb-1">
+                          <ShieldAlert className="h-3.5 w-3.5 text-rose-400" />
+                          <span>Critical Risk: System Wipe</span>
+                        </div>
+                        <h4 className="font-extrabold text-slate-100 text-sm">Full System Reset</h4>
+                        <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                          Permanently clear all operational duty records, sales, readings, and transaction logs to re-initialize bunk setup.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleOpenResetModal}
+                        className="w-full px-3 py-2 rounded-xl bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 font-bold text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <AlertTriangle className="h-3.5 w-3.5" />
+                        Full System Reset
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800/80 space-y-1 text-[11px] text-slate-400">
+                  <p>ℹ️ <strong>Saved Readings Correction:</strong> Saved pump readings cannot be erased silently. Use <strong>Correct Reading</strong> directly on the Active Duty form to record an audited correction.</p>
+                  <p>ℹ️ <strong>Data Safety Guarantee:</strong> Resetting current reading inputs will not modify or delete historical duty reports, sales, tank stock, price periods, or credit ledgers.</p>
                 </div>
               </div>
             </div>
@@ -6960,8 +8665,8 @@ export default function DashboardContainer({
                             value={msDensityInput}
                             onChange={(e) => setMsDensityInput(e.target.value)}
                             className={`w-full rounded-lg border bg-slate-950 py-2.5 px-3 text-sm text-white font-mono font-bold focus:outline-none ${msDensityInput !== '' && (Number(msDensityInput) < 710 || Number(msDensityInput) > 780)
-                                ? 'border-red-500 text-red-400 focus:border-red-400'
-                                : 'border-slate-700 focus:border-amber-400'
+                              ? 'border-red-500 text-red-400 focus:border-red-400'
+                              : 'border-slate-700 focus:border-amber-400'
                               }`}
                             placeholder="e.g. 750.0"
                           />
@@ -6991,8 +8696,8 @@ export default function DashboardContainer({
                             value={hsdDensityInput}
                             onChange={(e) => setHsdDensityInput(e.target.value)}
                             className={`w-full rounded-lg border bg-slate-950 py-2.5 px-3 text-sm text-white font-mono font-bold focus:outline-none ${hsdDensityInput !== '' && (Number(hsdDensityInput) < 810 || Number(hsdDensityInput) > 870)
-                                ? 'border-red-500 text-red-400 focus:border-red-400'
-                                : 'border-slate-700 focus:border-emerald-400'
+                              ? 'border-red-500 text-red-400 focus:border-red-400'
+                              : 'border-slate-700 focus:border-emerald-400'
                               }`}
                             placeholder="e.g. 842.0"
                           />
@@ -7007,11 +8712,11 @@ export default function DashboardContainer({
                     </div>
                   </div>
 
-                  {/* SHIFT CLOSING READINGS Table */}
+                  {/* DUTY METER READINGS Table */}
                   <div className="bg-slate-950 border border-slate-850 rounded-xl p-4 space-y-3 overflow-x-auto">
                     <div className="flex justify-between items-center border-b border-slate-900 pb-2">
                       <span className="text-xs font-extrabold text-white uppercase tracking-wider block">
-                        SHIFT CLOSING READINGS
+                        DUTY METER READINGS
                       </span>
                       <span className="text-[10px] text-slate-400 font-mono">PUMP 1 & PUMP 2 NOZZLES</span>
                     </div>
@@ -7020,9 +8725,9 @@ export default function DashboardContainer({
                         <tr className="border-b border-slate-850 text-slate-400 uppercase font-bold text-[10px]">
                           <th className="p-2.5">Gun</th>
                           <th className="p-2.5">Duty Staff</th>
-                          <th className="p-2.5 text-right">Original Opening</th>
+                          <th className="p-2.5 text-right">Closing</th>
                           <th className="p-2.5 text-right">Latest Checkpoint</th>
-                          <th className="p-2.5 text-right">Final Closing</th>
+                          <th className="p-2.5 text-right">Opening</th>
                           <th className="p-2.5 text-right">Total Litres</th>
                           <th className="p-2.5 text-right">Price</th>
                           <th className="p-2.5 text-right">Total Sales</th>
@@ -7069,7 +8774,7 @@ export default function DashboardContainer({
                             if (checkpointReading !== null && checkpointReading > prevVal && checkpointReading < currentVal) {
                               const p1Price = (hasIntervals && mr.intervals.length === 1) ? mr.intervals[0].priceUsed : (mr.initialPrice || mr.priceUsed);
                               const p2Price = mr.priceUsed;
-                              
+
                               const litres1 = Math.max(0, checkpointReading - prevVal);
                               const amount1 = litres1 * p1Price;
 
@@ -7111,7 +8816,6 @@ export default function DashboardContainer({
                             ? mr.intervals[mr.intervals.length - 1].startReading
                             : (mr.currentReading > mr.previousReading ? mr.currentReading : null);
 
-                          const isOwner = session?.role === 'OWNER';
                           const assignedStaff = getAssignedStaffForGun(activeDuty, mr.gun);
 
                           return (
@@ -7121,34 +8825,6 @@ export default function DashboardContainer({
                                   {mr.gun.name} <span className="text-[10px] text-slate-500 font-normal">({mr.gun.fuelType})</span>
                                 </td>
                                 <td className="p-2.5 font-sans font-semibold text-emerald-400 text-xs">{assignedStaff}</td>
-                                <td className="p-2.5 text-right">
-                                  {isOwner ? (
-                                    <input
-                                      type="number"
-                                      step="0.01"
-                                      value={openingReadings[mr.gunId] !== undefined ? openingReadings[mr.gunId] : mr.previousReading}
-                                      onChange={(e) => {
-                                        setOpeningReadings({
-                                          ...openingReadings,
-                                          [mr.gunId]: Number(e.target.value),
-                                        });
-                                      }}
-                                      className="w-24 rounded border border-amber-500/60 bg-slate-950 py-1 px-2 text-xs font-mono font-bold text-amber-300 text-right focus:border-amber-400 focus:outline-none"
-                                      title="Owner Privilege: Edit Original Opening Meter Reading"
-                                    />
-                                  ) : (
-                                    <span className="text-slate-400 font-mono font-bold">{mr.previousReading.toFixed(2)}</span>
-                                  )}
-                                </td>
-                                <td className="p-2.5 text-right font-mono">
-                                  {latestCheckpointVal !== null ? (
-                                    <span className="text-amber-300 font-bold bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 text-xs" title="Persisted Checkpoint Reading">
-                                      {latestCheckpointVal.toFixed(2)} 📌
-                                    </span>
-                                  ) : (
-                                    <span className="text-slate-600">-</span>
-                                  )}
-                                </td>
                                 <td className="p-2.5 text-right">
                                   <input
                                     id={`closing-reading-${mr.gunId}`}
@@ -7164,6 +8840,37 @@ export default function DashboardContainer({
                                     }}
                                     className="w-28 rounded border border-indigo-500/50 bg-slate-900 py-1 px-2 text-xs font-mono font-bold text-white text-right focus:border-indigo-400 focus:outline-none"
                                   />
+                                </td>
+                                <td className="p-2.5 text-right font-mono">
+                                  {latestCheckpointVal !== null ? (
+                                    <span className="text-amber-300 font-bold bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 text-xs" title="Persisted Checkpoint Reading">
+                                      {latestCheckpointVal.toFixed(2)} 📌
+                                    </span>
+                                  ) : (
+                                    <span className="text-slate-600">-</span>
+                                  )}
+                                </td>
+                                <td className="p-2.5 text-right">
+                                  {mr.previousReading === 0 || session?.role === 'OWNER' ? (
+                                    <input
+                                      type="number"
+                                      step="0.01"
+                                      value={openingReadings[mr.gunId] !== undefined ? openingReadings[mr.gunId] : (mr.previousReading > 0 ? mr.previousReading : '')}
+                                      onChange={(e) => {
+                                        setOpeningReadings({
+                                          ...openingReadings,
+                                          [mr.gunId]: e.target.value === '' ? '' : Number(e.target.value),
+                                        });
+                                      }}
+                                      className="w-28 rounded border border-amber-500/60 bg-slate-950 py-1 px-2 text-xs font-mono font-bold text-amber-300 text-right focus:border-amber-400 focus:outline-none"
+                                      placeholder="0.00"
+                                      title={mr.previousReading === 0 ? "Enter Initial Baseline Opening Meter Reading" : "Owner Privilege: Edit Original Opening Meter Reading"}
+                                    />
+                                  ) : (
+                                    <span className="text-slate-300 font-mono font-bold bg-slate-900/60 px-2.5 py-1 rounded border border-slate-800 text-xs inline-block min-w-[75px] text-right" title="Read-only Opening carried forward from previous duty closing">
+                                      {mr.previousReading.toFixed(2)}
+                                    </span>
+                                  )}
                                 </td>
                                 <td className="p-2.5 text-right text-white font-bold">{litres.toFixed(2)} L</td>
                                 <td className="p-2.5 text-right text-slate-400">
@@ -7359,8 +9066,8 @@ export default function DashboardContainer({
                           <div className="flex justify-between text-slate-400 border-t border-slate-850 pt-1">
                             <span>VARIATION:</span>
                             <span className={`font-mono font-bold ${msMetrics.stockVariation === null ? 'text-slate-400 font-normal italic' :
-                                msMetrics.stockVariation < -0.01 ? 'text-red-400' :
-                                  msMetrics.stockVariation > 0.01 ? 'text-emerald-400' : 'text-slate-300'
+                              msMetrics.stockVariation < -0.01 ? 'text-red-400' :
+                                msMetrics.stockVariation > 0.01 ? 'text-emerald-400' : 'text-slate-300'
                               }`}>
                               {msMetrics.variationText}
                             </span>
@@ -7494,8 +9201,8 @@ export default function DashboardContainer({
                           <div className="flex justify-between text-slate-400 border-t border-slate-850 pt-1">
                             <span>VARIATION:</span>
                             <span className={`font-mono font-bold ${hsdMetrics.stockVariation === null ? 'text-slate-400 font-normal italic' :
-                                hsdMetrics.stockVariation < -0.01 ? 'text-red-400' :
-                                  hsdMetrics.stockVariation > 0.01 ? 'text-emerald-400' : 'text-slate-300'
+                              hsdMetrics.stockVariation < -0.01 ? 'text-red-400' :
+                                hsdMetrics.stockVariation > 0.01 ? 'text-emerald-400' : 'text-slate-300'
                               }`}>
                               {hsdMetrics.variationText}
                             </span>
@@ -7988,7 +9695,7 @@ export default function DashboardContainer({
                         </thead>
                         <tbody className="divide-y divide-slate-900 font-mono text-xs">
                           {getSortedReadings(activeDuty.meterReadings).map((mr: any, idx: number) => {
-                            const prevVal = openingReadings[mr.gunId] !== undefined ? openingReadings[mr.gunId] : mr.previousReading;
+                            const prevVal = mr.previousReading;
                             const currentVal = closingReadings[mr.gunId] !== undefined ? closingReadings[mr.gunId] : mr.currentReading;
                             const litres = Math.max(0, currentVal - prevVal);
 
@@ -8090,8 +9797,8 @@ export default function DashboardContainer({
                           <div className="flex justify-between text-slate-400 border-t border-slate-850 pt-1">
                             <span>Stock Variation:</span>
                             <span className={`font-mono font-bold ${msMetrics.stockVariation === null ? 'text-slate-400 font-normal italic' :
-                                msMetrics.stockVariation < -0.01 ? 'text-red-400' :
-                                  msMetrics.stockVariation > 0.01 ? 'text-emerald-400' : 'text-slate-300'
+                              msMetrics.stockVariation < -0.01 ? 'text-red-400' :
+                                msMetrics.stockVariation > 0.01 ? 'text-emerald-400' : 'text-slate-300'
                               }`}>
                               {msMetrics.variationText}
                             </span>
@@ -8114,8 +9821,8 @@ export default function DashboardContainer({
                           <div className="flex justify-between text-slate-400 border-t border-slate-850 pt-1">
                             <span>Stock Variation:</span>
                             <span className={`font-mono font-bold ${hsdMetrics.stockVariation === null ? 'text-slate-400 font-normal italic' :
-                                hsdMetrics.stockVariation < -0.01 ? 'text-red-400' :
-                                  hsdMetrics.stockVariation > 0.01 ? 'text-emerald-400' : 'text-slate-300'
+                              hsdMetrics.stockVariation < -0.01 ? 'text-red-400' :
+                                hsdMetrics.stockVariation > 0.01 ? 'text-emerald-400' : 'text-slate-300'
                               }`}>
                               {hsdMetrics.variationText}
                             </span>
@@ -8300,56 +10007,56 @@ export default function DashboardContainer({
                   )}
                 </div>
 
-              <div className="flex gap-4">
-                <button
-                  onClick={() => setWizardOpen(false)}
-                  className="px-5 py-2.5 rounded-lg border border-slate-800 text-slate-400 hover:text-slate-350 text-xs font-bold transition-all"
-                >
-                  Close Wizard
-                </button>
-
-                {wizardStep === 'firstDuty' && (
+                <div className="flex gap-4">
                   <button
-                    onClick={handleStartFirstDutyStep}
-                    disabled={actionLoading}
-                    className="px-6 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition-all shadow-md"
+                    onClick={() => setWizardOpen(false)}
+                    className="px-5 py-2.5 rounded-lg border border-slate-800 text-slate-400 hover:text-slate-350 text-xs font-bold transition-all"
                   >
-                    {actionLoading ? 'Initializing First Duty...' : 'Start First Duty'}
+                    Close Wizard
                   </button>
-                )}
 
-                {wizardStep === 1 && (
-                  <button
-                    onClick={handleProceedToReview}
-                    disabled={actionLoading}
-                    className="px-6 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition-all shadow-md"
-                  >
-                    Proceed to Final Review →
-                  </button>
-                )}
+                  {wizardStep === 'firstDuty' && (
+                    <button
+                      onClick={handleStartFirstDutyStep}
+                      disabled={actionLoading}
+                      className="px-6 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition-all shadow-md"
+                    >
+                      {actionLoading ? 'Initializing First Duty...' : 'Start First Duty'}
+                    </button>
+                  )}
 
-                {wizardStep === 'review' && (
-                  <button
-                    onClick={handleConfirmCloseDuty}
-                    disabled={actionLoading}
-                    className="px-6 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-all shadow-md"
-                  >
-                    {actionLoading ? 'Closing Duty...' : `CONFIRM & CLOSE DUTY #${activeDuty?.dutyNumber || ''}`}
-                  </button>
-                )}
+                  {wizardStep === 1 && (
+                    <button
+                      onClick={handleProceedToReview}
+                      disabled={actionLoading}
+                      className="px-6 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition-all shadow-md"
+                    >
+                      Proceed to Final Review →
+                    </button>
+                  )}
 
-                {wizardStep === 2 && (
-                  <button
-                    onClick={handleStartNewDutyStep}
-                    disabled={actionLoading}
-                    className="px-6 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition-all shadow-md"
-                  >
-                    {actionLoading ? 'Opening Shift...' : 'Initialize Next Duty Shift'}
-                  </button>
-                )}
+                  {wizardStep === 'review' && (
+                    <button
+                      onClick={handleConfirmCloseDuty}
+                      disabled={actionLoading}
+                      className="px-6 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-all shadow-md"
+                    >
+                      {actionLoading ? 'Closing Duty...' : `CONFIRM & CLOSE DUTY #${activeDuty?.dutyNumber || ''}`}
+                    </button>
+                  )}
+
+                  {wizardStep === 2 && (
+                    <button
+                      onClick={handleStartNewDutyStep}
+                      disabled={actionLoading}
+                      className="px-6 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition-all shadow-md"
+                    >
+                      {actionLoading ? 'Opening Shift...' : 'Initialize Next Duty Shift'}
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
-          </div>
 
           </div>
         </div>
@@ -8507,162 +10214,115 @@ export default function DashboardContainer({
                   setAttendanceAuditLogs(prev => [
                     {
                       id: 'aud_' + Date.now(),
-                      staffName: statusCorrectionModal.staffName,
-                      dutyNumber: statusCorrectionModal.dutyNumber,
-                      oldStatus: statusCorrectionModal.currentStatus,
-                      newStatus: statusCorrectionModal.newStatus,
-                      changedBy: `${session.username} (${session.role})`,
-                      timestamp: new Date().toLocaleString(),
-                      reason: statusCorrectionModal.reason || 'Manual owner status override'
-                    },
-                    ...prev
-                  ]);
+                  staffName: statusCorrectionModal.staffName,
+                  dutyNumber: statusCorrectionModal.dutyNumber,
+                  oldStatus: statusCorrectionModal.currentStatus,
+                  newStatus: statusCorrectionModal.newStatus,
+                  changedBy: `${session.username} (${session.role})`,
+                  timestamp: new Date().toLocaleString(),
+                  reason: statusCorrectionModal.reason || 'Manual owner status override'
+                },
+                ...prev
+              ]);
 
-                  setStatusCorrectionModal(null);
-                }}
-                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-lg"
-              >
-                Save Attendance Status
-              </button>
-            </div>
-          </div>
+              setStatusCorrectionModal(null);
+            }}
+            className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-lg"
+          >
+            Save Attendance Status
+          </button>
         </div>
-      )}
+      </div>
+    </div>
+  )}
 
-      {/* INDIVIDUAL STAFF DUTY HISTORY MODAL */}
-      {staffHistoryModal?.open && (() => {
-        const combinedDuties = [
-          ...initialHistoricalDuties,
-          ...(initialActiveDuty && !initialHistoricalDuties.some((d: any) => d.id === initialActiveDuty.id) ? [initialActiveDuty] : [])
-        ];
+  {/* INDIVIDUAL STAFF ATTENDANCE HISTORY MODAL */}
+  {staffHistoryModal?.open && (() => {
+    const detailStaff = (monthlyAttData?.summary || []).find((s: any) => s.staffId === staffHistoryModal.staffId);
 
-        const historyRows = combinedDuties.map((d: any) => {
-          const sAssignments = (d.assignments || []).filter((as: any) =>
-            as.staffId === staffHistoryModal.staffId || as.staff?.id === staffHistoryModal.staffId || as.staff?.name === staffHistoryModal.staffName
-          );
-          const hasAssignment = sAssignments.length > 0;
-          const pumpNames = hasAssignment
-            ? Array.from(new Set(sAssignments.map((as: any) => as.pump?.name || (as.pumpId === 'p1' ? 'Pump 1' : 'Pump 2')))).join(', ')
-            : '-';
+    let historyEntries: any[] = [];
+    let totalDays = 0;
 
-          let msHandled = false;
-          let hsdHandled = false;
+    if (detailStaff && detailStaff.details && detailStaff.details.length > 0) {
+      historyEntries = detailStaff.details;
+      totalDays = detailStaff.workedDays;
+    } else {
+      const combinedDuties = [
+        ...initialHistoricalDuties,
+        ...(initialActiveDuty && !initialHistoricalDuties.some((d: any) => d.id === initialActiveDuty.id) ? [initialActiveDuty] : [])
+      ];
 
-          if (hasAssignment) {
-            sAssignments.forEach((as: any) => {
-              const fType = as.fuelType || (as.pumpId === 'p1' ? 'MS' : 'HSD');
-              if (fType === 'MS') msHandled = true;
-              if (fType === 'HSD') hsdHandled = true;
-            });
-            if (!msHandled && !hsdHandled) msHandled = true;
-          }
-
-          const overrideKey = `${d.id}_${staffHistoryModal.staffId}`;
-          const status = attendanceOverrides[overrideKey] || (hasAssignment ? 'PRESENT' : 'NOT_SCHEDULED');
-
+      historyEntries = combinedDuties
+        .filter((d: any) => (d.assignments || []).some((as: any) => as.staffId === staffHistoryModal.staffId || as.staff?.id === staffHistoryModal.staffId || as.staff?.name === staffHistoryModal.staffName))
+        .map((d: any) => {
           const startObj = new Date(d.startTime);
-          const startStr = startObj.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) + ' ' +
-            startObj.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
-          const endStr = d.endTime
-            ? new Date(d.endTime).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) + ' ' +
-            new Date(d.endTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
-            : 'OPEN';
-
+          const dateStr = startObj.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+          const overrideKey = `${d.id}_${staffHistoryModal.staffId}`;
+          const status = attendanceOverrides[overrideKey] || 'PRESENT';
+          const wDays = status === 'ABSENT' ? 0 : 1.0;
           return {
-            dutyId: d.id,
+            id: d.id,
+            date: dateStr,
             dutyNumber: d.dutyNumber,
-            pump: pumpNames,
-            msHandled,
-            hsdHandled,
-            startStr,
-            endStr,
-            status
+            workedDays: wDays,
+            status,
+            remarks: '-'
           };
-        }).sort((a, b) => (b.dutyNumber || 0) - (a.dutyNumber || 0));
+        });
+      totalDays = historyEntries.reduce((acc, curr) => acc + curr.workedDays, 0);
+    }
 
-        const presentCount = historyRows.filter(r => r.status === 'PRESENT').length;
-        const absentCount = historyRows.filter(r => r.status === 'ABSENT').length;
-        const notSchedCount = historyRows.filter(r => r.status === 'NOT_SCHEDULED').length;
-        const msDuties = historyRows.filter(r => r.status === 'PRESENT' && r.msHandled).length;
-        const hsdDuties = historyRows.filter(r => r.status === 'PRESENT' && r.hsdHandled).length;
+    const formatDays = (days: number) => Number.isInteger(days) ? days.toString() : days.toFixed(2).replace(/\.?0+$/, '');
 
-        return (
-          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-4xl w-full p-6 shadow-2xl space-y-6 max-h-[90vh] overflow-y-auto">
-              <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-                <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-full bg-indigo-600/20 border border-indigo-500/30 text-indigo-400 font-extrabold flex items-center justify-center text-xs">
-                    {staffHistoryModal.staffName.slice(0, 2).toUpperCase()}
-                  </div>
-                  <div>
-                    <h3 className="font-extrabold text-white text-base">STAFF HISTORY: {staffHistoryModal.staffName}</h3>
-                    <p className="text-xs text-slate-400">Complete 24-Hour Duty Session History & Attendance Ledger</p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setStaffHistoryModal(null)}
-                  className="text-slate-400 hover:text-white text-sm font-bold bg-slate-800 px-3 py-1.5 rounded-lg"
-                >
-                  ✕ Close
-                </button>
+    return (
+      <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-5 shadow-2xl space-y-4">
+          <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+            <div className="flex items-center gap-3">
+              <div className="h-9 w-9 rounded-full bg-indigo-600/20 border border-indigo-500/30 text-indigo-400 font-extrabold flex items-center justify-center text-xs shrink-0 font-mono">
+                {staffHistoryModal.staffName.slice(0, 2).toUpperCase()}
               </div>
-
-              {/* Summary Cards */}
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs font-mono">
-                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-center">
-                  <span className="text-[10px] text-slate-400 uppercase font-sans font-bold block">Present</span>
-                  <span className="text-emerald-400 font-bold text-base mt-0.5 block">{presentCount}</span>
-                </div>
-                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-center">
-                  <span className="text-[10px] text-slate-400 uppercase font-sans font-bold block">Absent</span>
-                  <span className="text-red-400 font-bold text-base mt-0.5 block">{absentCount}</span>
-                </div>
-                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-center">
-                  <span className="text-[10px] text-slate-400 uppercase font-sans font-bold block">Not Scheduled</span>
-                  <span className="text-slate-400 font-bold text-base mt-0.5 block">{notSchedCount}</span>
-                </div>
-                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-center">
-                  <span className="text-[10px] text-slate-400 uppercase font-sans font-bold block">MS Duties</span>
-                  <span className="text-indigo-400 font-bold text-base mt-0.5 block">{msDuties}</span>
-                </div>
-                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-center">
-                  <span className="text-[10px] text-slate-400 uppercase font-sans font-bold block">HSD Duties</span>
-                  <span className="text-emerald-400 font-bold text-base mt-0.5 block">{hsdDuties}</span>
-                </div>
+              <div>
+                <h3 className="font-extrabold text-white text-base font-sans">{staffHistoryModal.staffName} — Attendance History</h3>
+                <p className="text-xs text-slate-400 font-mono">Working Days Register</p>
               </div>
+            </div>
+            <button
+              onClick={() => setStaffHistoryModal(null)}
+              className="text-slate-400 hover:text-white text-sm font-bold bg-slate-800 px-3 py-1.5 rounded-lg cursor-pointer"
+            >
+              ✕ Close
+            </button>
+          </div>
 
-              {/* History Table */}
-              <div className="overflow-x-auto border border-slate-800 rounded-xl">
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead>
-                    <tr className="bg-slate-950 border-b border-slate-800 text-slate-400 uppercase font-bold font-mono">
-                      <th className="p-3">Duty</th>
-                      <th className="p-3">Pump</th>
-                      <th className="p-3 text-center">MS</th>
-                      <th className="p-3 text-center">HSD</th>
-                      <th className="p-3">Duty Start</th>
-                      <th className="p-3">Duty End</th>
-                      <th className="p-3 text-center">Status</th>
+          {/* History Table */}
+          <div className="overflow-x-auto border border-slate-800 rounded-xl bg-slate-950">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="bg-slate-900 border-b border-slate-800 text-slate-400 uppercase font-bold font-mono text-[10px]">
+                  <th className="p-3">Date</th>
+                  <th className="p-3">Duty</th>
+                  <th className="p-3">Pumps / Nozzles</th>
+                  <th className="p-3 text-right">Working Days</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/40 font-mono">
+                {historyEntries.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="p-4 text-center text-slate-500 italic font-sans">No duty history records found.</td>
+                  </tr>
+                ) : (
+                  historyEntries.map((r, idx) => (
+                    <tr key={r.id || idx} className="hover:bg-slate-900/50">
+                      <td className="p-3 font-sans font-bold text-slate-200">{r.date}</td>
+                      <td className="p-3 font-bold text-indigo-400">#{r.dutyNumber}</td>
+                      <td className="p-3 text-indigo-300 font-sans text-xs">{r.pumpNozzleStr || r.gunName || r.pumpName || '-'}</td>
+                      <td className="p-3 text-right font-black text-indigo-300">{formatDays(r.workedDays)}</td>
                     </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/40 font-mono">
-                    {historyRows.map((r, idx) => (
-                      <tr key={idx} className="hover:bg-slate-950/40">
-                        <td className="p-3 font-bold text-indigo-400">#{r.dutyNumber}</td>
-                        <td className="p-3 font-sans text-slate-300">{r.pump}</td>
-                        <td className="p-3 text-center">{r.msHandled ? <span className="text-indigo-400 font-bold">✓</span> : '-'}</td>
-                        <td className="p-3 text-center">{r.hsdHandled ? <span className="text-emerald-400 font-bold">✓</span> : '-'}</td>
-                        <td className="p-3 text-slate-300 text-[11px]">{r.startStr}</td>
-                        <td className="p-3 text-slate-300 text-[11px]">{r.endStr}</td>
-                        <td className="p-3 text-center">
-                          {r.status === 'PRESENT' && <span className="px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] font-sans font-bold">PRESENT</span>}
-                          {r.status === 'ABSENT' && <span className="px-2 py-0.5 rounded bg-red-950 text-red-400 border border-red-800 text-[10px] font-sans font-bold">ABSENT</span>}
-                          {r.status === 'NOT_SCHEDULED' && <span className="px-2 py-0.5 rounded bg-slate-950 text-slate-500 border border-slate-800 text-[10px] font-sans font-bold">NOT SCHEDULED</span>}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                  ))
+                )}
+              </tbody>
+            </table>
               </div>
             </div>
           </div>
@@ -8683,11 +10343,10 @@ export default function DashboardContainer({
       >
         <button
           onClick={() => setActiveTab('dashboard')}
-          className={`flex flex-col items-center justify-center gap-1 min-w-[56px] py-1 text-[11px] font-semibold transition-all touch-target-44 ${
-            activeTab === 'dashboard'
+          className={`flex flex-col items-center justify-center gap-1 min-w-[56px] py-1 text-[11px] font-semibold transition-all touch-target-44 ${activeTab === 'dashboard'
               ? 'text-blue-600 dark:text-blue-400 font-bold'
               : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-          }`}
+            }`}
           aria-label="Home Dashboard"
         >
           <LayoutDashboard className="h-5 w-5" />
@@ -8696,11 +10355,10 @@ export default function DashboardContainer({
 
         <button
           onClick={() => setActiveTab('current-duty')}
-          className={`flex flex-col items-center justify-center gap-1 min-w-[56px] py-1 text-[11px] font-semibold relative transition-all touch-target-44 ${
-            activeTab === 'current-duty'
+          className={`flex flex-col items-center justify-center gap-1 min-w-[56px] py-1 text-[11px] font-semibold relative transition-all touch-target-44 ${activeTab === 'current-duty'
               ? 'text-blue-600 dark:text-blue-400 font-bold'
               : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-          }`}
+            }`}
           aria-label="Current Duty"
         >
           <Activity className="h-5 w-5" />
@@ -8717,11 +10375,10 @@ export default function DashboardContainer({
             setActiveTab('reports');
             setReportsTab('sales');
           }}
-          className={`flex flex-col items-center justify-center gap-1 min-w-[56px] py-1 text-[11px] font-semibold transition-all touch-target-44 ${
-            activeTab === 'reports' && reportsTab === 'sales'
+          className={`flex flex-col items-center justify-center gap-1 min-w-[56px] py-1 text-[11px] font-semibold transition-all touch-target-44 ${activeTab === 'reports' && reportsTab === 'sales'
               ? 'text-blue-600 dark:text-blue-400 font-bold'
               : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-          }`}
+            }`}
           aria-label="Fuel Sales"
         >
           <DollarSign className="h-5 w-5" />
@@ -8732,11 +10389,10 @@ export default function DashboardContainer({
           onClick={() => {
             setActiveTab('reports');
           }}
-          className={`flex flex-col items-center justify-center gap-1 min-w-[56px] py-1 text-[11px] font-semibold transition-all touch-target-44 ${
-            activeTab === 'reports' && reportsTab !== 'sales'
+          className={`flex flex-col items-center justify-center gap-1 min-w-[56px] py-1 text-[11px] font-semibold transition-all touch-target-44 ${activeTab === 'reports' && reportsTab !== 'sales'
               ? 'text-blue-600 dark:text-blue-400 font-bold'
               : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-          }`}
+            }`}
           aria-label="All Reports"
         >
           <BarChart3 className="h-5 w-5" />
@@ -8752,6 +10408,1056 @@ export default function DashboardContainer({
           <span>Menu</span>
         </button>
       </nav>
+
+      {/* EDIT ATTENDANCE MODAL */}
+      {showEditAttModal && editingAttRecord && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[60] flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full space-y-5 shadow-2xl">
+            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+              <div>
+                <h3 className="font-extrabold text-white text-base flex items-center gap-2">
+                  <Edit className="h-5 w-5 text-indigo-400" />
+                  Edit Attendance Entry
+                </h3>
+                <p className="text-[11px] text-slate-400">Modify working days counter or status for staff shift</p>
+              </div>
+              <button onClick={() => setShowEditAttModal(false)} className="text-slate-400 hover:text-white text-sm font-bold">✕</button>
+            </div>
+
+            <form onSubmit={handleSubmitEditAtt} className="space-y-4 text-xs">
+              <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-850 space-y-1 font-mono">
+                <div className="flex justify-between">
+                  <span className="text-slate-400 font-sans">Staff Member:</span>
+                  <span className="font-bold text-white font-sans">{editAttStaffName}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400 font-sans">Duty Session:</span>
+                  <span className="font-bold text-indigo-400">Duty #{editAttDutyNumber}</span>
+                </div>
+                {editAttDate && (
+                  <div className="flex justify-between">
+                    <span className="text-slate-400 font-sans">Date:</span>
+                    <span className="font-bold text-slate-300">{editAttDate}</span>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="text-slate-300 font-bold block mb-1">Attendance Status *</label>
+                <select
+                  value={editAttStatusInput}
+                  onChange={(e) => {
+                    const st = e.target.value;
+                    setEditAttStatusInput(st);
+                    if (st === 'ABSENT') {
+                      setEditAttDaysInput('0');
+                    } else if (st === 'PRESENT' && (editAttDaysInput === '0' || editAttDaysInput === 0)) {
+                      setEditAttDaysInput('1.0');
+                    } else if (st === 'PARTIAL' || st === 'EMERGENCY') {
+                      if (editAttDaysInput === '1.0' || editAttDaysInput === 1) setEditAttDaysInput('0.5');
+                    }
+                  }}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white font-bold text-xs focus:border-indigo-500 focus:outline-none"
+                >
+                  <option value="PRESENT">PRESENT (1.0 Working Day)</option>
+                  <option value="PARTIAL">PARTIAL (Partial Shift)</option>
+                  <option value="EMERGENCY">EMERGENCY (Emergency Exit)</option>
+                  <option value="ABSENT">ABSENT (0.0 Working Days)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-slate-300 font-bold block mb-1">Working Days Value (e.g. 1.0, 0.5, 0.25, 0) *</label>
+                <input
+                  type="number"
+                  step="0.05"
+                  min="0"
+                  max="2"
+                  required
+                  value={editAttDaysInput}
+                  onChange={(e) => setEditAttDaysInput(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-white font-mono font-bold text-sm focus:border-indigo-500 focus:outline-none"
+                />
+                <span className="text-[10px] text-slate-500 block mt-1">
+                  Assigned = 1.0 day, Absent = 0.0 days, Emergency = 0.5 days. Changeable to any decimal.
+                </span>
+              </div>
+
+              <div>
+                <label className="text-slate-300 font-bold block mb-1">Remarks / Reason (Optional)</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Left due to emergency"
+                  value={editAttRemarksInput}
+                  onChange={(e) => setEditAttRemarksInput(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-white text-xs focus:border-indigo-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="flex justify-end border-t border-slate-800 pt-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowEditAttModal(false)}
+                  className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingEditAtt}
+                  className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md disabled:opacity-50"
+                >
+                  {isSubmittingEditAtt ? 'Updating...' : 'Save Attendance'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* DAILY ATTENDANCE BREAKDOWN MODAL */}
+      {showAttDetailModal && detailModalStaff && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-2xl w-full space-y-4 shadow-2xl max-h-[85vh] overflow-y-auto">
+            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+              <div>
+                <h3 className="font-extrabold text-white text-base">
+                  Daily Attendance Breakdown: {detailModalStaff.staffName}
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Total Working Days: <strong className="text-indigo-400 font-mono text-sm">{detailModalStaff.workedDays} Days</strong>
+                </p>
+              </div>
+              <button onClick={() => setShowAttDetailModal(false)} className="text-slate-400 hover:text-white text-sm font-bold bg-slate-800 px-3 py-1.5 rounded-lg cursor-pointer">✕ Close</button>
+            </div>
+
+            <div className="overflow-x-auto border border-slate-850 rounded-xl">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="bg-slate-950 text-slate-400 uppercase font-bold text-[10px] border-b border-slate-850 font-mono">
+                    <th className="p-2.5">Date</th>
+                    <th className="p-2.5">Duty</th>
+                    <th className="p-2.5">Pump / Nozzle</th>
+                    <th className="p-2.5 text-center">Status</th>
+                    <th className="p-2.5 text-right">Working Days</th>
+                    <th className="p-2.5">Remarks</th>
+                    <th className="p-2.5 text-center">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/40 font-mono text-[11px]">
+                  {(!detailModalStaff.details || detailModalStaff.details.length === 0) ? (
+                    <tr>
+                      <td colSpan={7} className="p-4 text-center text-slate-500 italic font-sans">No attendance records for this period.</td>
+                    </tr>
+                  ) : (
+                    detailModalStaff.details.map((record: any) => (
+                      <tr key={record.id} className="hover:bg-slate-950/40">
+                        <td className="p-2.5 font-bold text-white font-sans">{record.date}</td>
+                        <td className="p-2.5 font-bold text-indigo-400">Duty #{record.dutyNumber}</td>
+                        <td className="p-2.5 font-sans text-slate-300">{record.pumpName} ({record.gunName})</td>
+                        <td className="p-2.5 text-center font-sans">
+                          {record.status === 'PRESENT' && <span className="px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] font-bold">PRESENT</span>}
+                          {record.status === 'ABSENT' && <span className="px-2 py-0.5 rounded bg-red-950 text-red-400 border border-red-800 text-[10px] font-bold">ABSENT</span>}
+                          {(record.status === 'PARTIAL' || record.status === 'PARTIAL_DUTY') && <span className="px-2 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-800 text-[10px] font-bold">PARTIAL</span>}
+                          {record.status === 'EMERGENCY' && <span className="px-2 py-0.5 rounded bg-orange-950 text-orange-300 border border-orange-800 text-[10px] font-bold">EMERGENCY</span>}
+                          {record.status === 'REPLACEMENT' && <span className="px-2 py-0.5 rounded bg-sky-950 text-sky-300 border border-sky-800 text-[10px] font-bold">REPLACEMENT</span>}
+                        </td>
+                        <td className="p-2.5 text-right font-black text-indigo-300">{record.workedDays}</td>
+                        <td className="p-2.5 font-sans text-slate-400 text-[10px]">{record.remarks || record.reason || '-'}</td>
+                        <td className="p-2.5 text-center font-sans">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditAtt(record)}
+                            className="px-2.5 py-1 rounded bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-300 border border-indigo-500/30 text-[10px] font-bold cursor-pointer"
+                          >
+                            Edit
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ADD / EDIT EMAIL RECIPIENT MODAL */}
+      {showRecipientModal && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full space-y-5 shadow-2xl">
+            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+              <div>
+                <h3 className="font-extrabold text-white text-base flex items-center gap-2">
+                  <Mail className="h-5 w-5 text-indigo-400" />
+                  {editingRecipient ? 'Edit Email Recipient' : 'Add Email Recipient'}
+                </h3>
+                <p className="text-[11px] text-slate-400">
+                  {editingRecipient ? 'Update recipient details & notification preferences' : 'Configure a new email recipient stored in database'}
+                </p>
+              </div>
+              <button onClick={() => setShowRecipientModal(false)} className="text-slate-400 hover:text-white text-sm font-bold">✕</button>
+            </div>
+
+            <form onSubmit={handleSaveEmailRecipient} className="space-y-4 text-xs">
+              <div>
+                <label className="text-slate-300 font-bold block mb-1">Recipient Name *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Owner, Manager, Accountant, Operations"
+                  value={recNameInput}
+                  onChange={(e) => setRecNameInput(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-white font-medium text-xs focus:border-indigo-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="text-slate-300 font-bold block mb-1">Email Address *</label>
+                <input
+                  type="email"
+                  required
+                  placeholder="e.g. recipient@example.com"
+                  value={recEmailInput}
+                  onChange={(e) => setRecEmailInput(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-white font-mono text-xs focus:border-indigo-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="space-y-2 bg-slate-950 p-3.5 rounded-xl border border-slate-800">
+                <span className="text-[10px] text-slate-400 font-bold uppercase block mb-1">Notifications Subscriptions</span>
+
+                <label className="flex items-center gap-2.5 text-slate-200 font-semibold cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={recDutyReportsInput}
+                    onChange={(e) => setRecDutyReportsInput(e.target.checked)}
+                    className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  Duty Closing Summary Reports
+                </label>
+
+                <label className="flex items-center gap-2.5 text-slate-200 font-semibold cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={recLowStockInput}
+                    onChange={(e) => setRecLowStockInput(e.target.checked)}
+                    className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  Low Fuel Stock Alerts (≤ 6,000 L)
+                </label>
+              </div>
+
+              <div className="flex justify-end border-t border-slate-800 pt-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowRecipientModal(false)}
+                  className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingRecipient}
+                  className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md disabled:opacity-50"
+                >
+                  {isSavingRecipient ? 'Saving...' : 'Save Recipient'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {/* RESET CURRENT PUMP READINGS MODAL */}
+      {showClearReadingsModal && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-indigo-800/60 rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl text-slate-100">
+            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2 text-indigo-400 font-extrabold text-base">
+                <RefreshCw className="h-5 w-5 text-indigo-400" />
+                <span>Reset Current Pump Readings?</span>
+              </div>
+              <button onClick={() => setShowClearReadingsModal(false)} className="text-slate-400 hover:text-white font-bold">✕</button>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              This will clear current uncommitted pump reading inputs only. Past duties, reports, sales, stock records and historical meter readings will not be deleted.
+            </p>
+
+            <div className="bg-indigo-950/40 border border-indigo-500/30 p-3 rounded-xl text-[11px] text-indigo-200 space-y-1">
+              <p>✓ <strong>Active Duty:</strong> Preserved and remains active.</p>
+              <p>✓ <strong>Opening Readings &amp; Stock:</strong> Untouched.</p>
+              <p>✓ <strong>Past Reports &amp; Audit Logs:</strong> Never affected.</p>
+            </div>
+
+            <div className="flex justify-end gap-2 border-t border-slate-800 pt-3">
+              <button
+                type="button"
+                onClick={() => setShowClearReadingsModal(false)}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmClearCurrentInputs}
+                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md flex items-center gap-1.5 cursor-pointer"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                Reset Pump Readings
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* FULL SYSTEM RESET MODAL (OWNER ONLY) */}
+      {showResetModal && (
+        <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-rose-700/60 rounded-2xl p-6 max-w-lg w-full space-y-5 shadow-2xl text-slate-100">
+            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2 text-rose-400 font-black text-lg">
+                <ShieldAlert className="h-6 w-6 animate-pulse" />
+                <span>FULL SYSTEM RESET (OWNER ONLY)</span>
+              </div>
+              <button onClick={() => setShowResetModal(false)} className="text-slate-400 hover:text-white font-bold">✕</button>
+            </div>
+
+            <div className="bg-rose-950/60 border border-rose-500/50 p-4 rounded-xl space-y-2 text-xs text-rose-200">
+              <p className="font-extrabold text-sm text-rose-300 uppercase tracking-wide">⚠️ EXTREMELY DANGEROUS OPERATION</p>
+              <p>You are about to reset the petrol pump management system. All operational data (duty sessions, meter readings, expenses, credit transactions, oil sales) will be permanently cleared.</p>
+              <p className="text-rose-300 font-semibold">• Owner &amp; Manager User Accounts will NOT be deleted.</p>
+              <p className="text-rose-300 font-semibold">• Pump, Gun, and Staff configurations will survive.</p>
+            </div>
+
+            <div className="space-y-4 text-xs">
+              <div>
+                <label className="text-slate-300 font-bold block mb-1">
+                  Step 1: Type <span className="font-mono text-rose-400 font-extrabold uppercase">RESET SYSTEM</span> to confirm *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="RESET SYSTEM"
+                  value={resetTextInput}
+                  onChange={(e) => setResetTextInput(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white font-mono text-xs focus:border-rose-500 focus:outline-none"
+                />
+                {resetTextInput && resetTextInput.trim().toUpperCase() !== 'RESET SYSTEM' && (
+                  <p className="text-[11px] text-amber-400 font-semibold mt-1 flex items-center gap-1">
+                    ⚠️ Type exact words <span className="font-mono font-bold">RESET SYSTEM</span> (not your username &quot;owner&quot;)
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label className="text-slate-300 font-bold block mb-1">
+                  Step 2: Enter Owner Account Password *
+                </label>
+                <input
+                  type="password"
+                  required
+                  placeholder="Enter Owner Password"
+                  value={resetPasswordInput}
+                  onChange={(e) => setResetPasswordInput(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white font-mono text-xs focus:border-rose-500 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 border-t border-slate-800 pt-4">
+              <button
+                type="button"
+                onClick={() => setShowResetModal(false)}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmSystemReset}
+                disabled={isResettingSystem || resetTextInput.trim().toUpperCase() !== 'RESET SYSTEM' || !resetPasswordInput}
+                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-black shadow-lg disabled:opacity-50 flex items-center gap-2 cursor-pointer disabled:cursor-not-allowed"
+              >
+                <AlertTriangle className="h-4 w-4" />
+                {isResettingSystem ? 'Resetting System...' : 'EXECUTE FULL SYSTEM RESET'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* HANDOVER / LEAVE DUTY MODAL */}
+      {showHandoverModal && handoverTarget && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl">
+            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+              <div>
+                <h3 className="font-extrabold text-white text-base flex items-center gap-2">
+                  <RefreshCw className="h-5 w-5 text-indigo-400" />
+                  Shift Handover / Leave Duty
+                </h3>
+                <p className="text-[11px] text-slate-400">Transfer nozzle responsibility to another staff member or end shift</p>
+              </div>
+              <button onClick={() => setShowHandoverModal(false)} className="text-slate-400 hover:text-white text-sm font-bold">✕</button>
+            </div>
+
+            <form onSubmit={handleSubmitHandover} className="space-y-4 text-xs">
+              <div className="bg-slate-950 p-3 rounded-xl border border-slate-850 space-y-1">
+                <div className="text-slate-400 text-[11px]">
+                  Outgoing Staff: <strong className="text-white font-bold">{handoverTarget.outgoingStaffName}</strong>
+                </div>
+                <div className="text-slate-400 text-[11px]">
+                  Pump / Nozzle: <strong className="text-indigo-400 font-bold">{handoverTarget.pumpName || 'Pump'} ({handoverTarget.gunName || 'Nozzle'})</strong>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-slate-300 font-bold block mb-1">Who is taking over this pump?</label>
+                <select
+                  value={incomingStaffInput}
+                  onChange={(e) => setIncomingStaffInput(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white font-medium text-xs focus:border-indigo-500 focus:outline-none"
+                >
+                  <option value="">-- No Replacement (End Responsibility) --</option>
+                  {(staticData.staff || [])
+                    .filter((s: any) => s.id !== handoverTarget.outgoingStaffId && s.active)
+                    .map((s: any) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                </select>
+                <span className="text-[10px] text-slate-500 block mt-1">
+                  Select replacement employee taking over, or choose &quot;No Replacement&quot; if nobody takes over.
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-slate-300 font-bold block mb-1">Handover Time *</label>
+                  <input
+                    type="datetime-local"
+                    required
+                    value={handoverTimeInput}
+                    onChange={(e) => setHandoverTimeInput(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono text-xs focus:border-indigo-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-slate-300 font-bold block mb-1">Handover Meter Reading *</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    required
+                    value={handoverMeterInput}
+                    onChange={(e) => setHandoverMeterInput(Number(e.target.value))}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono font-bold text-xs focus:border-indigo-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-slate-300 font-bold block mb-1">Outgoing Staff Status</label>
+                <select
+                  value={handoverStatusInput}
+                  onChange={(e) => setHandoverStatusInput(e.target.value as any)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-medium text-xs focus:border-indigo-500 focus:outline-none"
+                >
+                  <option value="EMERGENCY">Emergency Leave</option>
+                  <option value="PARTIAL_DUTY">Partial Duty Shift</option>
+                  <option value="EARLY_EXIT">Early Shift Exit</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-slate-300 font-bold block mb-1">Reason / Remarks</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Medical emergency, Shift rotation, Family issue"
+                  value={handoverReasonInput}
+                  onChange={(e) => setHandoverReasonInput(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white text-xs focus:border-indigo-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="flex justify-end border-t border-slate-800 pt-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowHandoverModal(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingHandover}
+                  className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md disabled:opacity-50"
+                >
+                  {isSubmittingHandover ? 'Saving...' : 'Confirm Handover'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MARK ABSENT MODAL */}
+      {showAbsentModal && absentTarget && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl">
+            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+              <div>
+                <h3 className="font-extrabold text-white text-base flex items-center gap-2">
+                  <ShieldAlert className="h-5 w-5 text-rose-400" />
+                  Mark Staff Absent
+                </h3>
+                <p className="text-[11px] text-slate-400">Record absenteeism for assigned employee who did not report</p>
+              </div>
+              <button onClick={() => setShowAbsentModal(false)} className="text-slate-400 hover:text-white text-sm font-bold">✕</button>
+            </div>
+
+            <form onSubmit={handleSubmitAbsent} className="space-y-4 text-xs">
+              <div className="bg-slate-950 p-3 rounded-xl border border-slate-850 space-y-1">
+                <div className="text-slate-400 text-[11px]">
+                  Assigned Staff: <strong className="text-rose-400 font-bold">{absentTarget.staffName}</strong>
+                </div>
+                <div className="text-slate-400 text-[11px]">
+                  Pump / Gun: <strong className="text-white font-bold">{absentTarget.gunName || 'Nozzle'}</strong>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-slate-300 font-bold block mb-1">Replacement Staff (Optional)</label>
+                <select
+                  value={absentReplacementInput}
+                  onChange={(e) => setAbsentReplacementInput(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white font-medium text-xs focus:border-indigo-500 focus:outline-none"
+                >
+                  <option value="">-- No Immediate Replacement --</option>
+                  {(staticData.staff || [])
+                    .filter((s: any) => s.id !== absentTarget.staffId && s.active)
+                    .map((s: any) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-slate-300 font-bold block mb-1">Reason</label>
+                <input
+                  type="text"
+                  required
+                  value={absentReasonInput}
+                  onChange={(e) => setAbsentReasonInput(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white text-xs focus:border-indigo-500 focus:outline-none"
+                  placeholder="e.g. Did not report, Sick leave, Uninformed absence"
+                />
+              </div>
+
+              <div className="flex justify-end border-t border-slate-800 pt-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAbsentModal(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingAbsent}
+                  className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-md disabled:opacity-50"
+                >
+                  {isSubmittingAbsent ? 'Saving...' : 'Confirm Mark Absent'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ATTENDANCE DETAIL & HISTORY BREAKDOWN MODAL */}
+      {showAttDetailModal && detailModalStaff && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-4xl w-full space-y-4 shadow-2xl max-h-[90vh] flex flex-col">
+            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+              <div>
+                <h3 className="font-extrabold text-white text-base flex items-center gap-2">
+                  <Calendar className="h-5 w-5 text-indigo-400" />
+                  {detailModalStaff.staffName} — Attendance History & Breakdown
+                </h3>
+                <p className="text-[11px] text-slate-400">
+                  Full duty history register, pump/nozzle assignments, and worked days calculation
+                </p>
+              </div>
+              <button onClick={() => setShowAttDetailModal(false)} className="text-slate-400 hover:text-white text-sm font-bold cursor-pointer">✕</button>
+            </div>
+
+            {/* In-Modal Filter & Date Range Bar */}
+            <div className="bg-slate-950 p-3 rounded-xl border border-slate-850 flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="flex flex-wrap items-center gap-3">
+                <div>
+                  <span className="text-[10px] text-slate-400 font-bold uppercase block mb-1">Period Filter</span>
+                  <select
+                    value={attFilterPreset}
+                    onChange={async (e) => {
+                      const p = e.target.value as any;
+                      handleAttPresetChange(p);
+                    }}
+                    className="bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-white font-bold text-xs focus:border-indigo-500 focus:outline-none"
+                  >
+                    <option value="THIS_MONTH">This Month</option>
+                    <option value="LAST_MONTH">Last Month</option>
+                    <option value="WEEKLY">Last 7 Days (Weekly)</option>
+                    <option value="CUSTOM">Custom Date Range</option>
+                  </select>
+                </div>
+
+                {attFilterPreset === 'CUSTOM' || attFilterPreset === 'WEEKLY' ? (
+                  <>
+                    <div>
+                      <span className="text-[10px] text-slate-400 font-bold uppercase block mb-1">From Date</span>
+                      <input
+                        type="date"
+                        value={attCustomStartDate}
+                        onChange={(e) => setAttCustomStartDate(e.target.value)}
+                        className="bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1 text-white font-bold text-xs focus:border-indigo-500 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 font-bold uppercase block mb-1">To Date</span>
+                      <input
+                        type="date"
+                        value={attCustomEndDate}
+                        onChange={(e) => setAttCustomEndDate(e.target.value)}
+                        className="bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1 text-white font-bold text-xs focus:border-indigo-500 focus:outline-none"
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div>
+                      <span className="text-[10px] text-slate-400 font-bold uppercase block mb-1">Month</span>
+                      <select
+                        value={attFilterMonth}
+                        onChange={(e) => setAttFilterMonth(Number(e.target.value))}
+                        className="bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-white font-bold text-xs focus:border-indigo-500 focus:outline-none"
+                      >
+                        {['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'].map((m, i) => (
+                          <option key={i} value={i + 1}>{m}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 font-bold uppercase block mb-1">Year</span>
+                      <select
+                        value={attFilterYear}
+                        onChange={(e) => setAttFilterYear(Number(e.target.value))}
+                        className="bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-white font-bold text-xs focus:border-indigo-500 focus:outline-none"
+                      >
+                        {[2024, 2025, 2026, 2027].map((y) => (
+                          <option key={y} value={y}>{y}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={async () => {
+                  const fresh = await loadMonthlyAttendance();
+                  if (fresh && fresh.summary) {
+                    const st = fresh.summary.find((s: any) => s.staffId === detailModalStaff.staffId);
+                    if (st) setDetailModalStaff(st);
+                  }
+                }}
+                className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow cursor-pointer flex items-center gap-1 shrink-0"
+              >
+                <RefreshCw className="h-3.5 w-3.5" /> Refresh History
+              </button>
+            </div>
+
+            <div className="grid grid-cols-4 gap-3 text-center text-xs">
+              <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-850">
+                <span className="text-[10px] text-slate-500 font-bold block">Worked Days</span>
+                <span className="text-indigo-400 font-extrabold text-sm font-mono">{detailModalStaff.workedDays} Days</span>
+              </div>
+              <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-850">
+                <span className="text-[10px] text-slate-500 font-bold block">Full Duties</span>
+                <span className="text-emerald-400 font-extrabold text-sm font-mono">{detailModalStaff.fullDutiesCount}</span>
+              </div>
+              <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-850">
+                <span className="text-[10px] text-slate-500 font-bold block">Partial / Emergency</span>
+                <span className="text-amber-400 font-extrabold text-sm font-mono">{detailModalStaff.partialDutiesCount}</span>
+              </div>
+              <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-850">
+                <span className="text-[10px] text-slate-500 font-bold block">Absences</span>
+                <span className="text-rose-400 font-extrabold text-sm font-mono">{detailModalStaff.absentCount}</span>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto rounded-xl border border-slate-800 bg-slate-950">
+              <table className="w-full text-left text-xs text-slate-300">
+                <thead className="bg-slate-900 text-slate-400 uppercase text-[10px] font-bold sticky top-0">
+                  <tr>
+                    <th className="p-2.5">Date</th>
+                    <th className="p-2.5">Duty #</th>
+                    <th className="p-2.5">Pump / Nozzle</th>
+                    <th className="p-2.5">Start</th>
+                    <th className="p-2.5">End</th>
+                    <th className="p-2.5 text-center">Status</th>
+                    <th className="p-2.5 text-right">Worked Days</th>
+                    <th className="p-2.5 text-center">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-850 font-mono text-[11px]">
+                  {(!detailModalStaff.details || detailModalStaff.details.length === 0) ? (
+                    <tr>
+                      <td colSpan={8} className="p-4 text-center text-slate-500 italic font-sans">No duty history records found for this period.</td>
+                    </tr>
+                  ) : (
+                    detailModalStaff.details.map((d: any) => (
+                      <tr key={d.id} className="hover:bg-slate-900/50">
+                        <td className="p-2.5 text-slate-300 font-sans">{d.date}</td>
+                        <td className="p-2.5 font-bold text-white">#{d.dutyNumber}</td>
+                        <td className="p-2.5 text-indigo-300 font-sans">{d.pumpNozzleStr || (d.gunName ? `${d.pumpName} (${d.gunName})` : d.pumpName)}</td>
+                        <td className="p-2.5 text-slate-300">{d.startTimeStr}</td>
+                        <td className="p-2.5 text-slate-300">{d.endTimeStr}</td>
+                        <td className="p-2.5 text-center font-sans">
+                          <span className={`px-2 py-0.5 rounded font-bold text-[10px] ${d.status === 'PRESENT' ? 'bg-emerald-500/20 text-emerald-400' :
+                              d.status === 'ABSENT' ? 'bg-rose-500/20 text-rose-400' :
+                                d.status === 'EMERGENCY' ? 'bg-amber-500/20 text-amber-300' :
+                                  'bg-indigo-500/20 text-indigo-300'
+                            }`}>
+                            {d.status}
+                          </span>
+                        </td>
+                        <td className="p-2.5 text-right font-bold text-white">{d.workedDays}</td>
+                        <td className="p-2.5 text-center">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditAtt(d)}
+                            className="px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[10px] shadow transition-all cursor-pointer inline-flex items-center gap-1"
+                            title="Edit attendance status and working days"
+                          >
+                            <Edit className="h-3 w-3" />
+                            Edit
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="flex justify-end border-t border-slate-800 pt-3">
+              <button
+                type="button"
+                onClick={() => setShowAttDetailModal(false)}
+                className="px-5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold shadow cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT ATTENDANCE MODAL */}
+      {showEditAttModal && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl">
+            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+              <div>
+                <h3 className="font-extrabold text-white text-base flex items-center gap-2">
+                  <Edit className="h-5 w-5 text-indigo-400" />
+                  Edit Attendance
+                </h3>
+                <p className="text-[11px] text-slate-400">
+                  {editAttStaffName} — Duty #{editAttDutyNumber} ({editAttDate})
+                </p>
+              </div>
+              <button onClick={() => setShowEditAttModal(false)} className="text-slate-400 hover:text-white text-sm font-bold">✕</button>
+            </div>
+
+            <form onSubmit={handleSubmitEditAtt} className="space-y-4 text-xs">
+              <div>
+                <label className="text-slate-300 font-bold block mb-1">Status</label>
+                <select
+                  value={editAttStatusInput}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setEditAttStatusInput(val);
+                    if (val === 'PRESENT') setEditAttDaysInput(1.0);
+                    else if (val === 'PARTIAL' || val === 'PARTIAL_DUTY') setEditAttDaysInput(0.5);
+                    else if (val === 'ABSENT') setEditAttDaysInput(0.0);
+                  }}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white font-medium text-xs focus:border-indigo-500 focus:outline-none"
+                >
+                  <option value="PRESENT">Present (1.0 day)</option>
+                  <option value="PARTIAL">Partial Duty (0.5 day)</option>
+                  <option value="EMERGENCY">Emergency Exit (0.5 day)</option>
+                  <option value="ABSENT">Absent (0.0 days)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-slate-300 font-bold block mb-1">Working Days</label>
+                <input
+                  type="number"
+                  step="0.05"
+                  min="0"
+                  max="5"
+                  required
+                  value={editAttDaysInput}
+                  onChange={(e) => setEditAttDaysInput(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono font-bold text-xs focus:border-indigo-500 focus:outline-none"
+                />
+                <span className="text-[10px] text-slate-500 block mt-1">
+                  1.0 = Full Day, 0.5 = Half Day, 0.25 = Quarter Day, 0.0 = Absent
+                </span>
+              </div>
+
+              <div>
+                <label className="text-slate-300 font-bold block mb-1">Remarks (Optional)</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Approved leave, shift adjustment"
+                  value={editAttRemarksInput}
+                  onChange={(e) => setEditAttRemarksInput(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white text-xs focus:border-indigo-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="flex justify-end border-t border-slate-800 pt-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowEditAttModal(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingEditAtt}
+                  className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md disabled:opacity-50"
+                >
+                  {isSubmittingEditAtt ? 'Saving...' : 'Save Attendance'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* DAY OPERATIONAL AUDIT & METER READING DRILL-DOWN MODAL */}
+      {showDayDrillDownModal && selectedDayDrillDownDate && (() => {
+        const dayDuties = (historicalDuties || []).filter((d: any) => {
+          const dDate = d.date || (d.startTime ? d.startTime.slice(0, 10) : '');
+          return dDate === selectedDayDrillDownDate;
+        });
+
+        // Collect all meter readings for this date
+        let dayReadings: any[] = [];
+        let dayDips: any[] = [];
+        let dayTests: any[] = [];
+        let dayMsVolume = 0;
+        let dayHsdVolume = 0;
+        let dayMsSales = 0;
+        let dayHsdSales = 0;
+
+        dayDuties.forEach((d: any) => {
+          (d.meterReadings || []).forEach((mr: any) => {
+            const litres = mr.litresSold || (mr.currentReading - mr.previousReading) || 0;
+            const price = mr.priceUsed || (mr.gun?.fuelType === 'HSD' ? 100.08 : 112.15);
+            const amount = mr.salesAmount || (litres * price);
+            const fuelType = mr.gun?.fuelType || 'MS';
+
+            if (fuelType === 'HSD') {
+              dayHsdVolume += litres;
+              dayHsdSales += amount;
+            } else {
+              dayMsVolume += litres;
+              dayMsSales += amount;
+            }
+
+            dayReadings.push({
+              dutyId: d.id,
+              dutyNumber: d.dutyNumber || d.id,
+              shift: d.shift || 'General',
+              gunName: mr.gun?.name || mr.gunId || 'Nozzle',
+              fuelType,
+              openingReading: mr.previousReading,
+              closingReading: mr.currentReading,
+              intervals: mr.intervals || [],
+              litresSold: litres,
+              priceUsed: price,
+              salesAmount: amount,
+              staffName: mr.staff?.name || d.staffAttendance?.[0]?.staff?.name || 'Assigned Staff'
+            });
+          });
+
+          if (d.tankDipReadings || d.tankDips) {
+            dayDips.push(...(d.tankDipReadings || d.tankDips || []));
+          }
+          if (d.fuelTestings) {
+            dayTests.push(...(d.fuelTestings || []));
+          }
+        });
+
+        const dayTotalVolume = dayMsVolume + dayHsdVolume;
+        const dayTotalSales = dayMsSales + dayHsdSales;
+        const formattedDateStr = new Date(selectedDayDrillDownDate).toLocaleDateString('en-IN', {
+          weekday: 'long',
+          day: 'numeric',
+          month: 'long',
+          year: 'numeric'
+        });
+
+        return (
+          <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-[70] flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-5xl w-full p-5 sm:p-7 shadow-2xl space-y-6 my-auto max-h-[90vh] overflow-y-auto">
+              
+              {/* HEADER */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="px-2.5 py-1 rounded-md bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 text-[11px] font-mono font-bold">
+                      {selectedDayDrillDownDate}
+                    </span>
+                    <span className="text-xs text-slate-400">• {dayDuties.length} Duty Shift(s)</span>
+                  </div>
+                  <h2 className="text-xl font-black text-white mt-1">
+                    Daily Operational & Nozzle Meter Reading Audit
+                  </h2>
+                  <p className="text-xs text-slate-400">{formattedDateStr}</p>
+                </div>
+                <button
+                  onClick={() => {
+                    setShowDayDrillDownModal(false);
+                    setSelectedDayDrillDownDate(null);
+                  }}
+                  className="self-end sm:self-auto px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs transition-all flex items-center gap-2 cursor-pointer"
+                >
+                  ✕ Close Audit Modal
+                </button>
+              </div>
+
+              {/* DAY SUMMARY KPI CARDS */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800/80">
+                  <div className="text-[11px] font-bold text-amber-400 uppercase tracking-wider mb-1">MS (Petrol) Total Sold</div>
+                  <div className="text-xl font-extrabold text-white font-mono">{dayMsVolume.toLocaleString('en-IN', { minimumFractionDigits: 2 })} L</div>
+                  <div className="text-xs font-semibold text-slate-400 mt-1">Revenue: ₹{dayMsSales.toLocaleString('en-IN')}</div>
+                </div>
+
+                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800/80">
+                  <div className="text-[11px] font-bold text-blue-400 uppercase tracking-wider mb-1">HSD (Diesel) Total Sold</div>
+                  <div className="text-xl font-extrabold text-white font-mono">{dayHsdVolume.toLocaleString('en-IN', { minimumFractionDigits: 2 })} L</div>
+                  <div className="text-xs font-semibold text-slate-400 mt-1">Revenue: ₹{dayHsdSales.toLocaleString('en-IN')}</div>
+                </div>
+
+                <div className="bg-slate-950 p-4 rounded-xl border border-indigo-500/30">
+                  <div className="text-[11px] font-bold text-indigo-400 uppercase tracking-wider mb-1">Total Fuel Volume & Revenue</div>
+                  <div className="text-xl font-black text-indigo-300 font-mono">{dayTotalVolume.toLocaleString('en-IN', { minimumFractionDigits: 2 })} L</div>
+                  <div className="text-xs font-bold text-emerald-400 mt-1">Total Sales: ₹{dayTotalSales.toLocaleString('en-IN')}</div>
+                </div>
+              </div>
+
+              {/* ACTUAL NOZZLE METER READINGS AUDIT REGISTER */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-extrabold text-white uppercase tracking-wider flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full bg-indigo-500"></span>
+                    Actual Nozzle Meter Readings ({selectedDayDrillDownDate})
+                  </h3>
+                  <span className="text-[11px] text-slate-400 italic">litres calculated directly from meter closing - opening</span>
+                </div>
+
+                <div className="overflow-x-auto border border-slate-800 rounded-xl bg-slate-950">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-slate-900/90 text-slate-400 uppercase font-bold text-[10px] tracking-wider border-b border-slate-800 font-mono">
+                        <th className="p-3">Duty #</th>
+                        <th className="p-3">Nozzle</th>
+                        <th className="p-3">Fuel</th>
+                        <th className="p-3 text-right">Opening Reading</th>
+                        <th className="p-3 text-right">Closing Reading</th>
+                        <th className="p-3 text-right">Litres Sold</th>
+                        <th className="p-3 text-right">Rate (₹)</th>
+                        <th className="p-3 text-right">Sales Amount (₹)</th>
+                        <th className="p-3">Staff Attendant</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-850 font-mono text-[11px]">
+                      {dayReadings.length === 0 ? (
+                        <tr>
+                          <td colSpan={9} className="p-5 text-center text-slate-500 italic font-sans">
+                            No meter reading entries logged for this date.
+                          </td>
+                        </tr>
+                      ) : (
+                        dayReadings.map((mr: any, idx: number) => (
+                          <tr key={idx} className="hover:bg-slate-900/50 transition-all">
+                            <td className="p-3 font-bold text-indigo-400">Duty #{mr.dutyNumber}</td>
+                            <td className="p-3 font-bold text-white">{mr.gunName}</td>
+                            <td className="p-3">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                mr.fuelType === 'MS' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
+                              }`}>
+                                {mr.fuelType}
+                              </span>
+                            </td>
+                            <td className="p-3 text-right text-slate-300">{mr.openingReading?.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                            <td className="p-3 text-right font-bold text-white">{mr.closingReading?.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                            <td className="p-3 text-right font-black text-emerald-400">{mr.litresSold?.toLocaleString('en-IN', { minimumFractionDigits: 2 })} L</td>
+                            <td className="p-3 text-right text-slate-400">₹{mr.priceUsed}</td>
+                            <td className="p-3 text-right font-bold text-white">₹{mr.salesAmount?.toLocaleString('en-IN')}</td>
+                            <td className="p-3 text-slate-300 font-sans">{mr.staffName}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* DUTIES CONDUCTED & COMPLETE RECORD DRILL-DOWN BUTTONS */}
+              <div className="space-y-3 border-t border-slate-800 pt-4">
+                <h3 className="text-sm font-extrabold text-white uppercase tracking-wider">
+                  Associated Duty Shift Operational Records
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {dayDuties.map((d: any) => (
+                    <div key={d.id} className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex items-center justify-between gap-4">
+                      <div>
+                        <div className="font-extrabold text-white text-sm">Duty #{d.dutyNumber || d.id}</div>
+                        <div className="text-xs text-slate-400 mt-0.5">Shift: {d.shift || 'General'} | Status: <span className="text-emerald-400 font-bold">{d.status || 'CLOSED'}</span></div>
+                        <div className="text-[11px] text-indigo-400 font-mono mt-1">
+                          Total Duty Sales: ₹{(d.totalSales || d.meterReadings?.reduce((s: number, m: any) => s + (m.salesAmount || 0), 0) || 0).toLocaleString('en-IN')}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setSelectedDutyId(d.id);
+                          setShowDayDrillDownModal(false);
+                          setActiveTab('past-duty');
+                        }}
+                        className="px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all shadow-md shrink-0 flex items-center gap-1.5 cursor-pointer"
+                      >
+                        View Complete Record →
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

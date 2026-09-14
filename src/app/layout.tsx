@@ -1,8 +1,11 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Script from "next/script";
 import "./globals.css";
 import { ThemeProvider } from "@/lib/ThemeContext";
+import { PWARegistration } from "@/components/PWARegistration";
+import { PWAInstallPrompt } from "@/components/PWAInstallPrompt";
+import { MobileBottomNav } from "@/components/MobileBottomNav";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -14,9 +17,32 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
+  userScalable: true,
+  themeColor: "#2563eb",
+  viewportFit: "cover",
+};
+
 export const metadata: Metadata = {
-  title: "Petrol Bunk ACC & Accounting System",
-  description: "Production-ready accounting and ACC management system for daily operations.",
+  title: "IOCL Petrol Bunk Accounting & Management Web App",
+  description: "Production-ready accounting, stock management, past duty ledger, and operational PWA system for IndianOil Petrol Bunks.",
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "IOCL Bunk",
+  },
+  icons: {
+    icon: [
+      { url: "/icons/icon.svg", type: "image/svg+xml" },
+    ],
+    apple: [
+      { url: "/icons/icon.svg" },
+    ],
+  },
 };
 
 export default function RootLayout({
@@ -54,11 +80,17 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className="min-h-full flex flex-col bg-[var(--bg-page)] text-[var(--text-primary)] font-sans transition-colors duration-200" suppressHydrationWarning>
+      <body className="min-h-full flex flex-col bg-[var(--bg-page)] text-[var(--text-primary)] font-sans transition-colors duration-200 pb-16 md:pb-0" suppressHydrationWarning>
         <ThemeProvider>
-          {children}
+          <PWARegistration />
+          <main className="flex-1">
+            {children}
+          </main>
+          <PWAInstallPrompt />
+          <MobileBottomNav />
         </ThemeProvider>
       </body>
     </html>
   );
 }
+
