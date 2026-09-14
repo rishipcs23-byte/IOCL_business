@@ -37,7 +37,11 @@ yarn-error.log*
 .vercel
 
 # typescript
-*.tsbuildinfo
-next-env.d.ts
+# database backups and local db
+*.db
+*.backup
+/prisma/*.db
+/prisma/*.backup
 
 /src/generated/prisma
+
