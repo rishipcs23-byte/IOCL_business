@@ -1,13 +1,15 @@
 /**
  * IOCL Petrol Bunk Accounting System
- * Database Migration Audit & Verification Script
- * 
- * Usage:
- *   $env:DATABASE_URL="postgresql://user:pass@host:5432/dbname?sslmode=require"
- *   node scripts/verify-migration.js
+ * Database Migration Audit & Verification Script (PrismaNeonHttp)
  */
 
+try {
+  require('dotenv').config({ path: '.env.local' });
+  require('dotenv').config();
+} catch (e) {}
+
 const { PrismaClient } = require('@prisma/client');
+const { PrismaNeonHttp } = require('@prisma/adapter-neon');
 const path = require('path');
 
 async function runVerification() {
@@ -18,19 +20,16 @@ async function runVerification() {
     process.exit(1);
   }
 
-  const sqliteDbPath = path.join(__dirname, '..', 'prisma', 'dev.db');
+  const { PrismaClient: SqlitePrismaClient } = require('../src/generated/sqlite-client');
+  const sqliteClient = new SqlitePrismaClient();
 
-  const sqliteClient = new PrismaClient({
-    datasources: { db: { url: `file:${sqliteDbPath}` } },
-  });
-
-  const pgClient = new PrismaClient({
-    datasources: { db: { url: targetPgUrl } },
-  });
+  process.env.DATABASE_URL = targetPgUrl;
+  const adapter = new PrismaNeonHttp(targetPgUrl);
+  const pgClient = new PrismaClient({ adapter });
 
   try {
     console.log('----------------------------------------------------');
-    console.log('📊 AUDITING REPLICATION: SQLite vs PostgreSQL');
+    console.log('📊 AUDITING REPLICATION: SQLite vs Neon PostgreSQL');
     console.log('----------------------------------------------------');
 
     const models = [
@@ -53,7 +52,7 @@ async function runVerification() {
       if (!match) allMatched = false;
 
       console.log(
-        `${match ? '✅' : '❌'} Model: ${model.padEnd(20)} | SQLite: ${String(sqliteCount).padStart(5)} | PostgreSQL: ${String(pgCount).padStart(5)}`
+        `${match ? '✅' : '❌'} Model: ${model.padEnd(20)} | SQLite: ${String(sqliteCount).padStart(5)} | Neon PostgreSQL: ${String(pgCount).padStart(5)}`
       );
     }
 

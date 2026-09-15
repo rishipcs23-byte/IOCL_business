@@ -1,0 +1,495 @@
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/sqlite-client"
+}
+
+model Role {
+  id    String @id @default(uuid())
+  name  String @unique // 'OWNER' or 'MANAGER'
+  users User[]
+}
+
+model User {
+  id           String   @id @default(uuid())
+  username     String   @unique
+  passwordHash String
+  roleId       String
+  role         Role     @relation(fields: [roleId], references: [id])
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  dutySessions        DutySession[]
+  oilSales            OilSale[]
+  sampleBoxSales      SampleBoxSale[]
+  expenses            Expense[]
+  creditTransactions  CreditTransaction[]
+  auditLogs           AuditLog[]
+  shortageAssignments ShortageAssignment[]
+  oilPurchases        OilPurchase[]
+  dutyDensities       DutyDensity[]
+  fuelReceipts        FuelReceipt[]
+  fuelMovements       FuelStockMovement[]
+  staffAttendances    StaffAttendance[]
+}
+
+model Staff {
+  id                  String               @id @default(uuid())
+  name                String
+  active              Boolean              @default(true)
+  createdAt           DateTime             @default(now())
+  dutyAssignments     DutyAssignment[]
+  shortageAssignments ShortageAssignment[]
+  attendances         StaffAttendance[]    @relation("StaffAttendances")
+  outgoingHandovers   StaffAttendance[]    @relation("OutgoingHandovers")
+  incomingHandovers   StaffAttendance[]    @relation("IncomingHandovers")
+}
+
+model Pump {
+  id              String           @id @default(uuid())
+  name            String           @unique // Pump 1, Pump 2
+  active          Boolean          @default(true)
+  guns            Gun[]
+  dutyAssignments DutyAssignment[]
+  staffAttendances StaffAttendance[]
+}
+
+model Gun {
+  id            String         @id @default(uuid())
+  name          String         // MS-1, HSD-1, etc.
+  pumpId        String
+  pump          Pump           @relation(fields: [pumpId], references: [id])
+  fuelType      String         // MS or HSD
+  active        Boolean        @default(true)
+  meterReadings MeterReading[]
+  dutyAssignments DutyAssignment[]
+  staffAttendances StaffAttendance[]
+}
+
+model DutySession {
+  id               String   @id @default(uuid())
+  dutyNumber       Int      @unique
+  startTime        DateTime
+  endTime          DateTime?
+  managerId        String
+  manager          User     @relation(fields: [managerId], references: [id])
+  status           String   @default("OPEN") // "OPEN", "CLOSED"
+  
+  // Cash reconciliation
+  expectedCash     Float    @default(0.0)
+  actualCash       Float    @default(0.0)
+  cashDifference   Float    @default(0.0)
+  
+  // Persisted Digital Payments Breakdown & Bank Deposit
+  phonePe          Float    @default(0.0)
+  gpay             Float    @default(0.0)
+  paytm            Float    @default(0.0)
+  bharatPe         Float    @default(0.0)
+  cardPayments     Float    @default(0.0)
+  bankTransfer     Float    @default(0.0)
+  totalDigital     Float    @default(0.0)
+  bankDeposit      Float    @default(0.0)
+  cashRetained     Float    @default(0.0)
+
+  // Persisted Density at 15°C
+  msDensity        Float?
+  hsdDensity       Float?
+  
+  createdAt        DateTime @default(now())
+
+  assignments         DutyAssignment[]
+  meterReadings       MeterReading[]
+  oilSales            OilSale[]
+  sampleBoxSales      SampleBoxSale[]
+  expenses            Expense[]
+  creditTransactions  CreditTransaction[]
+  tankDips            TankDip[]
+  tankSamples         TankSample[]
+  shortageAssignments ShortageAssignment[]
+  dutyDensities       DutyDensity[]
+  fuelMovements       FuelStockMovement[]
+  staffAttendances    StaffAttendance[]
+}
+
+model ShortageAssignment {
+  id            String      @id @default(uuid())
+  dutySessionId String
+  dutySession   DutySession @relation(fields: [dutySessionId], references: [id], onDelete: Cascade)
+  staffId       String
+  staff         Staff       @relation(fields: [staffId], references: [id])
+  amount        Float
+  reason        String?
+  assignedById  String
+  assignedBy    User        @relation(fields: [assignedById], references: [id])
+  timestamp     DateTime    @default(now())
+}
+
+model DutyAssignment {
+  id            String      @id @default(uuid())
+  dutySessionId String
+  dutySession   DutySession @relation(fields: [dutySessionId], references: [id], onDelete: Cascade)
+  pumpId        String
+  pump          Pump        @relation(fields: [pumpId], references: [id])
+  fuelType      String      // MS or HSD
+  gunId         String?
+  gun           Gun?        @relation(fields: [gunId], references: [id])
+  staffId       String
+  staff         Staff       @relation(fields: [staffId], references: [id])
+
+  @@unique([dutySessionId, gunId])
+}
+
+model StaffAttendance {
+  id                String       @id @default(uuid())
+  dutySessionId     String
+  dutySession       DutySession  @relation(fields: [dutySessionId], references: [id], onDelete: Cascade)
+  staffId           String
+  staff             Staff        @relation("StaffAttendances", fields: [staffId], references: [id])
+  pumpId            String
+  pump              Pump         @relation(fields: [pumpId], references: [id])
+  gunId             String?
+  gun               Gun?         @relation(fields: [gunId], references: [id])
+  fuelType          String?      // MS or HSD
+  startTime         DateTime?
+  endTime           DateTime?
+  startMeterReading Float?
+  endMeterReading   Float?
+  status            String       @default("PRESENT") // PRESENT, PARTIAL_DUTY, EARLY_EXIT, EMERGENCY, ABSENT, REPLACEMENT
+  workingDays       Float        @default(1.0)       // Working days counter (1.0 = full, 0.5 = half, 0 = absent)
+  reason            String?
+  remarks           String?
+  outgoingStaffId   String?
+  outgoingStaff     Staff?       @relation("OutgoingHandovers", fields: [outgoingStaffId], references: [id])
+  incomingStaffId   String?
+  incomingStaff     Staff?       @relation("IncomingHandovers", fields: [incomingStaffId], references: [id])
+  recordedById      String?
+  recordedBy        User?        @relation(fields: [recordedById], references: [id])
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  @@index([dutySessionId])
+  @@index([staffId])
+  @@index([startTime])
+}
+
+model MeterReading {
+  id              String                 @id @default(uuid())
+  dutySessionId   String
+  dutySession     DutySession            @relation(fields: [dutySessionId], references: [id], onDelete: Cascade)
+  gunId           String
+  gun             Gun                    @relation(fields: [gunId], references: [id])
+  previousReading Float
+  currentReading  Float
+  litresSold      Float
+  priceUsed       Float
+  salesAmount     Float
+  intervals       MeterReadingInterval[]
+
+  @@unique([dutySessionId, gunId])
+}
+
+model MeterReadingInterval {
+  id               String       @id @default(uuid())
+  meterReadingId   String
+  meterReading     MeterReading @relation(fields: [meterReadingId], references: [id], onDelete: Cascade)
+  startReading     Float
+  endReading       Float
+  litresSold       Float
+  priceUsed        Float
+  salesAmount      Float
+  effectiveFrom    DateTime     @default(now())
+  checkpointReason String?      // e.g. "MID_DUTY_PRICE_CHANGE"
+  createdAt        DateTime     @default(now())
+}
+
+model FuelPrice {
+  id            String   @id @default(uuid())
+  fuelType      String   // MS or HSD
+  price         Float
+  effectiveFrom DateTime @default(now())
+}
+
+model OilProduct {
+  id            String            @id @default(uuid())
+  name          String            @unique // 4T, 2T, etc.
+  price         Float             // Selling price
+  purchasePrice Float             @default(0.0) // Unit purchase cost
+  openingStock  Float             @default(0.0) // Opening stock baseline quantity
+  stockQuantity Float             @default(0.0) // Current calculated stock packets/units
+  minStockAlert Float             @default(5.0) // Minimum threshold for alert
+  active        Boolean           @default(true)
+  createdAt     DateTime          @default(now())
+  purchaseItems OilPurchaseItem[]
+  sales         OilSale[]
+}
+
+model OilPriceHistory {
+  id            String   @id @default(uuid())
+  productId     String
+  price         Float
+  effectiveFrom DateTime @default(now())
+}
+
+model OilPurchase {
+  id            String            @id @default(uuid())
+  supplierName  String
+  invoiceNumber String
+  invoiceDate   DateTime
+  totalAmount   Float
+  notes         String?
+  createdAt     DateTime          @default(now())
+  createdById   String?
+  createdBy     User?             @relation(fields: [createdById], references: [id])
+  items         OilPurchaseItem[]
+}
+
+model OilPurchaseItem {
+  id                String      @id @default(uuid())
+  purchaseId        String
+  purchase          OilPurchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  productId         String
+  product           OilProduct  @relation(fields: [productId], references: [id])
+  quantity          Float
+  unitPurchasePrice Float
+  totalPrice        Float
+}
+
+model OilSale {
+  id            String      @id @default(uuid())
+  dutySessionId String
+  dutySession   DutySession @relation(fields: [dutySessionId], references: [id], onDelete: Cascade)
+  productId     String
+  product       OilProduct  @relation(fields: [productId], references: [id])
+  productName   String
+  quantity      Float
+  unitPrice     Float
+  totalAmount   Float
+  enteredById   String
+  enteredBy     User        @relation(fields: [enteredById], references: [id])
+  timestamp     DateTime    @default(now())
+}
+
+model ExpenseCategory {
+  id        String    @id @default(uuid())
+  name      String    @unique
+  expenses  Expense[]
+}
+
+model Expense {
+  id            String          @id @default(uuid())
+  dutySessionId String
+  dutySession   DutySession     @relation(fields: [dutySessionId], references: [id], onDelete: Cascade)
+  categoryId    String
+  category      ExpenseCategory @relation(fields: [categoryId], references: [id])
+  description   String
+  amount        Float
+  paymentMethod String          // Cash, GPay, PhonePe, Paytm, etc.
+  remarks       String?
+  enteredById   String
+  enteredBy     User            @relation(fields: [enteredById], references: [id])
+  timestamp     DateTime        @default(now())
+}
+
+model Customer {
+  id             String              @id @default(uuid())
+  name           String              @unique
+  contactDetails String?
+  address        String?
+  active         Boolean             @default(true)
+  balance        Float               @default(0.0) // running balance (positive = outstanding credit)
+  createdAt      DateTime            @default(now())
+  transactions   CreditTransaction[]
+}
+
+model CreditTransaction {
+  id              String       @id @default(uuid())
+  customerId      String
+  customer        Customer     @relation(fields: [customerId], references: [id])
+  dutySessionId   String?
+  dutySession     DutySession? @relation(fields: [dutySessionId], references: [id], onDelete: Cascade)
+  transactionType String      // CREDIT_SALE (increases balance), COLLECTION (decreases balance)
+  indentNumber    String?
+  productName     String?
+  quantity        Float?
+  unitPrice       Float?
+  amount          Float
+  description     String?
+  paymentMethod   String?     @default("CASH") // CASH, CHEQUE, RTGS, NEFT, UPI, BANK_TRANSFER, OTHER
+  paymentReference String?    // Cheque No, UTR, Transaction ID
+  bankName        String?     // Bank Name for Cheque/RTGS/NEFT/Transfer
+  paymentDate     DateTime?   // Transaction Date / Cheque Date
+  enteredById     String
+  enteredBy       User        @relation(fields: [enteredById], references: [id])
+  timestamp       DateTime    @default(now())
+}
+
+model TankStock {
+  id              String   @id @default(uuid())
+  fuelType        String   // MS or HSD
+  openingStock    Float
+  receipts        Float    @default(0.0)
+  sales           Float    @default(0.0)
+  expectedClosing Float
+  physicalDip     Float
+  variance        Float
+  timestamp       DateTime @default(now())
+}
+
+model TankReceipt {
+  id       String   @id @default(uuid())
+  fuelType String   // MS or HSD
+  quantity Float
+  date     DateTime @default(now())
+}
+
+model TankDip {
+  id                    String      @id @default(uuid())
+  dutySessionId         String
+  dutySession           DutySession @relation(fields: [dutySessionId], references: [id], onDelete: Cascade)
+  fuelType              String      // MS or HSD
+  openingStock          Float?      // Physical opening tank stock at start of duty session
+  receipts              Float?      @default(0.0) // Fuel receipts added during duty session (litres)
+  physicalDispensing    Float?      @default(0.0) // Total physical meter dispensing during duty session (litres)
+  expectedClosing       Float?      // openingStock + receipts - physicalDispensing
+  dipCm                 Float?      // Physical dip in centimetres (e.g. 100.4)
+  chartCalculatedLitres Float?      // Auto litres from 20 KL dip chart (e.g. 10268)
+  correctedLitres       Float?      // Optional manual verified stock (e.g. 10250)
+  finalLitres           Float?      // Final stock used for variance calculation
+  physicalDip           Float       // Stock litres for backward compatibility
+  variance              Float?      // finalLitres - expectedClosing
+  density               Float?
+  isCorrected           Boolean     @default(false)
+  correctionReason      String?
+  correctedById         String?
+  correctedAt           DateTime?
+  timestamp             DateTime    @default(now())
+
+  @@unique([dutySessionId, fuelType])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  action     String   // e.g. "UPDATE_EXPENSE", "CHANGE_PRICE"
+  timestamp  DateTime @default(now())
+  recordType String   // e.g. "Expense", "FuelPrice"
+  recordId   String
+  oldValue   String?
+  newValue   String?
+}
+
+model TankSample {
+  id            String      @id @default(uuid())
+  dutySessionId String
+  dutySession   DutySession @relation(fields: [dutySessionId], references: [id], onDelete: Cascade)
+  fuelType      String      // MS or HSD
+  litres        Float       @default(0.0)
+  priceUsed     Float       @default(0.0)
+  amount        Float       @default(0.0)
+  createdAt     DateTime    @default(now())
+  createdBy     String?
+
+  @@unique([dutySessionId, fuelType])
+}
+
+model DutyDensity {
+  id            String      @id @default(uuid())
+  dutySessionId String
+  dutySession   DutySession @relation(fields: [dutySessionId], references: [id], onDelete: Cascade)
+  fuelType      String      // "MS" or "HSD"
+  densityAt15C  Float
+  recordedById  String
+  recordedBy    User        @relation(fields: [recordedById], references: [id])
+  recordedAt    DateTime    @default(now())
+
+  @@unique([dutySessionId, fuelType])
+}
+
+model FuelReceipt {
+  id            String   @id @default(uuid())
+  invoiceNumber String
+  invoiceDate   DateTime
+  receivedDate  DateTime @default(now())
+  supplier      String   @default("IOCL Supplier")
+  fuelType      String   // "MS" or "HSD"
+  quantityLitres Float
+  remarks       String?
+  createdById   String
+  createdBy     User     @relation(fields: [createdById], references: [id])
+  createdAt     DateTime @default(now())
+
+  movements     FuelStockMovement[]
+}
+
+model FuelStockMovement {
+  id            String       @id @default(uuid())
+  fuelType      String       // "MS" or "HSD"
+  movementType  String       // "RECEIPT", "DUTY_DISPENSING", "INITIAL_STOCK", "ADJUSTMENT"
+  quantityLitres Float       // Positive for receipts, negative for dispensing
+  balanceAfter  Float
+  dutySessionId String?
+  dutySession   DutySession? @relation(fields: [dutySessionId], references: [id], onDelete: SetNull)
+  fuelReceiptId String?
+  fuelReceipt   FuelReceipt? @relation(fields: [fuelReceiptId], references: [id], onDelete: SetNull)
+  createdById   String
+  createdBy     User         @relation(fields: [createdById], references: [id])
+  createdAt     DateTime     @default(now())
+}
+
+model FuelInventory {
+  id           String   @id @default(uuid())
+  fuelType     String   @unique // "MS" or "HSD"
+  currentStock Float    @default(0.0)
+  updatedAt    DateTime @updatedAt
+}
+
+model SampleBoxSale {
+  id            String      @id @default(uuid())
+  dutySessionId String
+  dutySession   DutySession @relation(fields: [dutySessionId], references: [id], onDelete: Cascade)
+  fuelType      String      // "MS" or "HSD"
+  quantity      Float       // Litres
+  unitPrice     Float       // Price per litre
+  totalAmount   Float       // quantity * unitPrice
+  notes         String?     // e.g. "Sample Box #1" or "Paid Load Sale"
+  paymentMethod String      @default("CASH")
+  enteredById   String
+  enteredBy     User        @relation(fields: [enteredById], references: [id])
+  timestamp     DateTime    @default(now())
+}
+
+model SystemSetting {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+model EmailLog {
+  id           String   @id @default(uuid())
+  emailType    String   // "TEST_EMAIL", "DUTY_REPORT", "LOW_STOCK_ALERT"
+  reference    String?  // e.g. "Duty #119" or "MS" or "MS + HSD"
+  recipients   String   // Comma separated recipient emails
+  status       String   // "SENT" or "FAILED"
+  errorMessage String?
+  sentAt       DateTime @default(now())
+}
+
+model EmailRecipient {
+  id                   String   @id @default(uuid())
+  name                 String
+  email                String   @unique
+  active               Boolean  @default(true)
+  dutyReportsEnabled   Boolean  @default(true)
+  lowFuelAlertsEnabled Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+}
+
+
+
