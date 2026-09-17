@@ -1775,12 +1775,11 @@ export async function closeDutySessionAction(
             },
           });
 
-          const updatedIntervals = await tx.meterReadingInterval.findMany({
-            where: { meterReadingId: existingReading.id },
-          });
+          const otherIntervalsLitres = existingIntervals.slice(0, existingIntervals.length - 1).reduce((sum: number, i: any) => sum + (i.litresSold || 0), 0);
+          const otherIntervalsSales = existingIntervals.slice(0, existingIntervals.length - 1).reduce((sum: number, i: any) => sum + (i.salesAmount || 0), 0);
 
-          const totalLitres = Number(updatedIntervals.reduce((sum: number, i: any) => sum + i.litresSold, 0).toFixed(2));
-          const totalSales = Number(updatedIntervals.reduce((sum: number, i: any) => sum + i.salesAmount, 0).toFixed(2));
+          const totalLitres = Number((otherIntervalsLitres + lastLitres).toFixed(2));
+          const totalSales = Number((otherIntervalsSales + lastSales).toFixed(2));
 
           await tx.meterReading.update({
             where: { id: existingReading.id },
@@ -2119,7 +2118,7 @@ export async function closeDutySessionAction(
         },
       });
     }
-  });
+  }, TX_OPTIONS);
 
   // --- POST-DUTY CLOSE EMAIL NOTIFICATIONS (Fire & Forget, non-blocking) ---
   try {
@@ -3031,7 +3030,7 @@ export async function getBusinessSettingsAction() {
     HSD_LOW_THRESHOLD: '6000',
   };
   try {
-    const records = await db.$queryRaw<Array<{ key: string; value: string }>>`SELECT key, value FROM SystemSetting`;
+    const records = await db.systemSetting.findMany({ select: { key: true, value: true } });
     for (const r of records) {
       settings[r.key] = r.value;
     }
@@ -3737,10 +3736,6 @@ export async function updateBusinessSettingsAction(settingsPayload: {
 }) {
   const session = await requireAuth(['OWNER']);
 
-  if (!(db as any).systemSetting) {
-    await db.$executeRaw`CREATE TABLE IF NOT EXISTS SystemSetting (id TEXT PRIMARY KEY, key TEXT UNIQUE, value TEXT, updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP)`;
-  }
-
   const entries = [
     { key: 'BUSINESS_NAME', val: (settingsPayload.businessName || '').trim() },
     { key: 'BUSINESS_ADDRESS', val: (settingsPayload.businessAddress || '').trim() },
@@ -3752,15 +3747,11 @@ export async function updateBusinessSettingsAction(settingsPayload: {
 
   for (const entry of entries) {
     if (entry.val) {
-      if ((db as any).systemSetting) {
-        await (db as any).systemSetting.upsert({
-          where: { key: entry.key },
-          update: { value: entry.val },
-          create: { key: entry.key, value: entry.val },
-        });
-      } else {
-        await db.$executeRaw`INSERT INTO SystemSetting (id, key, value, updatedAt) VALUES (${entry.key}, ${entry.key}, ${entry.val}, CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value = ${entry.val}, updatedAt = CURRENT_TIMESTAMP`;
-      }
+      await db.systemSetting.upsert({
+        where: { key: entry.key },
+        update: { value: entry.val },
+        create: { key: entry.key, value: entry.val },
+      });
     }
   }
 

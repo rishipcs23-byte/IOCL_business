@@ -1,4 +1,5 @@
 import { cookies } from 'next/headers';
+import { redirect } from 'next/navigation';
 import { db } from './db';
 import crypto from 'crypto';
 
@@ -83,7 +84,7 @@ export async function logoutUser() {
 export async function requireAuth(allowedRoles?: ('OWNER' | 'MANAGER')[]) {
   const session = await getSession();
   if (!session) {
-    throw new Error('Unauthorized');
+    redirect('/login');
   }
 
   if (allowedRoles && !allowedRoles.includes(session.role)) {
