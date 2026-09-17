@@ -8851,26 +8851,9 @@ export default function DashboardContainer({
                                   )}
                                 </td>
                                 <td className="p-2.5 text-right">
-                                  {mr.previousReading === 0 || session?.role === 'OWNER' ? (
-                                    <input
-                                      type="number"
-                                      step="0.01"
-                                      value={openingReadings[mr.gunId] !== undefined ? openingReadings[mr.gunId] : (mr.previousReading > 0 ? mr.previousReading : '')}
-                                      onChange={(e) => {
-                                        setOpeningReadings({
-                                          ...openingReadings,
-                                          [mr.gunId]: e.target.value === '' ? '' : Number(e.target.value),
-                                        });
-                                      }}
-                                      className="w-28 rounded border border-amber-500/60 bg-slate-950 py-1 px-2 text-xs font-mono font-bold text-amber-300 text-right focus:border-amber-400 focus:outline-none"
-                                      placeholder="0.00"
-                                      title={mr.previousReading === 0 ? "Enter Initial Baseline Opening Meter Reading" : "Owner Privilege: Edit Original Opening Meter Reading"}
-                                    />
-                                  ) : (
-                                    <span className="text-slate-300 font-mono font-bold bg-slate-900/60 px-2.5 py-1 rounded border border-slate-800 text-xs inline-block min-w-[75px] text-right" title="Read-only Opening carried forward from previous duty closing">
-                                      {mr.previousReading.toFixed(2)}
-                                    </span>
-                                  )}
+                                  <span className="text-slate-300 font-mono font-bold bg-slate-900/60 px-2.5 py-1 rounded border border-slate-800 text-xs inline-block min-w-[75px] text-right" title="Read-only Opening carried forward automatically from previous duty closing">
+                                    {(mr.previousReading || 0).toFixed(2)}
+                                  </span>
                                 </td>
                                 <td className="p-2.5 text-right text-white font-bold">{litres.toFixed(2)} L</td>
                                 <td className="p-2.5 text-right text-slate-400">
