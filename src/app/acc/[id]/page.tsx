@@ -1,5 +1,7 @@
 import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/auth';
+
+export const dynamic = 'force-dynamic';
 import { getDutyReport } from '@/lib/actions';
 import Link from 'next/link';
 import { Fuel, Printer, ArrowLeft } from 'lucide-react';
