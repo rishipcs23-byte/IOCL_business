@@ -3,6 +3,8 @@ import { getSession } from '@/lib/auth';
 import { getStaticData, getActiveDutySession, getDashboardStats, getHistoricalDuties, getStaffPerformanceReport, getCreditLedgerReport, getExpenseReport, getOilSalesReport, getOilPurchasesReport, getStockReport, getAuditLogs } from '@/lib/actions';
 import DashboardContainer from '@/components/DashboardContainer';
 
+export const dynamic = 'force-dynamic';
+
 export default async function DashboardPage() {
   const session = await getSession();
 
