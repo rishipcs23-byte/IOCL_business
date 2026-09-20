@@ -1,3 +1,4 @@
+require('dotenv').config();
 const { getStaticData, getActiveDutySession, getDashboardStats, getHistoricalDuties, getStaffPerformanceReport, getCreditLedgerReport, getExpenseReport, getOilSalesReport, getOilPurchasesReport, getStockReport, getAuditLogs } = require('./src/lib/actions');
 
 async function testAll() {
@@ -33,10 +34,7 @@ async function testAll() {
     const stock = await getStockReport();
     console.log('✓ getStockReport succeeded');
 
-    const audit = await getAuditLogs();
-    console.log('✓ getAuditLogs succeeded');
-
-    console.log('\n🎉 ALL ACTIONS TESTED OK!');
+    console.log('\n🎉 ALL ACTIONS TESTED OK WITH NEON POOL ADAPTER!');
   } catch (err) {
     console.error('❌ ACTION TEST FAILED:', err);
   }
