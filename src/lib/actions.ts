@@ -33,32 +33,37 @@ async function logAudit(userId: string, action: string, recordType: string, reco
 // ----------------- AUTHENTICATION ACTIONS -----------------
 
 export async function loginAction(prevState: any, formData: FormData) {
-  const username = ((formData.get('username') as string) || '').trim().toLowerCase();
-  const password = ((formData.get('password') as string) || '').trim();
+  try {
+    const username = ((formData.get('username') as string) || '').trim().toLowerCase();
+    const password = ((formData.get('password') as string) || '').trim();
 
-  if (!username || !password) {
-    return { error: 'Please enter both username and password' };
-  }
-
-  let passHash = hashPassword(password);
-  let session = await loginUser(username, passHash);
-
-  // Fallback demo password support (password123)
-  if (!session) {
-    if (password === 'password123') {
-      const altHash = hashPassword(username === 'owner' ? 'owner123' : 'manager123');
-      session = await loginUser(username, altHash);
-    } else if (password === 'owner123' || password === 'manager123') {
-      const altHash = hashPassword('password123');
-      session = await loginUser(username, altHash);
+    if (!username || !password) {
+      return { error: 'Please enter both username and password' };
     }
-  }
 
-  if (!session) {
-    return { error: 'Invalid username or password' };
-  }
+    let passHash = hashPassword(password);
+    let session = await loginUser(username, passHash);
 
-  return { success: true, role: session.role };
+    // Fallback demo password support (password123)
+    if (!session) {
+      if (password === 'password123') {
+        const altHash = hashPassword(username === 'owner' ? 'owner123' : 'manager123');
+        session = await loginUser(username, altHash);
+      } else if (password === 'owner123' || password === 'manager123') {
+        const altHash = hashPassword('password123');
+        session = await loginUser(username, altHash);
+      }
+    }
+
+    if (!session) {
+      return { error: 'Invalid username or password' };
+    }
+
+    return { success: true, role: session.role };
+  } catch (err: any) {
+    console.error('Login action error:', err);
+    return { error: err?.message || 'Authentication error occurred.' };
+  }
 }
 
 export async function logoutAction() {
