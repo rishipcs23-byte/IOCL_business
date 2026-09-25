@@ -411,11 +411,11 @@ export async function toggleOilProductStatusAction(id: string, active: boolean) 
 }
 
 export async function deleteOilProductAction(id: string) {
-  const session = await requireAuth(['OWNER', 'MANAGER']);
-  const product = await db.oilProduct.findUnique({ where: { id } });
-  if (!product) throw new Error('Product not found');
-
   try {
+    const session = await requireAuth(['OWNER', 'MANAGER']);
+    const product = await db.oilProduct.findUnique({ where: { id } });
+    if (!product) return { success: false, error: 'Product not found' };
+
     await db.$transaction(async (tx) => {
       // Delete associated sales & purchase items to allow clean removal of test/invalid products
       await tx.oilSale.deleteMany({ where: { productId: id } });
@@ -431,8 +431,8 @@ export async function deleteOilProductAction(id: string) {
     revalidatePath('/dashboard');
     return { success: true, message: `Product "${product.name}" deleted successfully.` };
   } catch (err: any) {
-    if (err instanceof Error) throw err;
-    throw new Error(err?.message || 'Failed to delete product.');
+    console.error('Error in deleteOilProductAction:', err);
+    return { success: false, error: err?.message || 'Failed to delete product.' };
   }
 }
 
@@ -784,26 +784,26 @@ export async function recalculateCentralOilInventory(tx?: any) {
 }
 
 export async function addOilSaleAction(dutySessionId: string, productId: string, quantity: number) {
-  const session = await requireAuth(['OWNER', 'MANAGER']);
-  const numQty = Number(quantity);
-  if (isNaN(numQty) || numQty <= 0) throw new Error('Quantity must be greater than 0');
+  try {
+    const session = await requireAuth(['OWNER', 'MANAGER']);
+    const numQty = Number(quantity);
+    if (isNaN(numQty) || numQty <= 0) return { success: false, error: 'Quantity must be greater than 0' };
 
-  let finalDutyId = dutySessionId;
-  if (!finalDutyId || finalDutyId === 'LATEST') {
-    const openDuty = await db.dutySession.findFirst({ where: { status: 'OPEN' } });
-    if (openDuty) {
-      finalDutyId = openDuty.id;
-    } else {
-      const latestDuty = await db.dutySession.findFirst({ orderBy: { dutyNumber: 'desc' } });
-      if (latestDuty) {
-        finalDutyId = latestDuty.id;
+    let finalDutyId = dutySessionId;
+    if (!finalDutyId || finalDutyId === 'LATEST') {
+      const openDuty = await db.dutySession.findFirst({ where: { status: 'OPEN' } });
+      if (openDuty) {
+        finalDutyId = openDuty.id;
       } else {
-        throw new Error('No duty session found in system to record oil sale.');
+        const latestDuty = await db.dutySession.findFirst({ orderBy: { dutyNumber: 'desc' } });
+        if (latestDuty) {
+          finalDutyId = latestDuty.id;
+        } else {
+          return { success: false, error: 'No duty session found in system to record oil sale.' };
+        }
       }
     }
-  }
 
-  try {
     const sale = await db.$transaction(async (tx) => {
       // Atomic stock validation on transaction client to prevent race conditions
       const product = await tx.oilProduct.findUnique({
@@ -858,17 +858,17 @@ export async function addOilSaleAction(dutySessionId: string, productId: string,
     revalidatePath('/oil');
     return { success: true };
   } catch (err: any) {
-    if (err instanceof Error) throw err;
-    throw new Error(err?.message || 'Failed to record oil sale.');
+    console.error('Error in addOilSaleAction:', err);
+    return { success: false, error: err?.message || 'Failed to record oil sale.' };
   }
 }
 
 export async function deleteOilSaleAction(id: string) {
-  const session = await requireAuth(['OWNER', 'MANAGER']);
-  const sale = await db.oilSale.findUnique({ where: { id } });
-  if (!sale) throw new Error('Sale not found');
-
   try {
+    const session = await requireAuth(['OWNER', 'MANAGER']);
+    const sale = await db.oilSale.findUnique({ where: { id } });
+    if (!sale) return { success: false, error: 'Sale not found' };
+
     await db.$transaction(async (tx) => {
       await tx.oilSale.delete({ where: { id } });
       await tx.oilProduct.update({
@@ -886,8 +886,8 @@ export async function deleteOilSaleAction(id: string) {
     revalidatePath('/oil');
     return { success: true };
   } catch (err: any) {
-    if (err instanceof Error) throw err;
-    throw new Error(err?.message || 'Failed to delete oil sale.');
+    console.error('Error in deleteOilSaleAction:', err);
+    return { success: false, error: err?.message || 'Failed to delete oil sale.' };
   }
 }
 
@@ -898,24 +898,24 @@ export async function recordOilPurchaseAction(
   items: { productId: string; quantity: number; unitPurchasePrice: number }[],
   notes?: string
 ) {
-  const session = await requireAuth(['OWNER', 'MANAGER']);
-  const invoiceDate = new Date(invoiceDateStr);
-
-  if (!supplierName || !invoiceNumber || !items || items.length === 0) {
-    throw new Error('Please fill all required invoice fields and at least one item.');
-  }
-
-  // Prevent duplicate invoice entries
-  const existingInv = await db.oilPurchase.findFirst({
-    where: { invoiceNumber: invoiceNumber.trim() },
-  });
-  if (existingInv) {
-    throw new Error(`Invoice number "${invoiceNumber.trim()}" already exists (Recorded on ${new Date(existingInv.invoiceDate).toLocaleDateString()}). Please enter a unique invoice number.`);
-  }
-
-  const totalAmount = items.reduce((sum, item) => sum + (item.quantity * item.unitPurchasePrice), 0);
-
   try {
+    const session = await requireAuth(['OWNER', 'MANAGER']);
+    const invoiceDate = new Date(invoiceDateStr);
+
+    if (!supplierName?.trim() || !invoiceNumber?.trim() || !items || items.length === 0) {
+      return { success: false, error: 'Please fill all required invoice fields and at least one item.' };
+    }
+
+    // Prevent duplicate invoice entries
+    const existingInv = await db.oilPurchase.findFirst({
+      where: { invoiceNumber: invoiceNumber.trim() },
+    });
+    if (existingInv) {
+      return { success: false, error: `Invoice number "${invoiceNumber.trim()}" already exists (Recorded on ${new Date(existingInv.invoiceDate).toLocaleDateString()}). Please enter a unique invoice number.` };
+    }
+
+    const totalAmount = items.reduce((sum, item) => sum + (item.quantity * item.unitPurchasePrice), 0);
+
     const purchase = await db.$transaction(async (tx) => {
       const p = await tx.oilPurchase.create({
         data: {
@@ -956,20 +956,20 @@ export async function recordOilPurchaseAction(
     revalidatePath('/oil');
     return { success: true, purchaseId: purchase.id };
   } catch (err: any) {
-    if (err instanceof Error) throw err;
-    throw new Error(err?.message || 'Failed to record purchase invoice.');
+    console.error('Error in recordOilPurchaseAction:', err);
+    return { success: false, error: err?.message || 'Failed to record purchase invoice.' };
   }
 }
 
 export async function deleteOilPurchaseAction(id: string) {
-  const session = await requireAuth(['OWNER', 'MANAGER']);
-  const purchase = await db.oilPurchase.findUnique({
-    where: { id },
-    include: { items: true },
-  });
-  if (!purchase) throw new Error('Purchase invoice not found');
-
   try {
+    const session = await requireAuth(['OWNER', 'MANAGER']);
+    const purchase = await db.oilPurchase.findUnique({
+      where: { id },
+      include: { items: true },
+    });
+    if (!purchase) return { success: false, error: 'Purchase invoice not found' };
+
     await db.$transaction(async (tx) => {
       await tx.oilPurchaseItem.deleteMany({ where: { purchaseId: id } });
       await tx.oilPurchase.delete({ where: { id } });
@@ -982,31 +982,36 @@ export async function deleteOilPurchaseAction(id: string) {
     revalidatePath('/oil');
     return { success: true };
   } catch (err: any) {
-    if (err instanceof Error) throw err;
-    throw new Error(err?.message || 'Failed to delete purchase invoice.');
+    console.error('Error in deleteOilPurchaseAction:', err);
+    return { success: false, error: err?.message || 'Failed to delete purchase invoice.' };
   }
 }
 
 export async function updateOilProductOpeningStockAction(productId: string, openingStock: number) {
-  const session = await requireAuth(['OWNER']);
-  const numOpening = Math.max(0, Number(openingStock) || 0);
+  try {
+    const session = await requireAuth(['OWNER']);
+    const numOpening = Math.max(0, Number(openingStock) || 0);
 
-  const product = await db.oilProduct.findUnique({ where: { id: productId } });
-  if (!product) throw new Error('Oil product not found');
+    const product = await db.oilProduct.findUnique({ where: { id: productId } });
+    if (!product) return { success: false, error: 'Oil product not found' };
 
-  const oldStock = product.openingStock;
+    const oldStock = product.openingStock;
 
-  await db.oilProduct.update({
-    where: { id: productId },
-    data: { openingStock: numOpening },
-  });
+    await db.oilProduct.update({
+      where: { id: productId },
+      data: { openingStock: numOpening },
+    });
 
-  await recalculateCentralOilInventory();
+    await recalculateCentralOilInventory();
 
-  await logAudit(session.id, 'UPDATE_OIL_OPENING_STOCK', 'OilProduct', productId, `Opening stock: ${oldStock}`, `Opening stock: ${numOpening}`);
-  revalidatePath('/oil');
-  revalidatePath('/dashboard');
-  return { success: true };
+    await logAudit(session.id, 'UPDATE_OIL_OPENING_STOCK', 'OilProduct', productId, `Opening stock: ${oldStock}`, `Opening stock: ${numOpening}`);
+    revalidatePath('/oil');
+    revalidatePath('/dashboard');
+    return { success: true };
+  } catch (err: any) {
+    console.error('Error in updateOilProductOpeningStockAction:', err);
+    return { success: false, error: err?.message || 'Failed to update opening stock.' };
+  }
 }
 
 
@@ -1017,20 +1022,20 @@ export async function createOilProductAction(
   minStockAlert: number = 5,
   openingStock: number = 0
 ) {
-  const session = await requireAuth(['OWNER', 'MANAGER']);
-  const trimmedName = name?.trim() || '';
-  if (!trimmedName || isNaN(price) || price <= 0) {
-    throw new Error('Valid product name and selling price are required.');
-  }
-
-  const existing = await db.oilProduct.findFirst({
-    where: { name: trimmedName },
-  });
-  if (existing) {
-    throw new Error(`An oil product with the name "${trimmedName}" already exists.`);
-  }
-
   try {
+    const session = await requireAuth(['OWNER', 'MANAGER']);
+    const trimmedName = name?.trim() || '';
+    if (!trimmedName || isNaN(price) || price <= 0) {
+      return { success: false, error: 'Valid product name and selling price are required.' };
+    }
+
+    const existing = await db.oilProduct.findFirst({
+      where: { name: trimmedName },
+    });
+    if (existing) {
+      return { success: false, error: `An oil product with the name "${trimmedName}" already exists.` };
+    }
+
     const product = await db.$transaction(async (tx) => {
       const prod = await tx.oilProduct.create({
         data: {
@@ -1053,9 +1058,10 @@ export async function createOilProductAction(
     return { success: true, product };
   } catch (err: any) {
     if (err?.code === 'P2002' || (err?.message && err.message.includes('Unique constraint'))) {
-      throw new Error(`An oil product with the name "${trimmedName}" already exists.`);
+      return { success: false, error: `An oil product with the name "${name?.trim()}" already exists.` };
     }
-    throw err;
+    console.error('Error in createOilProductAction:', err);
+    return { success: false, error: err?.message || 'Failed to create oil product' };
   }
 }
 
@@ -1070,23 +1076,23 @@ export async function updateOilProductAction(
     active?: boolean;
   }
 ) {
-  const session = await requireAuth(['OWNER', 'MANAGER']);
-  const product = await db.oilProduct.findUnique({ where: { id } });
-  if (!product) throw new Error('Product not found');
+  try {
+    const session = await requireAuth(['OWNER', 'MANAGER']);
+    const product = await db.oilProduct.findUnique({ where: { id } });
+    if (!product) return { success: false, error: 'Product not found' };
 
-  if (data.name !== undefined) {
-    const trimmedName = data.name.trim();
-    if (trimmedName.toLowerCase() !== product.name.toLowerCase()) {
-      const existing = await db.oilProduct.findFirst({
-        where: { name: trimmedName, id: { not: id } },
-      });
-      if (existing) {
-        throw new Error(`An oil product with the name "${trimmedName}" already exists.`);
+    if (data.name !== undefined) {
+      const trimmedName = data.name.trim();
+      if (trimmedName.toLowerCase() !== product.name.toLowerCase()) {
+        const existing = await db.oilProduct.findFirst({
+          where: { name: trimmedName, id: { not: id } },
+        });
+        if (existing) {
+          return { success: false, error: `An oil product with the name "${trimmedName}" already exists.` };
+        }
       }
     }
-  }
 
-  try {
     await db.$transaction(async (tx) => {
       const updateData: any = {};
       if (data.name !== undefined) updateData.name = data.name.trim();
@@ -1109,9 +1115,10 @@ export async function updateOilProductAction(
     return { success: true };
   } catch (err: any) {
     if (err?.code === 'P2002' || (err?.message && err.message.includes('Unique constraint'))) {
-      throw new Error(`An oil product with the name "${data.name?.trim()}" already exists.`);
+      return { success: false, error: `An oil product with the name "${data.name?.trim()}" already exists.` };
     }
-    throw err;
+    console.error('Error in updateOilProductAction:', err);
+    return { success: false, error: err?.message || 'Failed to update oil product' };
   }
 }
 

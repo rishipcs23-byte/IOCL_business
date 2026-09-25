@@ -122,22 +122,50 @@ export default function OilInventoryManager({
     e.preventDefault();
     if (isSubmittingPurchase) return;
 
+    const trimmedSupplier = supplierName.trim();
+    const trimmedInvoice = invoiceNumber.trim();
+
+    if (!trimmedSupplier) {
+      flashMessage('Please enter the Supplier / Vendor name.', 'error');
+      return;
+    }
+    if (!trimmedInvoice) {
+      flashMessage('Please enter the Invoice / Bill Number.', 'error');
+      return;
+    }
+    if (!invoiceDate) {
+      flashMessage('Please select the Invoice Date.', 'error');
+      return;
+    }
+    if (products.length === 0) {
+      flashMessage('No oil products found in inventory. Please click "+ New Product" above to create an oil product before recording an invoice.', 'error');
+      return;
+    }
+
+    const hasMissingProduct = purchaseItems.some(item => !item.productId);
+    if (hasMissingProduct) {
+      flashMessage('Please select a valid product for every item row.', 'error');
+      return;
+    }
+
     const validItems = purchaseItems.filter(item => item.productId && item.quantity > 0 && item.unitPurchasePrice >= 0);
-    if (!supplierName || !invoiceNumber || !invoiceDate || validItems.length === 0) {
-      flashMessage('Please fill all required invoice fields and at least one item.', 'error');
+    if (validItems.length === 0) {
+      flashMessage('Please enter a quantity greater than 0 and valid unit cost for at least one item.', 'error');
       return;
     }
 
     setIsSubmittingPurchase(true);
     try {
-      const res = await recordOilPurchaseAction(supplierName, invoiceNumber, invoiceDate, validItems, purchaseNotes);
-      if (res.success) {
+      const res = await recordOilPurchaseAction(trimmedSupplier, trimmedInvoice, invoiceDate, validItems, purchaseNotes);
+      if (res && res.success) {
         flashMessage('Oil purchase invoice recorded and stock updated successfully!', 'success');
         setSupplierName('');
         setInvoiceNumber('');
         setPurchaseNotes('');
         setPurchaseItems([{ productId: products[0]?.id || '', quantity: 1, unitPurchasePrice: products[0]?.purchasePrice || 0 }]);
         await onRefresh();
+      } else {
+        flashMessage(res?.error || 'Failed to record purchase invoice', 'error');
       }
     } catch (err: any) {
       flashMessage(err.message || 'Failed to record purchase invoice', 'error');
@@ -149,9 +177,13 @@ export default function OilInventoryManager({
   const handleDeletePurchase = async (id: string) => {
     if (!confirm('Are you sure you want to delete this purchase invoice? Stock and weighted costs will be recalculated.')) return;
     try {
-      await deleteOilPurchaseAction(id);
-      flashMessage('Purchase invoice deleted and stock recalculated!', 'success');
-      await onRefresh();
+      const res = await deleteOilPurchaseAction(id);
+      if (res && res.success) {
+        flashMessage('Purchase invoice deleted and stock recalculated!', 'success');
+        await onRefresh();
+      } else {
+        flashMessage(res?.error || 'Failed to delete purchase invoice', 'error');
+      }
     } catch (err: any) {
       flashMessage(err.message || 'Failed to delete purchase invoice', 'error');
     }
@@ -180,10 +212,12 @@ export default function OilInventoryManager({
     setIsSubmittingSale(true);
     try {
       const res = await addOilSaleAction(activeDuty.id, oilProdId, oilQty);
-      if (res.success) {
+      if (res && res.success) {
         flashMessage('Oil sale recorded and inventory ledger updated!', 'success');
         setOilQty(1);
         await onRefresh();
+      } else {
+        flashMessage(res?.error || 'Failed to record oil sale', 'error');
       }
     } catch (err: any) {
       flashMessage(err.message || 'Failed to record oil sale', 'error');
@@ -195,9 +229,13 @@ export default function OilInventoryManager({
   const handleDeleteSale = async (id: string) => {
     if (!confirm('Are you sure you want to delete this oil sale? Stock will be restored in ledger.')) return;
     try {
-      await deleteOilSaleAction(id);
-      flashMessage('Oil sale deleted and stock restored in ledger!', 'success');
-      await onRefresh();
+      const res = await deleteOilSaleAction(id);
+      if (res && res.success) {
+        flashMessage('Oil sale deleted and stock restored in ledger!', 'success');
+        await onRefresh();
+      } else {
+        flashMessage(res?.error || 'Failed to delete oil sale', 'error');
+      }
     } catch (err: any) {
       flashMessage(err.message, 'error');
     }
@@ -209,11 +247,15 @@ export default function OilInventoryManager({
     if (isCreatingProd) return;
     setIsCreatingProd(true);
     try {
-      await createOilProductAction(newName, newPrice, newPurchasePrice, newMinStock, newOpeningStock);
-      flashMessage(`Product "${newName}" created successfully!`, 'success');
-      setShowCreateModal(false);
-      setNewName('');
-      await onRefresh();
+      const res = await createOilProductAction(newName, newPrice, newPurchasePrice, newMinStock, newOpeningStock);
+      if (res && res.success) {
+        flashMessage(`Product "${newName}" created successfully!`, 'success');
+        setShowCreateModal(false);
+        setNewName('');
+        await onRefresh();
+      } else {
+        flashMessage(res?.error || 'Failed to create product', 'error');
+      }
     } catch (err: any) {
       flashMessage(err.message || 'Failed to create product', 'error');
     } finally {
@@ -235,16 +277,20 @@ export default function OilInventoryManager({
     if (!editingProd || isSavingProd) return;
     setIsSavingProd(true);
     try {
-      await updateOilProductAction(editingProd.id, {
+      const res = await updateOilProductAction(editingProd.id, {
         name: editName,
         price: editPrice,
         purchasePrice: editPurchasePrice,
         minStockAlert: editMinStock,
         openingStock: editOpeningStock,
       });
-      flashMessage(`Product "${editName}" updated successfully!`, 'success');
-      setEditingProd(null);
-      await onRefresh();
+      if (res && res.success) {
+        flashMessage(`Product "${editName}" updated successfully!`, 'success');
+        setEditingProd(null);
+        await onRefresh();
+      } else {
+        flashMessage(res?.error || 'Failed to update product', 'error');
+      }
     } catch (err: any) {
       flashMessage(err.message || 'Failed to update product', 'error');
     } finally {
@@ -255,9 +301,13 @@ export default function OilInventoryManager({
   const handleDeleteProduct = async (prod: any) => {
     if (!confirm(`Are you sure you want to delete product "${prod.name}"? This will delete the product master and recalculate inventory balances.`)) return;
     try {
-      await deleteOilProductAction(prod.id);
-      flashMessage(`Product "${prod.name}" deleted successfully!`, 'success');
-      await onRefresh();
+      const res = await deleteOilProductAction(prod.id);
+      if (res && res.success) {
+        flashMessage(`Product "${prod.name}" deleted successfully!`, 'success');
+        await onRefresh();
+      } else {
+        flashMessage(res?.error || 'Failed to delete product', 'error');
+      }
     } catch (err: any) {
       flashMessage(err.message || 'Failed to delete product', 'error');
     }
@@ -754,11 +804,18 @@ export default function OilInventoryManager({
                         <select
                           value={item.productId}
                           onChange={(e) => handleItemChange(idx, 'productId', e.target.value)}
-                          className="w-full bg-white border border-slate-300 text-slate-900 rounded-xl p-2 font-medium focus:border-blue-600 outline-none"
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-xl p-2 font-medium focus:border-blue-600 outline-none"
                         >
-                          {products.map((prod: any) => (
-                            <option key={prod.id} value={prod.id}>{prod.name} (Stock: {prod.stockQuantity})</option>
-                          ))}
+                          {products.length === 0 ? (
+                            <option value="">-- No products created (Click + New Product above) --</option>
+                          ) : (
+                            <>
+                              <option value="">-- Select Product --</option>
+                              {products.map((prod: any) => (
+                                <option key={prod.id} value={prod.id}>{prod.name} (Stock: {prod.stockQuantity})</option>
+                              ))}
+                            </>
+                          )}
                         </select>
                       </div>
 
@@ -769,7 +826,7 @@ export default function OilInventoryManager({
                           min="1"
                           value={item.quantity || ''}
                           onChange={(e) => handleItemChange(idx, 'quantity', e.target.value)}
-                          className="w-full bg-white border border-slate-300 text-slate-900 rounded-xl p-2 font-mono font-medium focus:border-blue-600 outline-none"
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-xl p-2 font-mono font-medium focus:border-blue-600 outline-none"
                         />
                       </div>
 
@@ -781,7 +838,7 @@ export default function OilInventoryManager({
                           step="0.01"
                           value={item.unitPurchasePrice || ''}
                           onChange={(e) => handleItemChange(idx, 'unitPurchasePrice', e.target.value)}
-                          className="w-full bg-white border border-slate-300 text-slate-900 rounded-xl p-2 font-mono font-medium focus:border-blue-600 outline-none"
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-xl p-2 font-mono font-medium focus:border-blue-600 outline-none"
                         />
                       </div>
 
