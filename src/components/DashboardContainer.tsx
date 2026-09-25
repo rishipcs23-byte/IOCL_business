@@ -7,7 +7,7 @@ import {
   Activity, Users, ShieldAlert, LogOut, ArrowRight, UserCheck, UserX, CheckCircle2,
   AlertTriangle, Plus, Trash2, Calendar, FileText, ChevronRight, HelpCircle,
   Database, Info, TrendingUp, ArrowUpRight, ArrowDownRight, Wallet, HardDrive, BarChart3, CreditCard,
-  Edit, Eye, Layers, Building2, Check, ChevronDown, Filter, Lock, ShieldCheck, FlaskConical, Menu, X, Mail,
+  Edit, Eye, Layers, Building2, Check, ChevronDown, Filter, Lock, Unlock, ShieldCheck, FlaskConical, Menu, X, Mail,
   RefreshCw, Wrench, Printer
 } from 'lucide-react';
 import {
@@ -134,6 +134,7 @@ export default function DashboardContainer({
   // Closing form state
   const [closingReadings, setClosingReadings] = useState<Record<string, number>>({});
   const [openingReadings, setOpeningReadings] = useState<Record<string, number>>({});
+  const [isClosingUnlocked, setIsClosingUnlocked] = useState<boolean>(false);
   const [actualCash, setActualCash] = useState<number>(0);
   const [digitalPayments, setDigitalPayments] = useState<{
     phonepe: number;
@@ -1054,6 +1055,7 @@ export default function DashboardContainer({
 
   // Helper to completely reset current duty input form values
   const resetDutyFormState = () => {
+    setIsClosingUnlocked(false);
     setClosingReadings({});
     setOpeningReadings({});
     setOngoingReadings({});
@@ -1109,6 +1111,7 @@ export default function DashboardContainer({
 
   // Update readings state cleanly when activeDuty session initializes or changes ID
   useEffect(() => {
+    setIsClosingUnlocked(false);
     if (activeDuty) {
       const readingsMap: Record<string, number> = {};
       for (const mr of activeDuty.meterReadings || []) {
@@ -1231,11 +1234,16 @@ export default function DashboardContainer({
   const handleSaveOngoingReadings = async () => {
     if (!activeDuty) return;
 
-    // Check validation: Current Reading cannot be lower than previous reading
+    if (!isClosingUnlocked) {
+      flashMessage('Closing readings are locked. Please unlock the closing stage first to enter and save closing readings.', 'error');
+      return;
+    }
+
+    // Check validation: Closing Reading cannot be lower than Opening Reading (previous reading)
     for (const mr of activeDuty.meterReadings) {
       const val = ongoingReadings[mr.gunId];
       if (val !== undefined && val !== null && !isNaN(Number(val)) && Number(val) < mr.previousReading) {
-        flashMessage(`Current reading cannot be lower than previous reading for ${mr.gun.name}.`, 'error');
+        flashMessage(`Closing reading (${Number(val)}) for ${mr.gun.name} cannot be lower than opening reading (${mr.previousReading}).`, 'error');
         return;
       }
     }
@@ -4137,12 +4145,46 @@ export default function DashboardContainer({
 
                       {/* Active Readings Form - Grouped by Pump 1 and Pump 2 */}
                       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
-                        <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-4">
                           <div>
-                            <h3 className="font-extrabold text-white text-lg">Gun Meter Readings (Grouped by Pump)</h3>
-                            <p className="text-xs text-slate-400 mt-1">Enter current meter reading for each gun. Litres sold and sales are calculated automatically.</p>
+                            <div className="flex items-center gap-2">
+                              <h3 className="font-extrabold text-white text-lg">Gun Meter Readings (Grouped by Pump)</h3>
+                              {!isClosingUnlocked ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                                  <Lock className="h-3 w-3" /> Closing Locked
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                                  <Unlock className="h-3 w-3" /> Closing Unlocked
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs text-slate-400 mt-1">
+                              Opening readings are saved and read-only. Closing readings remain locked initially and unlock when closing stage is initiated.
+                            </p>
                           </div>
                           <div className="flex items-center gap-2">
+                            {!isClosingUnlocked ? (
+                              <button
+                                type="button"
+                                onClick={() => setIsClosingUnlocked(true)}
+                                className="px-3.5 py-2.5 rounded-xl bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/40 font-bold text-xs transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+                                title="Unlock Closing Meter Reading fields for entry"
+                              >
+                                <Lock className="h-3.5 w-3.5 text-amber-400" />
+                                Unlock Closing Stage
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setIsClosingUnlocked(false)}
+                                className="px-3.5 py-2.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 font-bold text-xs transition-all flex items-center gap-1.5 cursor-pointer"
+                                title="Lock Closing Meter Reading fields"
+                              >
+                                <Unlock className="h-3.5 w-3.5 text-emerald-400" />
+                                Lock Closing Stage
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={() => setShowClearReadingsModal(true)}
@@ -4154,8 +4196,12 @@ export default function DashboardContainer({
                             </button>
                             <button
                               onClick={handleSaveOngoingReadings}
-                              disabled={actionLoading}
-                              className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition-all shadow-md"
+                              disabled={actionLoading || !isClosingUnlocked}
+                              className={`px-5 py-2.5 rounded-xl font-bold text-xs transition-all shadow-md ${
+                                !isClosingUnlocked
+                                  ? 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
+                                  : 'bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer'
+                              }`}
                             >
                               {actionLoading ? 'Saving...' : 'Save Meter Readings'}
                             </button>
@@ -4192,17 +4238,25 @@ export default function DashboardContainer({
                                     </div>
                                     <div className="grid grid-cols-2 gap-4">
                                       <div>
-                                        <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Previous Reading</label>
-                                        <span className="block text-sm font-mono font-bold text-slate-450 mt-1.5 bg-slate-900 px-3 py-2 rounded-lg border border-slate-800 select-none">
+                                        <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Opening Reading</label>
+                                        <span className="block text-sm font-mono font-bold text-slate-400 mt-1.5 bg-slate-900/80 px-3 py-2 rounded-lg border border-slate-800 select-none" title="Opening Reading is preserved read-only">
                                           {mr.previousReading.toFixed(2)}
                                         </span>
                                       </div>
                                       <div>
-                                        <label htmlFor={`reading-${mr.gunId}`} className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Current Reading</label>
+                                        <div className="flex items-center justify-between">
+                                          <label htmlFor={`reading-${mr.gunId}`} className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Closing Reading</label>
+                                          {!isClosingUnlocked && (
+                                            <span className="text-[10px] font-bold text-amber-400 flex items-center gap-0.5">
+                                              <Lock className="h-2.5 w-2.5" /> Locked
+                                            </span>
+                                          )}
+                                        </div>
                                         <input
                                           id={`reading-${mr.gunId}`}
                                           type="number"
                                           step="0.01"
+                                          disabled={!isClosingUnlocked}
                                           value={ongoingReadings[mr.gunId] !== undefined ? ongoingReadings[mr.gunId] : ''}
                                           onChange={(e) => {
                                             setOngoingReadings({
@@ -4210,8 +4264,12 @@ export default function DashboardContainer({
                                               [mr.gunId]: Number(e.target.value),
                                             });
                                           }}
-                                          className="block w-full rounded-lg border border-slate-700 bg-slate-900 py-1.5 px-3 mt-1 text-sm text-slate-100 font-mono font-semibold placeholder-slate-600 focus:border-indigo-500 focus:outline-none"
-                                          placeholder="Enter reading"
+                                          className={`block w-full rounded-lg border py-1.5 px-3 mt-1 text-sm font-mono font-semibold focus:outline-none transition-all ${
+                                            !isClosingUnlocked
+                                              ? 'border-slate-800 bg-slate-950/70 text-slate-500 cursor-not-allowed select-none'
+                                              : 'border-slate-700 bg-slate-900 text-slate-100 placeholder-slate-600 focus:border-indigo-500'
+                                          }`}
+                                          placeholder={!isClosingUnlocked ? 'Locked until Closing' : 'Enter reading'}
                                         />
                                       </div>
                                     </div>
@@ -4255,17 +4313,25 @@ export default function DashboardContainer({
                                     </div>
                                     <div className="grid grid-cols-2 gap-4">
                                       <div>
-                                        <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Previous Reading</label>
-                                        <span className="block text-sm font-mono font-bold text-slate-450 mt-1.5 bg-slate-900 px-3 py-2 rounded-lg border border-slate-800 select-none">
+                                        <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Opening Reading</label>
+                                        <span className="block text-sm font-mono font-bold text-slate-400 mt-1.5 bg-slate-900/80 px-3 py-2 rounded-lg border border-slate-800 select-none" title="Opening Reading is preserved read-only">
                                           {mr.previousReading.toFixed(2)}
                                         </span>
                                       </div>
                                       <div>
-                                        <label htmlFor={`reading-${mr.gunId}`} className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Current Reading</label>
+                                        <div className="flex items-center justify-between">
+                                          <label htmlFor={`reading-${mr.gunId}`} className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Closing Reading</label>
+                                          {!isClosingUnlocked && (
+                                            <span className="text-[10px] font-bold text-amber-400 flex items-center gap-0.5">
+                                              <Lock className="h-2.5 w-2.5" /> Locked
+                                            </span>
+                                          )}
+                                        </div>
                                         <input
                                           id={`reading-${mr.gunId}`}
                                           type="number"
                                           step="0.01"
+                                          disabled={!isClosingUnlocked}
                                           value={ongoingReadings[mr.gunId] !== undefined ? ongoingReadings[mr.gunId] : ''}
                                           onChange={(e) => {
                                             setOngoingReadings({
@@ -4273,8 +4339,12 @@ export default function DashboardContainer({
                                               [mr.gunId]: Number(e.target.value),
                                             });
                                           }}
-                                          className="block w-full rounded-lg border border-slate-700 bg-slate-900 py-1.5 px-3 mt-1 text-sm text-slate-100 font-mono font-semibold placeholder-slate-600 focus:border-indigo-500 focus:outline-none"
-                                          placeholder="Enter reading"
+                                          className={`block w-full rounded-lg border py-1.5 px-3 mt-1 text-sm font-mono font-semibold focus:outline-none transition-all ${
+                                            !isClosingUnlocked
+                                              ? 'border-slate-800 bg-slate-950/70 text-slate-500 cursor-not-allowed select-none'
+                                              : 'border-slate-700 bg-slate-900 text-slate-100 placeholder-slate-600 focus:border-indigo-500'
+                                          }`}
+                                          placeholder={!isClosingUnlocked ? 'Locked until Closing' : 'Enter reading'}
                                         />
                                       </div>
                                     </div>
@@ -4288,13 +4358,28 @@ export default function DashboardContainer({
                           </div>
                         </div>
 
-                        <div className="flex justify-end pt-4 border-t border-slate-800">
+                        <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-slate-800">
+                          <div className="text-xs text-slate-400 font-medium">
+                            {!isClosingUnlocked ? (
+                              <span className="text-amber-400 flex items-center gap-1.5 font-bold">
+                                <Lock className="h-3.5 w-3.5" /> Closing readings locked initially. Click "Unlock Closing Stage" or "Close Duty" to enter closing readings.
+                              </span>
+                            ) : (
+                              <span className="text-emerald-400 flex items-center gap-1.5 font-bold">
+                                <Unlock className="h-3.5 w-3.5" /> Closing stage unlocked. You can now enter and save closing readings for all nozzles.
+                              </span>
+                            )}
+                          </div>
                           <button
                             onClick={handleSaveOngoingReadings}
-                            disabled={actionLoading}
-                            className="px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm transition-all"
+                            disabled={actionLoading || !isClosingUnlocked}
+                            className={`px-6 py-3 rounded-xl font-bold text-sm transition-all ${
+                              !isClosingUnlocked
+                                ? 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
+                                : 'bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer'
+                            }`}
                           >
-                            {actionLoading ? 'Saving...' : 'Save Current Readings'}
+                            {actionLoading ? 'Saving...' : 'Save Meter Readings'}
                           </button>
                         </div>
                       </div>

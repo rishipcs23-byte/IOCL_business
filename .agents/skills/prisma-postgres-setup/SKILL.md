@@ -1,4 +1,4 @@
----
++---
 name: prisma-postgres-setup
 description: Set up a new Prisma Postgres database and connect it to a local project using the Management API. Use when asked to "set up a database", "create a Prisma Postgres project", "get a connection string", "connect my app to Prisma Postgres", or "provision a database".
 license: MIT
