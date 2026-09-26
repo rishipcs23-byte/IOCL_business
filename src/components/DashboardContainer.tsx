@@ -8349,7 +8349,8 @@ export default function DashboardContainer({
                             <th className="p-2.5">Email Type</th>
                             <th className="p-2.5">Reference</th>
                             <th className="p-2.5">Recipients</th>
-                            <th className="p-2.5">Status</th>
+                            <th className="p-2.5">Email Status</th>
+                            <th className="p-2.5">SMS Status</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-850 font-mono text-[11px]">
@@ -8364,6 +8365,17 @@ export default function DashboardContainer({
                                   <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-bold text-[10px]">✓ SENT</span>
                                 ) : (
                                   <span className="px-2 py-0.5 rounded bg-rose-500/20 text-rose-400 font-bold text-[10px]" title={log.errorMessage}>✕ FAILED</span>
+                                )}
+                              </td>
+                              <td className="p-2.5">
+                                {log.smsStatus === 'SENT' ? (
+                                  <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-bold text-[10px]">✓ SENT</span>
+                                ) : log.smsStatus === 'SKIPPED' ? (
+                                  <span className="px-2 py-0.5 rounded bg-slate-500/20 text-slate-400 font-bold text-[10px]" title={log.smsErrorMessage}>- SKIPPED</span>
+                                ) : log.smsStatus === 'FAILED' ? (
+                                  <span className="px-2 py-0.5 rounded bg-rose-500/20 text-rose-400 font-bold text-[10px]" title={log.smsErrorMessage}>✕ FAILED</span>
+                                ) : (
+                                  <span className="text-slate-600">-</span>
                                 )}
                               </td>
                             </tr>

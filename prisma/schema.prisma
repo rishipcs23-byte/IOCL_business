@@ -487,6 +487,8 @@ model EmailLog {
   recipients   String   // Comma separated recipient emails
   status       String   // "SENT" or "FAILED"
   errorMessage String?
+  smsStatus    String?   // "SENT", "FAILED", "SKIPPED"
+  smsErrorMessage String?
   sentAt       DateTime @default(now())
 }
 

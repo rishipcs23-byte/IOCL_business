@@ -23,6 +23,7 @@
 
 import nodemailer from 'nodemailer';
 import { db } from './db';
+import { sendSmsAlert } from './sms';
 
 // ---------------------------------------------------------------------------
 // Config & Recipient Helpers
@@ -108,7 +109,7 @@ export async function diagnoseSmtpConfig(): Promise<SmtpDiagnosticResult> {
 }
 
 /** Default low-stock threshold in litres (inclusive: ≤ threshold triggers alert) */
-export const LOW_FUEL_THRESHOLD_LITRES = Number(process.env.LOW_FUEL_THRESHOLD_LITRES) || 6000;
+export const LOW_FUEL_THRESHOLD_LITRES = Number(process.env.LOW_FUEL_THRESHOLD_LITRES) || 7000;
 
 export async function ensureDefaultEmailRecipientsMigrated(): Promise<void> {
   try {
@@ -214,7 +215,9 @@ async function logEmailDelivery(
   reference: string | null,
   recipients: string[],
   status: 'SENT' | 'FAILED',
-  errorMessage?: string
+  errorMessage?: string,
+  smsStatus?: 'SENT' | 'FAILED' | 'SKIPPED',
+  smsErrorMessage?: string
 ) {
   try {
     if ((db as any).emailLog) {
@@ -226,6 +229,8 @@ async function logEmailDelivery(
             recipients: rec.trim(),
             status,
             errorMessage: errorMessage ? errorMessage.slice(0, 500) : null,
+            smsStatus: smsStatus || null,
+            smsErrorMessage: smsErrorMessage ? smsErrorMessage.slice(0, 500) : null,
           }
         });
       }
@@ -492,6 +497,21 @@ export async function sendLowFuelStockAlert(
     ? `🚨 LOW FUEL STOCK ALERT — BOTH MS & HSD LOW (Duty #${payload.dutyNumber})`
     : `🚨 LOW ${payload.fuelType} STOCK ALERT — ${formatLitres(payload.msStock?.physicalStock || payload.hsdStock?.physicalStock || 0)} (Duty #${payload.dutyNumber})`;
 
+  let smsMessage = '';
+  if (isBoth) {
+    smsMessage = `IOCL ALERT: BOTH MS & HSD stock is LOW.\nMS: ${formatLitres(payload.msStock?.physicalStock || 0)}\nHSD: ${formatLitres(payload.hsdStock?.physicalStock || 0)}\nThreshold: ${formatLitres(LOW_FUEL_THRESHOLD_LITRES)}\nPlease arrange replenishment.`;
+  } else {
+    smsMessage = `IOCL ALERT: ${payload.fuelType} stock is LOW.\nPhysical stock: ${formatLitres(payload.msStock?.physicalStock || payload.hsdStock?.physicalStock || 0)}.\nThreshold: ${formatLitres(LOW_FUEL_THRESHOLD_LITRES)}.\nPlease arrange replenishment.`;
+  }
+
+  console.log(`[ALERT LOGIC] Triggering alerts for ${payload.fuelType}...`);
+  console.log(`[ALERT LOGIC] Physical Stock: MS=${payload.msStock?.physicalStock ?? 'N/A'}, HSD=${payload.hsdStock?.physicalStock ?? 'N/A'}, Threshold=${LOW_FUEL_THRESHOLD_LITRES} L`);
+
+  const smsResult = await sendSmsAlert(smsMessage);
+  const smsStatus = smsResult.success ? 'SENT' : (smsResult.message.includes('skipped') ? 'SKIPPED' : 'FAILED');
+
+  console.log(`[SMS] ${smsStatus}: ${smsResult.message}`);
+
   try {
     await transporter.sendMail({
       from: getSender(),
@@ -500,11 +520,11 @@ export async function sendLowFuelStockAlert(
       html,
       text: `${alertTitle}\nDuty #${payload.dutyNumber}\nRecipients: ${recipients.join(', ')}\nAction required: Order fuel delivery immediately.`,
     });
-    await logEmailDelivery('LOW_STOCK_ALERT', `Duty #${payload.dutyNumber} (${payload.fuelType})`, recipients, 'SENT');
-    console.log(`[EMAIL] ✅ Low stock alert (${payload.fuelType}) sent to ${recipients.join(', ')}`);
+    await logEmailDelivery('LOW_STOCK_ALERT', `Duty #${payload.dutyNumber} (${payload.fuelType})`, recipients, 'SENT', undefined, smsStatus, smsResult.success ? undefined : smsResult.message);
+    console.log(`[EMAIL] SENT: Low stock alert (${payload.fuelType}) sent to ${recipients.join(', ')}`);
   } catch (err: any) {
-    await logEmailDelivery('LOW_STOCK_ALERT', `Duty #${payload.dutyNumber} (${payload.fuelType})`, recipients, 'FAILED', err?.message);
-    console.error(`[EMAIL] ❌ Failed to send low ${payload.fuelType} stock alert:`, err);
+    await logEmailDelivery('LOW_STOCK_ALERT', `Duty #${payload.dutyNumber} (${payload.fuelType})`, recipients, 'FAILED', err?.message, smsStatus, smsResult.success ? undefined : smsResult.message);
+    console.error(`[EMAIL] FAILED: Failed to send low ${payload.fuelType} stock alert:`, err);
   }
 }
 
