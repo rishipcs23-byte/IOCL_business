@@ -29,9 +29,7 @@ export default function OwnerPastDutyReport({
   userRole = 'OWNER'
 }: OwnerPastDutyReportProps) {
   // Duty Filter State
-  const [selectedDutyId, setSelectedDutyId] = useState<string>(
-    historicalDuties.length > 0 ? historicalDuties[0].id : (activeDuty ? activeDuty.id : '')
-  );
+  const [selectedDutyId, setSelectedDutyId] = useState<string>('ALL');
 
   // Section View Switcher Tab State
   const [activeReportTab, setActiveReportTab] = useState<'COMBINED' | 'ANALYTICS' | 'SHIFT_DETAILS'>('COMBINED');
@@ -343,12 +341,17 @@ export default function OwnerPastDutyReport({
   });
 
   // Multi-duty aggregated historical statistics
+  const activeDutiesForAnalytics = React.useMemo(() => {
+    if (selectedDutyId === 'ALL') return filteredDutyOptions;
+    return filteredDutyOptions.filter((d: any) => d.id === selectedDutyId);
+  }, [filteredDutyOptions, selectedDutyId]);
+
   const analyticsSummary = React.useMemo(() => {
     let totalMsLitres = 0;
     let totalHsdLitres = 0;
     let totalMsSales = 0;
     let totalHsdSales = 0;
-    const completedDutiesCount = filteredDutyOptions.length;
+    const completedDutiesCount = activeDutiesForAnalytics.length;
 
     const groupedMap: Record<string, {
       periodKey: string;
@@ -363,7 +366,7 @@ export default function OwnerPastDutyReport({
       duties: any[];
     }> = {};
 
-    filteredDutyOptions.forEach((duty: any) => {
+    activeDutiesForAnalytics.forEach((duty: any) => {
       const dDate = new Date(duty.startTime);
       const dDateStr = dDate.toLocaleDateString('en-CA');
       const dYear = dDate.getFullYear();
@@ -450,22 +453,25 @@ export default function OwnerPastDutyReport({
       completedDutiesCount,
       groupedList
     };
-  }, [filteredDutyOptions, filterFuelType, filterPumpId, filterStaffId, groupBy]);
+  }, [activeDutiesForAnalytics, filterFuelType, filterPumpId, filterStaffId, groupBy]);
 
   // Auto-update selectedDutyId when active filters change so the report updates instantly
   React.useEffect(() => {
     if (filteredDutyOptions.length > 0) {
+      if (selectedDutyId === 'ALL') return;
       const isCurrentInFiltered = filteredDutyOptions.some((d: any) => d.id === selectedDutyId);
       if (!isCurrentInFiltered) {
-        setSelectedDutyId(filteredDutyOptions[0].id);
+        setSelectedDutyId('ALL');
       }
+    } else {
+      setSelectedDutyId('ALL');
     }
   }, [filteredDutyOptions, selectedDutyId]);
 
   // Find the selected duty session matching active filters
-  const targetDuty = (selectedDutyId && filteredDutyOptions.some((d: any) => d.id === selectedDutyId))
+  const targetDuty = (selectedDutyId && selectedDutyId !== 'ALL' && filteredDutyOptions.some((d: any) => d.id === selectedDutyId))
     ? allDuties.find((d: any) => d.id === selectedDutyId)
-    : (filteredDutyOptions[0] || null);
+    : null;
 
   // Calculate complete settlement using Centralized Engine (Section 17)
   let settlement: DutySettlementResult | null = null;
@@ -672,15 +678,12 @@ export default function OwnerPastDutyReport({
               onChange={(e) => setSelectedDutyId(e.target.value)}
               className="w-full bg-slate-950 border-2 border-indigo-500/60 hover:border-indigo-400 text-white font-extrabold rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/50 shadow-md h-10 transition-all cursor-pointer"
             >
-              {filteredDutyOptions.length === 0 ? (
-                <option value="" style={{ backgroundColor: '#0f172a', color: '#94a3b8' }}>No duty sessions match active filters</option>
-              ) : (
-                filteredDutyOptions.map((d: any, idx: number) => (
-                  <option key={`${d.id}-${idx}`} value={d.id} style={{ backgroundColor: '#0f172a', color: '#ffffff' }} className="font-bold py-1.5">
-                    Duty #{d.dutyNumber} ({new Date(d.startTime).toLocaleDateString('en-IN')}) - {d.status}
-                  </option>
-                ))
-              )}
+              <option value="ALL" style={{ backgroundColor: '#0f172a', color: '#ffffff' }}>All Matching Duties</option>
+              {filteredDutyOptions.map((d: any, idx: number) => (
+                <option key={`${d.id}-${idx}`} value={d.id} style={{ backgroundColor: '#0f172a', color: '#ffffff' }} className="font-bold py-1.5">
+                  Duty #{d.dutyNumber} ({new Date(d.startTime).toLocaleDateString('en-IN')}) - {d.status}
+                </option>
+              ))}
             </select>
           </div>
 
