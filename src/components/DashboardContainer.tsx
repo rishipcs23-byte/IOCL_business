@@ -137,17 +137,16 @@ export default function DashboardContainer({
   const [isClosingUnlocked, setIsClosingUnlocked] = useState<boolean>(false);
   const [actualCash, setActualCash] = useState<number>(0);
   const [digitalPaymentsState, setDigitalPaymentsState] = useState({
-    pineLabs1: 0,
-    pineLabs2: 0,
-    gpay1: 0,
-    gpay2: 0,
-    phonePe: 0,
-    paytm: 0,
-    bharatPe: 0,
-    alp: 0,
-    ufill: 0,
-    bank: 0,
+    gpay1: 0, gpay2: 0,
+    pineLabs1: 0, pineLabs2: 0,
+    phonePe1: 0, phonePe2: 0,
+    paytm1: 0, paytm2: 0,
+    bharatPe1: 0, bharatPe2: 0,
+    alp1: 0, alp2: 0,
+    ufill1: 0, ufill2: 0,
+    bank1: 0, bank2: 0,
   });
+  const [showDigitalSettlement2, setShowDigitalSettlement2] = useState<Record<string, boolean>>({});
 
   // Bank deposit state
   const [bankDeposit, setBankDeposit] = useState<number>(0);
@@ -2023,12 +2022,18 @@ export default function DashboardContainer({
         ...(digitalPaymentsState.pineLabs2 ? [{ provider: 'Pine Labs', amount: digitalPaymentsState.pineLabs2, referenceId: 'Settlement 2' }] : []),
         ...(digitalPaymentsState.gpay1 ? [{ provider: 'GPay', amount: digitalPaymentsState.gpay1, referenceId: 'Settlement 1' }] : []),
         ...(digitalPaymentsState.gpay2 ? [{ provider: 'GPay', amount: digitalPaymentsState.gpay2, referenceId: 'Settlement 2' }] : []),
-        ...(digitalPaymentsState.phonePe ? [{ provider: 'PhonePe', amount: digitalPaymentsState.phonePe, referenceId: '' }] : []),
-        ...(digitalPaymentsState.paytm ? [{ provider: 'Paytm', amount: digitalPaymentsState.paytm, referenceId: '' }] : []),
-        ...(digitalPaymentsState.bharatPe ? [{ provider: 'BharatPe', amount: digitalPaymentsState.bharatPe, referenceId: '' }] : []),
-        ...(digitalPaymentsState.alp ? [{ provider: 'ALP', amount: digitalPaymentsState.alp, referenceId: '' }] : []),
-        ...(digitalPaymentsState.ufill ? [{ provider: 'UFill', amount: digitalPaymentsState.ufill, referenceId: '' }] : []),
-        ...(digitalPaymentsState.bank ? [{ provider: 'Bank', amount: digitalPaymentsState.bank, referenceId: '' }] : []),
+        ...(digitalPaymentsState.phonePe1 ? [{ provider: 'PhonePe', amount: digitalPaymentsState.phonePe1, referenceId: 'Settlement 1' }] : []),
+        ...(digitalPaymentsState.phonePe2 ? [{ provider: 'PhonePe', amount: digitalPaymentsState.phonePe2, referenceId: 'Settlement 2' }] : []),
+        ...(digitalPaymentsState.paytm1 ? [{ provider: 'Paytm', amount: digitalPaymentsState.paytm1, referenceId: 'Settlement 1' }] : []),
+        ...(digitalPaymentsState.paytm2 ? [{ provider: 'Paytm', amount: digitalPaymentsState.paytm2, referenceId: 'Settlement 2' }] : []),
+        ...(digitalPaymentsState.bharatPe1 ? [{ provider: 'BharatPe', amount: digitalPaymentsState.bharatPe1, referenceId: 'Settlement 1' }] : []),
+        ...(digitalPaymentsState.bharatPe2 ? [{ provider: 'BharatPe', amount: digitalPaymentsState.bharatPe2, referenceId: 'Settlement 2' }] : []),
+        ...(digitalPaymentsState.alp1 ? [{ provider: 'ALP', amount: digitalPaymentsState.alp1, referenceId: 'Settlement 1' }] : []),
+        ...(digitalPaymentsState.alp2 ? [{ provider: 'ALP', amount: digitalPaymentsState.alp2, referenceId: 'Settlement 2' }] : []),
+        ...(digitalPaymentsState.ufill1 ? [{ provider: 'UFill', amount: digitalPaymentsState.ufill1, referenceId: 'Settlement 1' }] : []),
+        ...(digitalPaymentsState.ufill2 ? [{ provider: 'UFill', amount: digitalPaymentsState.ufill2, referenceId: 'Settlement 2' }] : []),
+        ...(digitalPaymentsState.bank1 ? [{ provider: 'Bank', amount: digitalPaymentsState.bank1, referenceId: 'Settlement 1' }] : []),
+        ...(digitalPaymentsState.bank2 ? [{ provider: 'Bank', amount: digitalPaymentsState.bank2, referenceId: 'Settlement 2' }] : []),
       ];
 
       const res = await closeDutySessionAction(
@@ -9565,46 +9570,40 @@ export default function DashboardContainer({
                   <div className="bg-slate-950 border border-slate-850 p-4 rounded-xl space-y-3">
                     <span className="text-xs font-extrabold text-white uppercase tracking-wider block border-b border-slate-900 pb-2">DIGITAL PAYMENTS</span>
                     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Pine Labs 1</label>
-                        <input type="number" value={digitalPaymentsState.pineLabs1 || ''} onChange={(e) => setDigitalPaymentsState({ ...digitalPaymentsState, pineLabs1: Number(e.target.value) })} className="block w-full rounded border border-slate-700 bg-slate-900 py-1.5 px-2.5 mt-1 text-xs text-white font-semibold font-mono focus:border-indigo-500 focus:outline-none" placeholder="₹0" />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Pine Labs 2</label>
-                        <input type="number" value={digitalPaymentsState.pineLabs2 || ''} onChange={(e) => setDigitalPaymentsState({ ...digitalPaymentsState, pineLabs2: Number(e.target.value) })} className="block w-full rounded border border-slate-700 bg-slate-900 py-1.5 px-2.5 mt-1 text-xs text-white font-semibold font-mono focus:border-indigo-500 focus:outline-none" placeholder="₹0" />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">GPay 1</label>
-                        <input type="number" value={digitalPaymentsState.gpay1 || ''} onChange={(e) => setDigitalPaymentsState({ ...digitalPaymentsState, gpay1: Number(e.target.value) })} className="block w-full rounded border border-slate-700 bg-slate-900 py-1.5 px-2.5 mt-1 text-xs text-white font-semibold font-mono focus:border-indigo-500 focus:outline-none" placeholder="₹0" />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">GPay 2</label>
-                        <input type="number" value={digitalPaymentsState.gpay2 || ''} onChange={(e) => setDigitalPaymentsState({ ...digitalPaymentsState, gpay2: Number(e.target.value) })} className="block w-full rounded border border-slate-700 bg-slate-900 py-1.5 px-2.5 mt-1 text-xs text-white font-semibold font-mono focus:border-indigo-500 focus:outline-none" placeholder="₹0" />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">PhonePe</label>
-                        <input type="number" value={digitalPaymentsState.phonePe || ''} onChange={(e) => setDigitalPaymentsState({ ...digitalPaymentsState, phonePe: Number(e.target.value) })} className="block w-full rounded border border-slate-700 bg-slate-900 py-1.5 px-2.5 mt-1 text-xs text-white font-semibold font-mono focus:border-indigo-500 focus:outline-none" placeholder="₹0" />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Paytm</label>
-                        <input type="number" value={digitalPaymentsState.paytm || ''} onChange={(e) => setDigitalPaymentsState({ ...digitalPaymentsState, paytm: Number(e.target.value) })} className="block w-full rounded border border-slate-700 bg-slate-900 py-1.5 px-2.5 mt-1 text-xs text-white font-semibold font-mono focus:border-indigo-500 focus:outline-none" placeholder="₹0" />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">BharatPe</label>
-                        <input type="number" value={digitalPaymentsState.bharatPe || ''} onChange={(e) => setDigitalPaymentsState({ ...digitalPaymentsState, bharatPe: Number(e.target.value) })} className="block w-full rounded border border-slate-700 bg-slate-900 py-1.5 px-2.5 mt-1 text-xs text-white font-semibold font-mono focus:border-indigo-500 focus:outline-none" placeholder="₹0" />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">ALP</label>
-                        <input type="number" value={digitalPaymentsState.alp || ''} onChange={(e) => setDigitalPaymentsState({ ...digitalPaymentsState, alp: Number(e.target.value) })} className="block w-full rounded border border-slate-700 bg-slate-900 py-1.5 px-2.5 mt-1 text-xs text-white font-semibold font-mono focus:border-indigo-500 focus:outline-none" placeholder="₹0" />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">UFill</label>
-                        <input type="number" value={digitalPaymentsState.ufill || ''} onChange={(e) => setDigitalPaymentsState({ ...digitalPaymentsState, ufill: Number(e.target.value) })} className="block w-full rounded border border-slate-700 bg-slate-900 py-1.5 px-2.5 mt-1 text-xs text-white font-semibold font-mono focus:border-indigo-500 focus:outline-none" placeholder="₹0" />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Bank</label>
-                        <input type="number" value={digitalPaymentsState.bank || ''} onChange={(e) => setDigitalPaymentsState({ ...digitalPaymentsState, bank: Number(e.target.value) })} className="block w-full rounded border border-slate-700 bg-slate-900 py-1.5 px-2.5 mt-1 text-xs text-white font-semibold font-mono focus:border-indigo-500 focus:outline-none" placeholder="₹0" />
-                      </div>
+                      {[
+                        { id: 'gpay', label: 'GPay', key1: 'gpay1', key2: 'gpay2' },
+                        { id: 'pineLabs', label: 'Pine Labs', key1: 'pineLabs1', key2: 'pineLabs2' },
+                        { id: 'phonePe', label: 'PhonePe', key1: 'phonePe1', key2: 'phonePe2' },
+                        { id: 'paytm', label: 'Paytm', key1: 'paytm1', key2: 'paytm2' },
+                        { id: 'bharatPe', label: 'BharatPe', key1: 'bharatPe1', key2: 'bharatPe2' },
+                        { id: 'alp', label: 'ALP', key1: 'alp1', key2: 'alp2' },
+                        { id: 'ufill', label: 'UFill', key1: 'ufill1', key2: 'ufill2' },
+                        { id: 'bank', label: 'Bank', key1: 'bank1', key2: 'bank2' }
+                      ].map(provider => (
+                        <div key={provider.id} className="bg-slate-900 border border-slate-800 p-3 rounded-xl flex flex-col gap-2">
+                          <label className="block text-[11px] font-bold text-sky-400 uppercase tracking-wider border-b border-slate-800 pb-1.5">{provider.label}</label>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] text-slate-500 font-mono w-14 shrink-0">Settlement 1:</span>
+                            <input type="number" value={digitalPaymentsState[provider.key1 as keyof typeof digitalPaymentsState] || ''} onChange={(e) => setDigitalPaymentsState({ ...digitalPaymentsState, [provider.key1]: Number(e.target.value) })} className="block w-full rounded border border-slate-700 bg-slate-950 py-1.5 px-2 text-xs text-white font-semibold font-mono focus:border-indigo-500 focus:outline-none" placeholder="₹0" />
+                          </div>
+                          {showDigitalSettlement2[provider.id] ? (
+                            <div className="space-y-2 pt-1 border-t border-slate-800/50 mt-1">
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] text-slate-500 font-mono w-14 shrink-0">Settlement 2:</span>
+                                <input type="number" value={digitalPaymentsState[provider.key2 as keyof typeof digitalPaymentsState] || ''} onChange={(e) => setDigitalPaymentsState({ ...digitalPaymentsState, [provider.key2]: Number(e.target.value) })} className="block w-full rounded border border-slate-700 bg-slate-950 py-1.5 px-2 text-xs text-white font-semibold font-mono focus:border-indigo-500 focus:outline-none" placeholder="₹0" />
+                              </div>
+                              <button type="button" onClick={() => {
+                                setShowDigitalSettlement2({ ...showDigitalSettlement2, [provider.id]: false });
+                                setDigitalPaymentsState({ ...digitalPaymentsState, [provider.key2]: 0 });
+                              }} className="text-[9px] text-red-400 hover:text-red-300 font-bold uppercase block w-full text-right">Remove Settlement 2</button>
+                            </div>
+                          ) : (
+                            <button type="button" onClick={() => setShowDigitalSettlement2({ ...showDigitalSettlement2, [provider.id]: true })} className="text-[10px] text-indigo-400 hover:text-indigo-300 font-bold flex items-center justify-center w-full py-1.5 rounded bg-indigo-500/10 hover:bg-indigo-500/20 transition-colors mt-auto">
+                              <Plus className="h-3 w-3 mr-1" /> Add Settlement 2
+                            </button>
+                          )}
+                        </div>
+                      ))}
                     </div>
                     <div className="flex justify-between text-xs font-bold text-slate-300 border-t border-slate-900 pt-2">
                       <span>TOTAL DIGITAL</span>
