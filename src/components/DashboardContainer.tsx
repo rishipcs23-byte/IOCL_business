@@ -1063,7 +1063,8 @@ export default function DashboardContainer({
     setOpeningReadings({});
     setOngoingReadings({});
     setActualCash(0);
-    setDigitalPaymentsState({ pineLabs1: 0, pineLabs2: 0, gpay1: 0, gpay2: 0, phonePe: 0, paytm: 0, bharatPe: 0, alp: 0, ufill: 0, bank: 0 });
+    setDigitalPaymentsState({ pineLabs1: 0, pineLabs2: 0, gpay1: 0, gpay2: 0, phonePe1: 0, phonePe2: 0, paytm1: 0, paytm2: 0, bharatPe1: 0, bharatPe2: 0, alp1: 0, alp2: 0, ufill1: 0, ufill2: 0, bank1: 0, bank2: 0 });
+    setShowDigitalSettlement2({});
     setMsTestingLitres(0);
     setHsdTestingLitres(0);
     setOilProdId('');
