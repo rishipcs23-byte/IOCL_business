@@ -153,6 +153,7 @@ export interface DutySettlementResult {
     bharatPe: number;
     cardPayments: number;
     bankTransfer: number;
+    upiQr: number;
     totalDigital: number;
   };
 
@@ -350,6 +351,7 @@ export function calculateDutySettlement(
   let bharatPe = Number(dutySession.bharatPe || 0);
   let cardPayments = Number(dutySession.cardPayments || 0);
   let bankTransfer = Number(dutySession.bankTransfer || 0);
+  let upiQr = 0;
 
   if (dutySession.digitalSettlements && dutySession.digitalSettlements.length > 0) {
     dutySession.digitalSettlements.forEach((s: any) => {
@@ -361,6 +363,7 @@ export function calculateDutySettlement(
         case 'BharatPe': bharatPe += amt; break;
         case 'Pine Labs': cardPayments += amt; break;
         case 'Bank': bankTransfer += amt; break;
+        case 'UPI QR': upiQr += amt; break;
         default: cardPayments += amt; break; // Map unknown/others to cardPayments for legacy compat
       }
     });
@@ -368,7 +371,7 @@ export function calculateDutySettlement(
 
   let totalDigital = Number(dutySession.totalDigital || 0);
   if (totalDigital === 0 || (dutySession.digitalSettlements && dutySession.digitalSettlements.length > 0)) {
-    totalDigital = phonePe + gpay + paytm + bharatPe + cardPayments + bankTransfer;
+    totalDigital = phonePe + gpay + paytm + bharatPe + cardPayments + bankTransfer + upiQr;
   }
 
   // 8. Gross Inflow & Accounting Settlement (Section 12)
@@ -575,6 +578,7 @@ export function calculateDutySettlement(
       bharatPe,
       cardPayments,
       bankTransfer,
+      upiQr,
       totalDigital,
     },
     grossInflow,

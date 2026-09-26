@@ -145,6 +145,7 @@ export default function DashboardContainer({
     alp1: 0, alp2: 0,
     ufill1: 0, ufill2: 0,
     bank1: 0, bank2: 0,
+    upiQr1: 0, upiQr2: 0,
   });
   const [showDigitalSettlement2, setShowDigitalSettlement2] = useState<Record<string, boolean>>({});
 
@@ -1063,7 +1064,7 @@ export default function DashboardContainer({
     setOpeningReadings({});
     setOngoingReadings({});
     setActualCash(0);
-    setDigitalPaymentsState({ pineLabs1: 0, pineLabs2: 0, gpay1: 0, gpay2: 0, phonePe1: 0, phonePe2: 0, paytm1: 0, paytm2: 0, bharatPe1: 0, bharatPe2: 0, alp1: 0, alp2: 0, ufill1: 0, ufill2: 0, bank1: 0, bank2: 0 });
+    setDigitalPaymentsState({ pineLabs1: 0, pineLabs2: 0, gpay1: 0, gpay2: 0, phonePe1: 0, phonePe2: 0, paytm1: 0, paytm2: 0, bharatPe1: 0, bharatPe2: 0, alp1: 0, alp2: 0, ufill1: 0, ufill2: 0, bank1: 0, bank2: 0, upiQr1: 0, upiQr2: 0 });
     setShowDigitalSettlement2({});
     setMsTestingLitres(0);
     setHsdTestingLitres(0);
@@ -2035,6 +2036,8 @@ export default function DashboardContainer({
         ...(digitalPaymentsState.ufill2 ? [{ provider: 'UFill', amount: digitalPaymentsState.ufill2, referenceId: 'Settlement 2' }] : []),
         ...(digitalPaymentsState.bank1 ? [{ provider: 'Bank', amount: digitalPaymentsState.bank1, referenceId: 'Settlement 1' }] : []),
         ...(digitalPaymentsState.bank2 ? [{ provider: 'Bank', amount: digitalPaymentsState.bank2, referenceId: 'Settlement 2' }] : []),
+        ...(digitalPaymentsState.upiQr1 ? [{ provider: 'UPI QR', amount: digitalPaymentsState.upiQr1, referenceId: 'Settlement 1' }] : []),
+        ...(digitalPaymentsState.upiQr2 ? [{ provider: 'UPI QR', amount: digitalPaymentsState.upiQr2, referenceId: 'Settlement 2' }] : []),
       ];
 
       const res = await closeDutySessionAction(
@@ -9579,7 +9582,8 @@ export default function DashboardContainer({
                         { id: 'bharatPe', label: 'BharatPe', key1: 'bharatPe1', key2: 'bharatPe2' },
                         { id: 'alp', label: 'ALP', key1: 'alp1', key2: 'alp2' },
                         { id: 'ufill', label: 'UFill', key1: 'ufill1', key2: 'ufill2' },
-                        { id: 'bank', label: 'Bank', key1: 'bank1', key2: 'bank2' }
+                        { id: 'bank', label: 'Bank', key1: 'bank1', key2: 'bank2' },
+                        { id: 'upiQr', label: 'UPI QR', key1: 'upiQr1', key2: 'upiQr2' }
                       ].map(provider => (
                         <div key={provider.id} className="bg-slate-900 border border-slate-800 p-3 rounded-xl flex flex-col gap-2">
                           <label className="block text-[11px] font-bold text-sky-400 uppercase tracking-wider border-b border-slate-800 pb-1.5">{provider.label}</label>

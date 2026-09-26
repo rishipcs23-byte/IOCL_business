@@ -1860,7 +1860,7 @@ export default function OwnerPastDutyReport({
               11. Digital Payments Breakdown (Persisted Records)
             </h3>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3 text-xs font-mono">
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3 text-xs font-mono">
               <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-center">
                 <span className="text-slate-500 block text-[10px] font-sans">PhonePe</span>
                 <span className="font-bold text-sky-700 block mt-1">₹{settlement.digitalPayments.phonePe.toLocaleString()}</span>
@@ -1884,6 +1884,10 @@ export default function OwnerPastDutyReport({
               <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-center">
                 <span className="text-slate-500 block text-[10px] font-sans">Bank Transfer</span>
                 <span className="font-bold text-sky-700 block mt-1">₹{settlement.digitalPayments.bankTransfer.toLocaleString()}</span>
+              </div>
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-center">
+                <span className="text-slate-500 block text-[10px] font-sans">UPI QR</span>
+                <span className="font-bold text-sky-700 block mt-1">₹{settlement.digitalPayments.upiQr.toLocaleString()}</span>
               </div>
               <div className="bg-blue-50 p-3 rounded-xl border border-blue-200 text-center">
                 <span className="text-blue-700 block text-[10px] font-sans uppercase font-bold">TOTAL DIGITAL</span>
