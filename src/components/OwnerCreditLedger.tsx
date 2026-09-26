@@ -148,8 +148,26 @@ export default function OwnerCreditLedger({
     return true;
   });
 
+  // Calculate Filtered Customers
+  const filteredCustomers = customers.filter((cust: any) => {
+    if (selectedCustomerId !== 'ALL' && cust.id !== selectedCustomerId) return false;
+
+    const hasTxFilters = periodType !== 'ALL' || transactionType !== 'ALL' || paymentMethodFilter !== 'ALL' || productFilter !== 'ALL';
+    const hasMatchingTx = filteredTransactions.some(t => t.customerId === cust.id);
+
+    if (searchTerm) {
+      const q = searchTerm.toLowerCase();
+      const matchName = cust.name.toLowerCase().includes(q) || (cust.phone && cust.phone.includes(q));
+      if (!matchName && !hasMatchingTx) return false;
+    } else if (hasTxFilters && !hasMatchingTx) {
+      return false;
+    }
+
+    return true;
+  });
+
   // Calculate Customer Summaries (2A)
-  const customerSummaries = customers.map((cust: any) => {
+  const customerSummaries = filteredCustomers.map((cust: any) => {
     const custLedgerItem = creditLedger.find((cl: any) => cl.id === cust.id);
     const txs = custLedgerItem?.transactions || [];
 
@@ -157,25 +175,10 @@ export default function OwnerCreditLedger({
     const totalCollections = txs.filter((t: any) => t.transactionType === 'COLLECTION').reduce((sum: number, t: any) => sum + t.amount, 0);
     const openingBalance = cust.balance - totalCreditSales + totalCollections;
 
-    // Filter txs for period summary if period active
-    const filteredCustTxs = txs.filter((t: any) => {
-      const tDateStr = new Date(t.timestamp).toLocaleDateString('en-CA');
-      const tMonthStr = tDateStr.slice(0, 7);
-      const tYearStr = tDateStr.slice(0, 4);
-
-      if (periodType === 'SINGLE_DATE' && singleDate && tDateStr !== singleDate) return false;
-      if (periodType === 'DATE_RANGE') {
-        if (startDate && tDateStr < startDate) return false;
-        if (endDate && tDateStr > endDate) return false;
-      }
-      if (periodType === 'MONTH' && selectedMonth && tMonthStr !== selectedMonth) return false;
-      if (periodType === 'YEAR' && selectedYear && tYearStr !== selectedYear) return false;
-
-      return true;
-    });
-
-    const periodCreditGiven = filteredCustTxs.filter((t: any) => t.transactionType === 'CREDIT_SALE').reduce((sum: number, t: any) => sum + t.amount, 0);
-    const periodCollections = filteredCustTxs.filter((t: any) => t.transactionType === 'COLLECTION').reduce((sum: number, t: any) => sum + t.amount, 0);
+    // Use filteredTransactions directly so it matches the global page filters
+    const matchingTxs = filteredTransactions.filter(t => t.customerId === cust.id);
+    const periodCreditGiven = matchingTxs.filter((t: any) => t.transactionType === 'CREDIT_SALE').reduce((sum: number, t: any) => sum + t.amount, 0);
+    const periodCollections = matchingTxs.filter((t: any) => t.transactionType === 'COLLECTION').reduce((sum: number, t: any) => sum + t.amount, 0);
 
     return {
       id: cust.id,
@@ -261,7 +264,7 @@ export default function OwnerCreditLedger({
   // Aggregated Period Totals (2D)
   const totalPeriodCreditGiven = filteredTransactions.filter(t => t.transactionType === 'CREDIT_SALE').reduce((sum, t) => sum + t.amount, 0);
   const totalPeriodCollections = filteredTransactions.filter(t => t.transactionType === 'COLLECTION').reduce((sum, t) => sum + t.amount, 0);
-  const totalOutstandingReceivable = customers.reduce((sum: number, c: any) => sum + c.balance, 0);
+  const totalOutstandingReceivable = filteredCustomers.reduce((sum: number, c: any) => sum + c.balance, 0);
 
   // Open Record Credit Collection Modal
   const openCollectModal = (cust = customers[0]) => {
@@ -467,7 +470,7 @@ export default function OwnerCreditLedger({
           <span className="text-xs md:text-sm text-[var(--text-muted)] font-bold uppercase tracking-wider block">Total Outstanding Receivable</span>
           <div className="mt-2 flex items-baseline justify-between">
             <span className="text-2xl md:text-3xl font-extrabold text-rose-600 dark:text-rose-400 font-mono">₹{totalOutstandingReceivable.toLocaleString('en-IN')}</span>
-            <span className="text-xs md:text-sm text-[var(--text-secondary)] font-semibold">{customers.length} Accounts</span>
+            <span className="text-xs md:text-sm text-[var(--text-secondary)] font-semibold">{filteredCustomers.length} Accounts</span>
           </div>
         </div>
 
