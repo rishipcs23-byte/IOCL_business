@@ -136,14 +136,18 @@ export default function DashboardContainer({
   const [openingReadings, setOpeningReadings] = useState<Record<string, number>>({});
   const [isClosingUnlocked, setIsClosingUnlocked] = useState<boolean>(false);
   const [actualCash, setActualCash] = useState<number>(0);
-  const [digitalPayments, setDigitalPayments] = useState<{
-    phonepe: number;
-    gpay: number;
-    paytm: number;
-    bharatpe: number;
-    cards: number;
-    bank: number;
-  }>({ phonepe: 0, gpay: 0, paytm: 0, bharatpe: 0, cards: 0, bank: 0 });
+  const [digitalPaymentsState, setDigitalPaymentsState] = useState({
+    pineLabs1: 0,
+    pineLabs2: 0,
+    gpay1: 0,
+    gpay2: 0,
+    phonePe: 0,
+    paytm: 0,
+    bharatPe: 0,
+    alp: 0,
+    ufill: 0,
+    bank: 0,
+  });
 
   // Bank deposit state
   const [bankDeposit, setBankDeposit] = useState<number>(0);
@@ -1060,7 +1064,7 @@ export default function DashboardContainer({
     setOpeningReadings({});
     setOngoingReadings({});
     setActualCash(0);
-    setDigitalPayments({ phonepe: 0, gpay: 0, paytm: 0, bharatpe: 0, cards: 0, bank: 0 });
+    setDigitalPaymentsState({ pineLabs1: 0, pineLabs2: 0, gpay1: 0, gpay2: 0, phonePe: 0, paytm: 0, bharatPe: 0, alp: 0, ufill: 0, bank: 0 });
     setMsTestingLitres(0);
     setHsdTestingLitres(0);
     setOilProdId('');
@@ -1669,7 +1673,7 @@ export default function DashboardContainer({
     .reduce((sum: number, ct: any) => sum + ct.amount, 0) || 0;
 
   // Expected Cash calculation based on 4-step accounting flow
-  const digitalPaymentsSum = Object.values(digitalPayments).reduce((sum, val) => sum + Number(val), 0);
+  const digitalPaymentsSum = Object.values(digitalPaymentsState).reduce((sum, val) => sum + (Number(val) || 0), 0);
   const grossRevenueInflow = dynamicFuelSalesTotal + oilSalesTotal + creditCollectionsCash;
   const totalDeductions = creditSalesAmount + digitalPaymentsSum + expensesPaidInCash;
   const expectedCash = grossRevenueInflow - totalDeductions;
@@ -2014,21 +2018,26 @@ export default function DashboardContainer({
         },
       };
 
+      const digitalSettlementsPayload = [
+        ...(digitalPaymentsState.pineLabs1 ? [{ provider: 'Pine Labs', amount: digitalPaymentsState.pineLabs1, referenceId: 'Settlement 1' }] : []),
+        ...(digitalPaymentsState.pineLabs2 ? [{ provider: 'Pine Labs', amount: digitalPaymentsState.pineLabs2, referenceId: 'Settlement 2' }] : []),
+        ...(digitalPaymentsState.gpay1 ? [{ provider: 'GPay', amount: digitalPaymentsState.gpay1, referenceId: 'Settlement 1' }] : []),
+        ...(digitalPaymentsState.gpay2 ? [{ provider: 'GPay', amount: digitalPaymentsState.gpay2, referenceId: 'Settlement 2' }] : []),
+        ...(digitalPaymentsState.phonePe ? [{ provider: 'PhonePe', amount: digitalPaymentsState.phonePe, referenceId: '' }] : []),
+        ...(digitalPaymentsState.paytm ? [{ provider: 'Paytm', amount: digitalPaymentsState.paytm, referenceId: '' }] : []),
+        ...(digitalPaymentsState.bharatPe ? [{ provider: 'BharatPe', amount: digitalPaymentsState.bharatPe, referenceId: '' }] : []),
+        ...(digitalPaymentsState.alp ? [{ provider: 'ALP', amount: digitalPaymentsState.alp, referenceId: '' }] : []),
+        ...(digitalPaymentsState.ufill ? [{ provider: 'UFill', amount: digitalPaymentsState.ufill, referenceId: '' }] : []),
+        ...(digitalPaymentsState.bank ? [{ provider: 'Bank', amount: digitalPaymentsState.bank, referenceId: '' }] : []),
+      ];
+
       const res = await closeDutySessionAction(
         activeDuty.id,
         Number(bankDeposit || 0),
         digitalPaymentsSum,
-        Number(digitalPayments.cards || 0),
+        0,
         expectedCash,
-        {
-          phonePe: Number(digitalPayments.phonepe || 0),
-          gpay: Number(digitalPayments.gpay || 0),
-          paytm: Number(digitalPayments.paytm || 0),
-          bharatPe: Number(digitalPayments.bharatpe || 0),
-          cardPayments: Number(digitalPayments.cards || 0),
-          bankTransfer: Number(digitalPayments.bank || 0),
-          totalDigital: digitalPaymentsSum,
-        },
+        digitalSettlementsPayload,
         {
           bankDeposit: Number(bankDeposit || 0),
           cashRetained: 0,
@@ -3357,9 +3366,9 @@ export default function DashboardContainer({
                 }
 
                 // 6. DIGITAL PAYMENTS BREAKDOWN
-                const digitalMethods = ['PhonePe', 'GPay', 'Paytm', 'BharatPe', 'Cards', 'Bank'];
+                const digitalMethods = ['PhonePe', 'GPay', 'Paytm', 'BharatPe', 'Pine Labs', 'ALP', 'UFill', 'Bank'];
                 const digitalBreakdown: Record<string, number> = {
-                  PhonePe: 0, GPay: 0, Paytm: 0, BharatPe: 0, Cards: 0, Bank: 0
+                  PhonePe: 0, GPay: 0, Paytm: 0, BharatPe: 0, 'Pine Labs': 0, ALP: 0, UFill: 0, Bank: 0
                 };
                 for (const ex of filteredExpenses) {
                   if (digitalMethods.includes(ex.paymentMethod)) {
@@ -9555,13 +9564,47 @@ export default function DashboardContainer({
                   {/* Digital Payments */}
                   <div className="bg-slate-950 border border-slate-850 p-4 rounded-xl space-y-3">
                     <span className="text-xs font-extrabold text-white uppercase tracking-wider block border-b border-slate-900 pb-2">DIGITAL PAYMENTS</span>
-                    <div className="grid grid-cols-3 gap-3">
-                      {Object.keys(digitalPayments).map((key) => (
-                        <div key={key}>
-                          <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider capitalize">{key}</label>
-                          <input type="number" value={digitalPayments[key as keyof typeof digitalPayments] || ''} onChange={(e) => setDigitalPayments({ ...digitalPayments, [key]: Number(e.target.value) })} className="block w-full rounded border border-slate-700 bg-slate-900 py-1.5 px-2.5 mt-1 text-xs text-white font-semibold font-mono focus:border-indigo-500 focus:outline-none" placeholder="₹0" />
-                        </div>
-                      ))}
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Pine Labs 1</label>
+                        <input type="number" value={digitalPaymentsState.pineLabs1 || ''} onChange={(e) => setDigitalPaymentsState({ ...digitalPaymentsState, pineLabs1: Number(e.target.value) })} className="block w-full rounded border border-slate-700 bg-slate-900 py-1.5 px-2.5 mt-1 text-xs text-white font-semibold font-mono focus:border-indigo-500 focus:outline-none" placeholder="₹0" />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Pine Labs 2</label>
+                        <input type="number" value={digitalPaymentsState.pineLabs2 || ''} onChange={(e) => setDigitalPaymentsState({ ...digitalPaymentsState, pineLabs2: Number(e.target.value) })} className="block w-full rounded border border-slate-700 bg-slate-900 py-1.5 px-2.5 mt-1 text-xs text-white font-semibold font-mono focus:border-indigo-500 focus:outline-none" placeholder="₹0" />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">GPay 1</label>
+                        <input type="number" value={digitalPaymentsState.gpay1 || ''} onChange={(e) => setDigitalPaymentsState({ ...digitalPaymentsState, gpay1: Number(e.target.value) })} className="block w-full rounded border border-slate-700 bg-slate-900 py-1.5 px-2.5 mt-1 text-xs text-white font-semibold font-mono focus:border-indigo-500 focus:outline-none" placeholder="₹0" />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">GPay 2</label>
+                        <input type="number" value={digitalPaymentsState.gpay2 || ''} onChange={(e) => setDigitalPaymentsState({ ...digitalPaymentsState, gpay2: Number(e.target.value) })} className="block w-full rounded border border-slate-700 bg-slate-900 py-1.5 px-2.5 mt-1 text-xs text-white font-semibold font-mono focus:border-indigo-500 focus:outline-none" placeholder="₹0" />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">PhonePe</label>
+                        <input type="number" value={digitalPaymentsState.phonePe || ''} onChange={(e) => setDigitalPaymentsState({ ...digitalPaymentsState, phonePe: Number(e.target.value) })} className="block w-full rounded border border-slate-700 bg-slate-900 py-1.5 px-2.5 mt-1 text-xs text-white font-semibold font-mono focus:border-indigo-500 focus:outline-none" placeholder="₹0" />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Paytm</label>
+                        <input type="number" value={digitalPaymentsState.paytm || ''} onChange={(e) => setDigitalPaymentsState({ ...digitalPaymentsState, paytm: Number(e.target.value) })} className="block w-full rounded border border-slate-700 bg-slate-900 py-1.5 px-2.5 mt-1 text-xs text-white font-semibold font-mono focus:border-indigo-500 focus:outline-none" placeholder="₹0" />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">BharatPe</label>
+                        <input type="number" value={digitalPaymentsState.bharatPe || ''} onChange={(e) => setDigitalPaymentsState({ ...digitalPaymentsState, bharatPe: Number(e.target.value) })} className="block w-full rounded border border-slate-700 bg-slate-900 py-1.5 px-2.5 mt-1 text-xs text-white font-semibold font-mono focus:border-indigo-500 focus:outline-none" placeholder="₹0" />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">ALP</label>
+                        <input type="number" value={digitalPaymentsState.alp || ''} onChange={(e) => setDigitalPaymentsState({ ...digitalPaymentsState, alp: Number(e.target.value) })} className="block w-full rounded border border-slate-700 bg-slate-900 py-1.5 px-2.5 mt-1 text-xs text-white font-semibold font-mono focus:border-indigo-500 focus:outline-none" placeholder="₹0" />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">UFill</label>
+                        <input type="number" value={digitalPaymentsState.ufill || ''} onChange={(e) => setDigitalPaymentsState({ ...digitalPaymentsState, ufill: Number(e.target.value) })} className="block w-full rounded border border-slate-700 bg-slate-900 py-1.5 px-2.5 mt-1 text-xs text-white font-semibold font-mono focus:border-indigo-500 focus:outline-none" placeholder="₹0" />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Bank</label>
+                        <input type="number" value={digitalPaymentsState.bank || ''} onChange={(e) => setDigitalPaymentsState({ ...digitalPaymentsState, bank: Number(e.target.value) })} className="block w-full rounded border border-slate-700 bg-slate-900 py-1.5 px-2.5 mt-1 text-xs text-white font-semibold font-mono focus:border-indigo-500 focus:outline-none" placeholder="₹0" />
+                      </div>
                     </div>
                     <div className="flex justify-between text-xs font-bold text-slate-300 border-t border-slate-900 pt-2">
                       <span>TOTAL DIGITAL</span>

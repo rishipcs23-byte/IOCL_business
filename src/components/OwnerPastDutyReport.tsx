@@ -1878,7 +1878,7 @@ export default function OwnerPastDutyReport({
                 <span className="font-bold text-sky-700 block mt-1">₹{settlement.digitalPayments.bharatPe.toLocaleString()}</span>
               </div>
               <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-center">
-                <span className="text-slate-500 block text-[10px] font-sans">Cards</span>
+                <span className="text-slate-500 block text-[10px] font-sans">Pine Labs</span>
                 <span className="font-bold text-sky-700 block mt-1">₹{settlement.digitalPayments.cardPayments.toLocaleString()}</span>
               </div>
               <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-center">
@@ -2236,7 +2236,7 @@ export default function OwnerPastDutyReport({
                   <option value="gpay">GPay Digital Amount</option>
                   <option value="paytm">Paytm Digital Amount</option>
                   <option value="bharatPe">BharatPe Digital Amount</option>
-                  <option value="cardPayments">Cards Payment Amount</option>
+                  <option value="cardPayments">Pine Labs Payment Amount</option>
                   <option value="bankTransfer">Bank Transfer Amount</option>
                 </select>
               </div>

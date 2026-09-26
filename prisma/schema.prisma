@@ -112,6 +112,17 @@ model DutySession {
   dutyDensities       DutyDensity[]
   fuelMovements       FuelStockMovement[]
   staffAttendances    StaffAttendance[]
+  digitalSettlements  DigitalPaymentSettlement[]
+}
+
+model DigitalPaymentSettlement {
+  id            String      @id @default(uuid())
+  dutySessionId String
+  dutySession   DutySession @relation(fields: [dutySessionId], references: [id], onDelete: Cascade)
+  provider      String      // PhonePe, GPay, Paytm, BharatPe, Pine Labs, ALP, UFill, Bank
+  amount        Float
+  referenceId   String?
+  timestamp     DateTime    @default(now())
 }
 
 model ShortageAssignment {

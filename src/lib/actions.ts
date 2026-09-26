@@ -455,6 +455,7 @@ export async function getActiveDutySession() {
       creditTransactions: { include: { customer: true, enteredBy: true } },
       tankDips: true,
       tankSamples: true,
+      digitalSettlements: true,
       shortageAssignments: { include: { staff: true, assignedBy: true } },
       staffAttendances: { include: { staff: true, pump: true, gun: true, outgoingStaff: true, incomingStaff: true } },
       manager: true,
@@ -1679,15 +1680,12 @@ export async function closeDutySessionAction(
   digitalPayments: number,
   cardPayments: number,
   expectedCash: number,
-  digitalBreakdown?: {
-    phonePe?: number;
-    gpay?: number;
-    paytm?: number;
-    bharatPe?: number;
-    cardPayments?: number;
-    bankTransfer?: number;
-    totalDigital?: number;
-  },
+  digitalSettlements?: {
+    id?: string;
+    provider: string;
+    amount: number;
+    referenceId?: string;
+  }[],
   bankDepositDetails?: {
     bankDeposit?: number;
     cashRetained?: number;
@@ -1866,13 +1864,13 @@ export async function closeDutySessionAction(
       });
     }
 
-    const pPe = Number(digitalBreakdown?.phonePe || 0);
-    const gPy = Number(digitalBreakdown?.gpay || 0);
-    const pTm = Number(digitalBreakdown?.paytm || 0);
-    const bPe = Number(digitalBreakdown?.bharatPe || 0);
-    const cPay = Number(digitalBreakdown?.cardPayments || cardPayments || 0);
-    const bTr = Number(digitalBreakdown?.bankTransfer || 0);
-    const totDig = Number(digitalBreakdown?.totalDigital || digitalPayments || (pPe + gPy + pTm + bPe + cPay + bTr));
+    const pPe = 0;
+    const gPy = 0;
+    const pTm = 0;
+    const bPe = 0;
+    const cPay = 0;
+    const bTr = 0;
+    const totDig = digitalSettlements ? digitalSettlements.reduce((sum, s) => sum + s.amount, 0) : digitalPayments;
 
     const cRet = Number(bankDepositDetails?.cashRetained || 0);
 
@@ -2065,6 +2063,17 @@ export async function closeDutySessionAction(
         hsdDensity: validHsdDensity,
       },
     });
+
+    if (digitalSettlements && digitalSettlements.length > 0) {
+      await tx.digitalPaymentSettlement.createMany({
+        data: digitalSettlements.map(s => ({
+          dutySessionId: dutySessionId,
+          provider: s.provider,
+          amount: s.amount,
+          referenceId: s.referenceId || null,
+        }))
+      });
+    }
 
     // 7. Update Fuel Inventory and record Stock Movements for physical gun dispensing
     const updatedReadings = await tx.meterReading.findMany({
@@ -2843,6 +2852,7 @@ export async function getHistoricalDuties() {
       creditTransactions: { include: { customer: true, enteredBy: true } },
       tankDips: true,
       tankSamples: true,
+      digitalSettlements: true,
       shortageAssignments: { include: { staff: true, assignedBy: true } },
       dutyDensities: { include: { recordedBy: true } },
     },
@@ -2866,6 +2876,7 @@ export async function getDutyReport(dutySessionId: string) {
       creditTransactions: { include: { customer: true, enteredBy: true } },
       tankDips: true,
       tankSamples: true,
+      digitalSettlements: true,
       shortageAssignments: { include: { staff: true, assignedBy: true } },
       dutyDensities: { include: { recordedBy: true } },
       manager: true,

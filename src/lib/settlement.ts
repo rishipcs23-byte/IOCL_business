@@ -344,7 +344,6 @@ export function calculateDutySettlement(
   const digitalExpenses = totalExpenses - cashExpenses;
 
   // 7. Digital Payments Breakdown (Section 11)
-  // Extract persisted digital payments or sum up digital payment methods from expenses / duty fields
   let phonePe = Number(dutySession.phonePe || 0);
   let gpay = Number(dutySession.gpay || 0);
   let paytm = Number(dutySession.paytm || 0);
@@ -352,8 +351,23 @@ export function calculateDutySettlement(
   let cardPayments = Number(dutySession.cardPayments || 0);
   let bankTransfer = Number(dutySession.bankTransfer || 0);
 
+  if (dutySession.digitalSettlements && dutySession.digitalSettlements.length > 0) {
+    dutySession.digitalSettlements.forEach((s: any) => {
+      const amt = Number(s.amount || 0);
+      switch(s.provider) {
+        case 'PhonePe': phonePe += amt; break;
+        case 'GPay': gpay += amt; break;
+        case 'Paytm': paytm += amt; break;
+        case 'BharatPe': bharatPe += amt; break;
+        case 'Pine Labs': cardPayments += amt; break;
+        case 'Bank': bankTransfer += amt; break;
+        default: cardPayments += amt; break; // Map unknown/others to cardPayments for legacy compat
+      }
+    });
+  }
+
   let totalDigital = Number(dutySession.totalDigital || 0);
-  if (totalDigital === 0) {
+  if (totalDigital === 0 || (dutySession.digitalSettlements && dutySession.digitalSettlements.length > 0)) {
     totalDigital = phonePe + gpay + paytm + bharatPe + cardPayments + bankTransfer;
   }
 

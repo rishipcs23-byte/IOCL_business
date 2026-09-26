@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   HardDrive, Building2, DollarSign, Plus, Trash2, Calendar, FileText,
   AlertTriangle, CheckCircle2, TrendingUp, Filter, Search, ArrowRight, ShieldCheck,
@@ -26,6 +27,102 @@ interface OilInventoryManagerProps {
   onRefresh: () => Promise<void>;
   flashMessage: (msg: string, type: 'success' | 'error') => void;
 }
+
+const CustomProductSelect = ({ value, onChange, products, disabled, showPrice = false, className = '' }: any) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [coords, setCoords] = useState({ top: 0, left: 0, width: 0 });
+  const triggerRef = useRef<HTMLDivElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const updateCoords = () => {
+      if (isOpen && triggerRef.current) {
+        const rect = triggerRef.current.getBoundingClientRect();
+        setCoords({
+          top: rect.bottom + window.scrollY,
+          left: rect.left + window.scrollX,
+          width: rect.width,
+        });
+      }
+    };
+    updateCoords();
+    if (isOpen) {
+      window.addEventListener('scroll', updateCoords, true);
+      window.addEventListener('resize', updateCoords);
+    }
+    return () => {
+      window.removeEventListener('scroll', updateCoords, true);
+      window.removeEventListener('resize', updateCoords);
+    };
+  }, [isOpen]);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        triggerRef.current && !triggerRef.current.contains(event.target as Node) &&
+        dropdownRef.current && !dropdownRef.current.contains(event.target as Node)
+      ) {
+        setIsOpen(false);
+      }
+    };
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isOpen]);
+
+  const selectedProduct = products.find((p: any) => p.id === value);
+
+  return (
+    <>
+      <div
+        ref={triggerRef}
+        className={`bg-white dark:bg-slate-900 border ${isOpen ? 'border-blue-600 ring-1 ring-blue-600' : 'border-slate-300 dark:border-slate-700'} text-slate-900 dark:text-slate-100 flex justify-between items-center cursor-pointer transition-all shadow-sm ${className} ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
+        onClick={() => !disabled && setIsOpen(!isOpen)}
+      >
+        <span className="truncate">
+          {products.length === 0 ? '-- No products created --' : 
+           selectedProduct ? (
+             showPrice 
+               ? `${selectedProduct.name} - ₹${selectedProduct.price}/unit (Stock: ${selectedProduct.stockQuantity})` 
+               : `${selectedProduct.name} (Stock: ${selectedProduct.stockQuantity})`
+           ) : '-- Select Product --'}
+        </span>
+        <svg className={`w-4 h-4 ml-2 shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+      </div>
+      
+      {isOpen && !disabled && products.length > 0 && typeof document !== 'undefined' && createPortal(
+        <div 
+          ref={dropdownRef}
+          className="absolute z-[100000] bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl max-h-64 overflow-y-auto"
+          style={{ top: `${coords.top + 4}px`, left: `${coords.left}px`, width: `${coords.width}px` }}
+        >
+          <div 
+            className="p-3 hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-900 dark:text-slate-100 border-b border-slate-100 dark:border-slate-700 font-medium"
+            onClick={() => { onChange(''); setIsOpen(false); }}
+          >
+            -- Select Product --
+          </div>
+          {products.map((prod: any) => (
+            <div 
+              key={prod.id} 
+              className={`p-3 hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-900 dark:text-slate-100 transition-colors ${value === prod.id ? 'bg-blue-50 dark:bg-blue-900/30 font-bold text-blue-700 dark:text-blue-400' : 'font-medium'}`}
+              onClick={() => { onChange(prod.id); setIsOpen(false); }}
+            >
+              <div className="flex justify-between items-center">
+                <span>{prod.name}</span>
+                <span className={`text-xs ${value === prod.id ? 'text-blue-600/80 dark:text-blue-400/80' : 'text-slate-500 dark:text-slate-400'}`}>
+                  {showPrice ? `₹${prod.price}/unit | ` : ''}Stock: {prod.stockQuantity}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>,
+        document.body
+      )}
+    </>
+  );
+};
 
 export default function OilInventoryManager({
   initialSubTab = 'inventory',
@@ -801,22 +898,12 @@ export default function OilInventoryManager({
                     <div key={idx} className="grid grid-cols-1 md:grid-cols-12 gap-3 items-center text-xs bg-white p-3 rounded-xl border border-slate-200">
                       <div className="md:col-span-5">
                         <label className="text-[11px] text-slate-500 font-semibold block mb-1">Product *</label>
-                        <select
+                        <CustomProductSelect
                           value={item.productId}
-                          onChange={(e) => handleItemChange(idx, 'productId', e.target.value)}
-                          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-xl p-2 font-medium focus:border-blue-600 outline-none"
-                        >
-                          {products.length === 0 ? (
-                            <option value="">-- No products created (Click + New Product above) --</option>
-                          ) : (
-                            <>
-                              <option value="">-- Select Product --</option>
-                              {products.map((prod: any) => (
-                                <option key={prod.id} value={prod.id}>{prod.name} (Stock: {prod.stockQuantity})</option>
-                              ))}
-                            </>
-                          )}
-                        </select>
+                          onChange={(val: string) => handleItemChange(idx, 'productId', val)}
+                          products={products}
+                          className="w-full rounded-xl p-2 font-medium min-h-[38px]"
+                        />
                       </div>
 
                       <div className="md:col-span-2">
@@ -986,17 +1073,13 @@ export default function OilInventoryManager({
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end text-sm">
                     <div>
                       <label className="text-[var(--text-primary)] font-bold block mb-2 text-sm md:text-base">Select Oil Product *</label>
-                      <select
+                      <CustomProductSelect
                         value={oilProdId}
-                        onChange={(e) => setOilProdId(e.target.value)}
-                        className="google-input w-full font-semibold text-sm md:text-base py-3"
-                      >
-                        {products.map((p: any) => (
-                          <option key={p.id} value={p.id}>
-                            {p.name} - ₹{p.price}/unit (Stock: {p.stockQuantity})
-                          </option>
-                        ))}
-                      </select>
+                        onChange={(val: string) => setOilProdId(val)}
+                        products={products}
+                        showPrice={true}
+                        className="w-full rounded-xl px-3 py-2.5 font-semibold text-sm md:text-base min-h-[46px]"
+                      />
                     </div>
 
                     <div>
