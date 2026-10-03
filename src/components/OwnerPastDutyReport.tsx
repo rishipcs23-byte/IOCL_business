@@ -9,7 +9,7 @@ import {
 import * as XLSX from 'xlsx';
 import { calculateDutySettlement, DutySettlementResult } from '@/lib/settlement';
 import { assignShortageAction, updateHistoricalDutyAction, correctTankDipAction, deleteDutyAction } from '@/lib/actions';
-
+import MobilePastDutyReport from './MobilePastDutyReport';
 
 interface OwnerPastDutyReportProps {
   activeDuty: any;
@@ -628,10 +628,136 @@ export default function OwnerPastDutyReport({
     }
   };
 
+  const renderMobileFilters = () => (
+    <div className="flex flex-col gap-4">
+      <div>
+        <label className="text-indigo-300 font-extrabold block mb-1.5 text-[11px] uppercase tracking-wider flex items-center gap-1.5">
+          <History className="h-3.5 w-3.5 text-indigo-400" /> Select Completed Duty Session *
+        </label>
+        <select value={selectedDutyId} onChange={(e) => setSelectedDutyId(e.target.value)} className="w-full bg-slate-950 border-2 border-indigo-500/60 hover:border-indigo-400 text-white font-extrabold rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/50 shadow-md h-10 transition-all cursor-pointer">
+          <option value="ALL" style={{ backgroundColor: '#0f172a', color: '#ffffff' }}>All Matching Duties</option>
+          {filteredDutyOptions.map((d: any, idx: number) => (
+            <option key={`${d.id}-${idx}`} value={d.id} style={{ backgroundColor: '#0f172a', color: '#ffffff' }} className="font-bold py-1.5">Duty #{d.dutyNumber} ({new Date(d.startTime).toLocaleDateString('en-IN')}) - {d.status}</option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <label className="text-amber-300 font-extrabold block mb-1.5 text-[11px] uppercase tracking-wider flex items-center gap-1.5">
+          <Fuel className="h-3.5 w-3.5 text-amber-400" /> Filter Fuel Type:
+        </label>
+        <select value={filterFuelType} onChange={(e) => setFilterFuelType(e.target.value as any)} className="w-full bg-slate-950 border-2 border-amber-500/60 hover:border-amber-400 text-white font-extrabold rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-amber-500/50 shadow-md h-10 transition-all cursor-pointer">
+          <option value="ALL" style={{ backgroundColor: '#0f172a', color: '#ffffff' }} className="font-bold py-1.5">All Fuels (MS + HSD)</option>
+          <option value="MS" style={{ backgroundColor: '#0f172a', color: '#fbbf24' }} className="font-bold py-1.5">MS (Petrol Only)</option>
+          <option value="HSD" style={{ backgroundColor: '#0f172a', color: '#60a5fa' }} className="font-bold py-1.5">HSD (Diesel Only)</option>
+        </select>
+      </div>
+      <div>
+        <label className="text-emerald-300 font-extrabold block mb-1.5 text-[11px] uppercase tracking-wider flex items-center gap-1.5">
+          <Calendar className="h-3.5 w-3.5 text-emerald-400" /> Date Range Preset:
+        </label>
+        <select value={periodType} onChange={(e) => handlePeriodTypeChange(e.target.value)} className="w-full bg-slate-950 border-2 border-emerald-500/60 hover:border-emerald-400 text-white font-extrabold rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/50 shadow-md h-10 transition-all cursor-pointer">
+          <option value="ALL" style={{ backgroundColor: '#0f172a', color: '#ffffff' }}>All Time</option>
+          <option value="TODAY" style={{ backgroundColor: '#0f172a', color: '#ffffff' }}>Today</option>
+          <option value="YESTERDAY" style={{ backgroundColor: '#0f172a', color: '#ffffff' }}>Yesterday</option>
+          <option value="THIS_WEEK" style={{ backgroundColor: '#0f172a', color: '#ffffff' }}>This Week</option>
+          <option value="LAST_WEEK" style={{ backgroundColor: '#0f172a', color: '#ffffff' }}>Last Week</option>
+          <option value="THIS_MONTH" style={{ backgroundColor: '#0f172a', color: '#ffffff' }}>This Month</option>
+          <option value="LAST_MONTH" style={{ backgroundColor: '#0f172a', color: '#ffffff' }}>Last Month</option>
+          <option value="THIS_YEAR" style={{ backgroundColor: '#0f172a', color: '#ffffff' }}>This Year</option>
+          <option value="LAST_YEAR" style={{ backgroundColor: '#0f172a', color: '#ffffff' }}>Last Year</option>
+          <option value="DATE_RANGE" style={{ backgroundColor: '#0f172a', color: '#ffffff' }}>Custom Date Range</option>
+          <option value="SINGLE_DATE" style={{ backgroundColor: '#0f172a', color: '#ffffff' }}>Single Date</option>
+          <option value="MONTH" style={{ backgroundColor: '#0f172a', color: '#ffffff' }}>Specific Month</option>
+          <option value="YEAR" style={{ backgroundColor: '#0f172a', color: '#ffffff' }}>Specific Year</option>
+        </select>
+      </div>
+      {(['DATE_RANGE', 'TODAY', 'YESTERDAY', 'THIS_WEEK', 'LAST_WEEK', 'THIS_MONTH', 'LAST_MONTH', 'THIS_YEAR', 'LAST_YEAR', 'LAST_7_DAYS', 'LAST_30_DAYS'].includes(periodType)) && (
+        <>
+          <div>
+            <label className="text-emerald-300 font-extrabold block mb-1.5 text-[11px] uppercase tracking-wider">From Date:</label>
+            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-full bg-slate-950 border-2 border-emerald-500/60 hover:border-emerald-400 text-white font-extrabold rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/50 shadow-md h-10 transition-all" />
+          </div>
+          <div>
+            <label className="text-emerald-300 font-extrabold block mb-1.5 text-[11px] uppercase tracking-wider">To Date:</label>
+            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="w-full bg-slate-950 border-2 border-emerald-500/60 hover:border-emerald-400 text-white font-extrabold rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/50 shadow-md h-10 transition-all" />
+          </div>
+        </>
+      )}
+      {periodType === 'SINGLE_DATE' && (
+        <div>
+          <label className="text-emerald-300 font-extrabold block mb-1.5 text-[11px] uppercase tracking-wider">Select Date:</label>
+          <input type="date" value={singleDate} onChange={(e) => setSingleDate(e.target.value)} className="w-full bg-slate-950 border-2 border-emerald-500/60 hover:border-emerald-400 text-white font-extrabold rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/50 shadow-md h-10 transition-all" />
+        </div>
+      )}
+      {periodType === 'MONTH' && (
+        <div>
+          <label className="text-emerald-300 font-extrabold block mb-1.5 text-[11px] uppercase tracking-wider">Select Month:</label>
+          <input type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} className="w-full bg-slate-950 border-2 border-emerald-500/60 hover:border-emerald-400 text-white font-extrabold rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/50 shadow-md h-10 transition-all" />
+        </div>
+      )}
+      {periodType === 'YEAR' && (
+        <div>
+          <label className="text-emerald-300 font-extrabold block mb-1.5 text-[11px] uppercase tracking-wider">Select Year:</label>
+          <input type="number" placeholder="2026" value={selectedYear} onChange={(e) => setSelectedYear(e.target.value)} className="w-full bg-slate-950 border-2 border-emerald-500/60 hover:border-emerald-400 text-white font-extrabold rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/50 shadow-md h-10 transition-all" />
+        </div>
+      )}
+      <div>
+        <label className="text-sky-300 font-extrabold block mb-1.5 text-[11px] uppercase tracking-wider flex items-center gap-1.5">
+          <Filter className="h-3.5 w-3.5 text-sky-400" /> Filter Pump:
+        </label>
+        <select value={filterPumpId} onChange={(e) => setFilterPumpId(e.target.value)} className="w-full bg-slate-950 border-2 border-sky-500/60 hover:border-sky-400 text-white font-extrabold rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-sky-500/50 shadow-md h-10 transition-all cursor-pointer">
+          <option value="ALL" style={{ backgroundColor: '#0f172a', color: '#ffffff' }}>All Pumps</option>
+          {(staticData?.pumps || []).map((p: any) => (
+            <option key={p.id} value={p.id} style={{ backgroundColor: '#0f172a', color: '#ffffff' }}>{p.name}</option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <label className="text-purple-300 font-extrabold block mb-1.5 text-[11px] uppercase tracking-wider flex items-center gap-1.5">
+          <Users className="h-3.5 w-3.5 text-purple-400" /> Filter Staff:
+        </label>
+        <select value={filterStaffId} onChange={(e) => setFilterStaffId(e.target.value)} className="w-full bg-slate-950 border-2 border-purple-500/60 hover:border-purple-400 text-white font-extrabold rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-purple-500/50 shadow-md h-10 transition-all cursor-pointer">
+          <option value="ALL" style={{ backgroundColor: '#0f172a', color: '#ffffff' }}>All Staff</option>
+          {(staticData?.staff || []).map((s: any) => (
+            <option key={s.id} value={s.id} style={{ backgroundColor: '#0f172a', color: '#ffffff' }}>{s.name}</option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <label className="text-teal-300 font-extrabold block mb-1.5 text-[11px] uppercase tracking-wider flex items-center gap-1.5">
+          <Layers className="h-3.5 w-3.5 text-teal-400" /> Group By Aggregation:
+        </label>
+        <select value={groupBy} onChange={(e) => setGroupBy(e.target.value as any)} className="w-full bg-slate-950 border-2 border-teal-500/60 hover:border-teal-400 text-white font-extrabold rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-teal-500/50 shadow-md h-10 transition-all cursor-pointer">
+          <option value="DAILY" style={{ backgroundColor: '#0f172a', color: '#ffffff' }}>Daily Breakdown</option>
+          <option value="WEEKLY" style={{ backgroundColor: '#0f172a', color: '#ffffff' }}>Weekly Aggregation</option>
+          <option value="MONTHLY" style={{ backgroundColor: '#0f172a', color: '#ffffff' }}>Monthly Summary</option>
+          <option value="YEARLY" style={{ backgroundColor: '#0f172a', color: '#ffffff' }}>Yearly Totals</option>
+        </select>
+      </div>
+    </div>
+  );
+
   return (
-    <div className="space-y-6">
-      {/* GLOBAL FILTER & DUTY SELECTOR HEADER (Section 2 & 18) */}
-      <div className="google-hero p-4 sm:p-5 space-y-3">
+    <>
+      <MobilePastDutyReport
+        analyticsSummary={analyticsSummary}
+        filteredDuties={filteredDutyOptions}
+        targetDuty={targetDuty}
+        settlement={settlement}
+        periodLabel={
+          periodType === 'ALL' ? 'ALL TIME' : 
+          periodType === 'SINGLE_DATE' && singleDate ? new Date(singleDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) :
+          periodType === 'MONTH' && selectedMonth ? selectedMonth :
+          periodType === 'YEAR' && selectedYear ? selectedYear :
+          (startDate ? `${new Date(startDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}` : periodType)
+        }
+        handleSelectDuty={handleSelectDutyAndScroll}
+        renderFilters={renderMobileFilters}
+      />
+
+      <div className="hidden md:block space-y-6">
+        {/* GLOBAL FILTER & DUTY SELECTOR HEADER (Section 2 & 18) */}
+        <div className="google-hero p-4 sm:p-5 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border-color)] pb-3">
           <div className="flex items-center gap-2.5">
             <div className="h-9 w-9 bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 rounded-lg border border-blue-200 dark:border-blue-800 flex items-center justify-center shrink-0 shadow-sm">
@@ -2610,6 +2736,7 @@ export default function OwnerPastDutyReport({
         </div>
       )}
     </div>
+    </>
   );
 }
 
